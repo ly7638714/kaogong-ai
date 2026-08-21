@@ -204,19 +204,20 @@ html,body{height:100%;font-family:"Noto Sans SC",system-ui,sans-serif;background
 <div class="pi" onclick="qSend('把知识点整理成 Anki 卡片格式（正面提问/背面答案）')"><div class="pi-t">🃏 生成 Anki 卡</div><div class="pi-d">间隔重复记忆卡片格式</div></div>
 </div></div></div></div>
 
-<div class="page" id="pStat"><div style="max-width:720px;margin:0 auto"><div class="sg"><div class="sc"><div class="sn" id="sTot">0</div><div class="sl">总对话</div></div><div class="sc"><div class="sn" id="sQ">0</div><div class="sl">题目分析</div></div><div class="sc"><div class="sn" id="sR">0</div><div class="sl">复盘次数</div></div><div class="sc"><div class="sn" id="sW">0</div><div class="sl">错题数</div></div></div><div style="background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:16px;"><div class="sec-t">📊 最近对话</div><div id="hist" style="font-size:12.5px;color:var(--text2)"></div></div></div></div>
+<div class="page" id="pStat"><div style="max-width:720px;margin:0 auto"><div class="sg"><div class="sc" style="cursor:pointer" onclick="showStat('tot')"><div class="sn" id="sTot">0</div><div class="sl">总对话</div></div><div class="sc" style="cursor:pointer" onclick="showStat('q')"><div class="sn" id="sQ">0</div><div class="sl">题目分析</div></div><div class="sc" style="cursor:pointer" onclick="showStat('r')"><div class="sn" id="sR">0</div><div class="sl">复盘次数</div></div><div class="sc" style="cursor:pointer" onclick="swTab('wq')"><div class="sn" id="sW">0</div><div class="sl">错题数</div></div></div><div style="background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:16px;"><div class="sec-t">📊 最近对话</div><div id="hist" style="font-size:12.5px;color:var(--text2)"></div></div></div></div>
 
-<div class="page" id="pWq"><div style="max-width:720px;margin:0 auto"><div class="whdr"><h3>📋 错题记录</h3><div class="wha"><button class="bs pri" onclick="expWQ()">导出 JSON</button><button class="bs" onclick="openExportDialog('wrong')">📤 导出</button><button class="bs" onclick="clrWQ()">清空</button></div></div><div class="wl" id="wqlist"></div></div></div>
+<div class="page" id="pWq"><div style="max-width:720px;margin:0 auto"><div class="whdr"><h3>📋 错题记录</h3><div class="wha"><button class="bs pri" onclick="expWQ()">导出 JSON</button><button class="bs" onclick="openExportDialog('wrong')">📤 导出</button><button class="bs" onclick="expWQTxt()">TXT</button><button class="bs" onclick="clrWQ()">清空</button></div></div><div class="wl" id="wqlist"></div></div></div>
 
 <div class="mode-row" id="modeRow"><button class="mode-chip on" data-m="all" onclick="setMode('all')">🤖 综合</button><button class="mode-chip" data-m="luoji" onclick="setMode('luoji')">🧠 逻辑·薛睿</button><button class="mode-chip" data-m="yanyu" onclick="setMode('yanyu')">📖 言语·三师</button><button class="mode-chip" data-m="tutu" onclick="setMode('tutu')">🔷 图推</button><button class="mode-chip" data-m="ziliao" onclick="setMode('ziliao')">📈 资料/数量</button></div>
-<div class="input-bar" id="inputBar"><div class="img-strip" id="imgStrip"></div><div class="ocr-box" id="ocrBox"><div class="ocr-track"><div class="ocr-fill" id="ocrFill"></div></div><div class="ocr-lbl" id="ocrLbl">OCR 识别中...</div></div><div class="ib-row"><div class="ib-wrap"><textarea id="ta" rows="1" placeholder="输入题目或问题... (Enter 发送，可拖拽/粘贴/选择图片)" onkeydown="onKey(event)" oninput="autoR(this)"></textarea><button class="ib-cam" id="camBtn" onclick="togCam()">📷</button></div><button class="ib-send" id="sendBtn" onclick="doSend()">➤</button></div></div>
+<div class="input-bar" id="inputBar"><div class="img-strip" id="imgStrip"></div><div class="ocr-box" id="ocrBox"><div class="ocr-track"><div class="ocr-fill" id="ocrFill"></div></div><div class="ocr-lbl" id="ocrLbl">OCR 识别中...</div></div><div class="ib-row"><div class="ib-wrap"><textarea id="ta" rows="1" placeholder="输入题目或问题... (Enter 发送，可拖拽/粘贴/选择图片)" onkeydown="onKey(event)" oninput="autoR(this)"></textarea><button class="ib-cam" id="micBtn" onclick="togMic()" title="语音输入">🎤</button><button class="ib-cam" id="camBtn" onclick="togCam()">📷</button></div><button class="ib-send" id="sendBtn" onclick="doSend()">➤</button></div></div>
 </div>
 
 <div class="cam-pop" id="camPop"><button class="ci" onclick="pickImg()">📁 选择图片（支持截图粘贴）</button><button class="ci" onclick="openCam()">📷 拍照识别</button><button class="ci" onclick="toggleUrlRow()">🔗 从图片链接添加（适合无法选图的环境）</button><div id="urlRow" style="display:none;padding:6px 13px 10px"><input id="imgUrlInp" type="text" placeholder="粘贴图片链接，如 https://xxx/题目.png" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit"><button class="ci" style="margin-top:6px" onclick="addImgUrl()">✅ 添加该图片</button></div></div>
 
 <div class="exp-menu" id="expMenu"><div class="exp-t">📤 导出</div><button class="exp-i" onclick="openExportDialog('chat')">💬 对话记录（选格式/是否AI整理）</button><button class="exp-i" </button><button class="exp-i" onclick="openExportDialog('review')">📖 最近复盘（选格式/是否AI整理）</button><button class="exp-i" </button><button class="exp-i" onclick="openExportDialog('wrong')">📋 错题集（选格式/是否AI整理）</button><button class="exp-i" </button></div>
 <div class="ov" id="wqOv" onclick="if(event.target===this)closeWqOv()"><div class="pnl"><h3>📌 存入错题本</h3><div class="fld"><label>板块</label><select id="wqSub"><option>判断推理</option><option>言语理解</option><option>资料分析</option><option>数量关系</option><option>图形推理</option></select></div><div class="fld"><label>题目摘要</label><textarea id="wqNote" rows="3" placeholder="（自动截取当前问题）"></textarea></div><div class="pnl-btns"><button class="btn btn-gh" onclick="closeWqOv()">取消</button><button class="btn btn-pri" onclick="confirmWq()">保存</button></div></div></div>
-<div class="ov" id="expOv" onclick="if(event.target===this)closeExpOv()"><div class="pnl"><h3>📤 导出</h3><div class="fld"><label id="expTitle">内容</label></div><div class="sec-t">📄 直接导出（原样）</div><div class="exp-choices"><button class="btn btn-pri" onclick="doExport('docx',false)">Word</button><button class="btn btn-gh" onclick="doExport('pdf',false)">PDF</button></div><div class="sec-t">✨ 让 AI 整理后导出（梳理考点/错因/秒杀规律，更适合作笔记）</div><div class="exp-choices"><button class="btn btn-pri" onclick="doExport('docx',true)">AI整理 → Word</button><button class="btn btn-gh" onclick="doExport('pdf',true)">AI整理 → PDF</button></div><div class="pnl-btns"><button class="btn btn-gh" onclick="closeExpOv()">取消</button></div></div></div>
+<div class="ov" id="expOv" onclick="if(event.target===this)closeExpOv()"><div class="pnl"><h3>📤 导出</h3><div class="fld"><label id="expTitle">内容</label></div><div class="sec-t">✨ 让 AI 整理后导出（推荐：梳理考点/错因/秒杀规律）</div><div class="exp-choices"><button class="btn btn-pri" onclick="doExport('docx',true)">AI整理 → Word</button><button class="btn btn-gh" onclick="doExport('pdf',true)">AI整理 → PDF</button></div><div class="sec-t">📄 直接导出（原样）</div><div class="exp-choices"><button class="btn btn-gh" onclick="doExport('docx',false)">直接 → Word</button><button class="btn btn-gh" onclick="doExport('pdf',false)">直接 → PDF</button></div><div class="pnl-btns"><button class="btn btn-gh" onclick="closeExpOv()">取消</button></div></div></div>
+<div class="ov" id="statOv" onclick="if(event.target===this)closeStat()"><div class="pnl"><h3>📊 明细</h3><div id="statBody" style="max-height:60vh;overflow:auto"></div><div class="pnl-btns"><button class="btn btn-gh" onclick="closeStat()">关闭</button></div></div></div><div class="ov" id="wqDvOv" onclick="if(event.target===this)closeWqDv()"><div class="pnl"><h3>📋 错题详情</h3><div id="wqDvBody"></div><div class="pnl-btns"><button class="btn btn-gh" onclick="closeWqDv()">关闭</button><button class="btn btn-gh" onclick="delWq()">🗑 删除</button><button class="btn btn-pri" onclick="expWqOne()">📄 导出TXT</button></div></div></div>
 <div class="ov" id="setOv" onclick="if(event.target===this)doCloseSet()"><div class="pnl"><h3>⚙️ API 设置（文字 / 视觉 双模型）</h3>
 <div class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
 <div class="fld"><label>提供商</label><select id="spTProv" onchange="provChg('T')">
@@ -232,7 +233,7 @@ html,body{height:100%;font-family:"Noto Sans SC",system-ui,sans-serif;background
 <div class="fld"><label>模型名称</label><input type="text" id="spVModel" placeholder="glm-4.6v"></div>
 <div class="fld"><label>自定义 System Prompt（留空使用内置知识库）</label><textarea id="spSys" rows="3" placeholder=""></textarea></div>
 <div class="fld"><label><input type="checkbox" id="spKB" checked> 启用内置知识库增强（薛睿/三师/刘义恒等）</label></div>
-<div class="fld"><label><input type="checkbox" id="spStream" checked> 流式输出（逐字显示）</label></div><div class="fld"><label><input type="checkbox" id="spTTS"> 🔊 自动朗读 AI 回复（需设备有中文语音）</label></div>
+<div class="fld"><label><input type="checkbox" id="spStream" checked> 流式输出（逐字显示）</label></div><div class="fld"><label><input type="checkbox" id="spTTS" checked> 🔊 自动朗读 AI 回复（需设备有中文语音）</label></div>
 <div class="fld" style="background:var(--accent2);border-radius:8px;padding:10px;margin-top:8px;">
 <label style="color:var(--accent);font-weight:700;">🔷 图推图片处理模式（未配置视觉模型时的兜底）</label>
 <select id="figMode" style="margin-top:5px;width:100%">
@@ -575,7 +576,7 @@ function loadCfg(){
  cfg.sys=cfg.sys||'';if(cfg.kb===undefined)cfg.kb=true;if(cfg.strm===undefined)cfg.strm=true;cfg.figMode=cfg.figMode||'desc';
  fillSet('T',cfg.text);fillSet('V',cfg.vision);
  document.getElementById('spSys').value=cfg.sys;document.getElementById('spKB').checked=cfg.kb!==false;
- document.getElementById('spStream').checked=cfg.strm!==false;var ttsEl=document.getElementById('spTTS');if(ttsEl)ttsEl.checked=cfg.tts===true;
+ document.getElementById('spStream').checked=cfg.strm!==false;var ttsEl=document.getElementById('spTTS');if(ttsEl)ttsEl.checked=cfg.tts!==false;
  if(document.getElementById('figMode'))document.getElementById('figMode').value=cfg.figMode;
  updTag();
 }
@@ -710,8 +711,10 @@ async function doSend(){
   else await sendIt(am,ac);
   updStat();
  }catch(e){
-  if(e.name==='AbortError')addMsg('ai','*已停止*');
-  else addMsg('ai','❌ 请求失败：'+e.message);
+  let errEl;
+  if(e.name==='AbortError')errEl=addMsg('ai','*已停止*');
+  else errEl=addMsg('ai','❌ 请求失败：'+e.message);
+  appendMsgActions(errEl);
  }finally{
   streaming=false;hideTyp();updBtn();
   msgs.forEach(m=>{if(Array.isArray(m.content))m.content=textFromContent(m.content)});
@@ -836,6 +839,12 @@ function addMsgWithImg(role,text,imgsData){
  c.appendChild(d);scrollBot();
  return d;
 }
+// ---------- 板块识别 + 语音输入 + 增强 ----------
+function detectBanKuai(text){const t=String(text||'');if(/削弱|加强|支持|前提|假设|结论|论证|推理|假言|推出|最能|由此/.test(t))return '判断推理';if(/意在|主旨|这段文字|填入|排序|标题|成语|词语|文段|作者|强调/.test(t))return '言语理解';if(/图形|图推|规律|对称|黑白|立体|展开图|折叠|截面/.test(t))return '图形推理';if(/同比|环比|增长|比重|平均|倍数|亿元|万吨|百分点|基期|现期/.test(t))return '资料分析';if(/工程|行程|相遇|追及|概率|排列组合|工作效率/.test(t))return '数量关系';return '';}
+function pickTTSVoice(){try{const vs=window.speechSynthesis.getVoices();const zh=vs.filter(v=>v.lang&&v.lang.toLowerCase().startsWith('zh'));return zh.find(v=>/neural|xiaoxiao|xiaoyi|yunxi|yunyang|tingting|huihui|yaoyao|google/i.test(v.name))||zh[0]||null;}catch(e){return null;}}
+let recog=null,recogOn=false;
+function togMic(){if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){toast('当前浏览器不支持语音输入（请用Chrome/Edge）');return}if(recogOn){if(recog)recog.stop();recogOn=false;document.getElementById('micBtn').textContent='🎤';toast('已停止语音');return}const SR=window.SpeechRecognition||window.webkitSpeechRecognition;recog=new SR();recog.lang='zh-CN';recog.continuous=true;recog.interimResults=true;recog.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++){t+=e.results[i][0].transcript;}const ta=document.getElementById('ta');ta.value=ta.value?ta.value+t:t;autoR(ta);};recog.onend=()=>{recogOn=false;document.getElementById('micBtn').textContent='🎤';};recog.onerror=()=>{recogOn=false;document.getElementById('micBtn').textContent='🎤';};recogOn=true;document.getElementById('micBtn').textContent='⏹';toast('🎤 正在听，请说话…');recog.start();}
+
 function toggleExportMenu(){const m=document.getElementById('expMenu');if(m){const show=m.style.display!=='block';m.style.display=show?'block':'none';}}
 // ---------- 语音朗读（TTS） ----------
 function pickZhVoice(){try{const vs=window.speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('zh'))||null;}catch(e){return null;}}
@@ -845,11 +854,11 @@ function toggleSpeakMsg(btn){
  const el=btn.closest('.msg');if(!el)return;
  if(window.speechSynthesis.speaking||window.speechSynthesis.pending){window.speechSynthesis.cancel();btn.textContent='🔊 朗读';toast('已停止朗读');return}
  const text=msgAnswerText(el);if(!text){toast('没有可朗读的内容');return}
- const u=new SpeechSynthesisUtterance(stripMd(text).replace(/\s+/g,' '));u.lang='zh-CN';const v=pickZhVoice();if(v)u.voice=v;u.rate=0.95;
+ const u=new SpeechSynthesisUtterance(stripMd(text).replace(/\s+/g,' '));u.lang='zh-CN';const v=pickTTSVoice();if(v)u.voice=v;u.rate=0.98;
  u.onend=()=>{btn.textContent='🔊 朗读'};u.onerror=()=>{btn.textContent='🔊 朗读'};
  window.speechSynthesis.speak(u);btn.textContent='🔇 停止';toast('🔊 正在朗读…');
 }
-function autoSpeak(text){if(!cfg.tts||!text||!('speechSynthesis' in window))return;try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(stripMd(text).replace(/\s+/g,' '));u.lang='zh-CN';const v=pickZhVoice();if(v)u.voice=v;u.rate=0.95;window.speechSynthesis.speak(u);}catch(e){}}
+function autoSpeak(text){if(!cfg.tts||!text||!('speechSynthesis' in window))return;try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(stripMd(text).replace(/\s+/g,' '));u.lang='zh-CN';const v=pickTTSVoice();if(v)u.voice=v;u.rate=0.98;window.speechSynthesis.speak(u);}catch(e){}}
 
 function appendMsgActions(el){if(!el)return;if(el.querySelector('.msg-actions'))return;const d=document.createElement('div');d.className='msg-actions';d.innerHTML='<button onclick="saveCurWrong()">📌 存错题</button><button onclick="openExportDialog(\'review\')">📄 导出复盘</button><button onclick="toggleSpeakMsg(this)">🔊 朗读</button>';el.appendChild(d);}
 document.addEventListener('click',e=>{const m=document.getElementById('expMenu');if(m&&!m.contains(e.target)&&!e.target.closest('[title="导出"]'))m.style.display='none';});
@@ -862,6 +871,21 @@ function addMsg(role,content){
  return d;
 }
 function rMd(t){if(typeof marked!=='undefined')return marked.parse(t);return t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\*(.*?)\*/g,'<em>$1</em>').replace(/`(.*?)`/g,'<code>$1</code>').replace(/\n/g,'<br>')}
+// ---------- 统计明细 + 错题详情 ----------
+function showStat(kind){const ums=msgs.filter(m=>m.role==='user');let list=[];const cur=document.getElementById('sTot')?null:null;
+ if(kind==='wq'){swTab('wq');return}
+ if(kind==='tot')list=ums.slice(-10).map((m,i)=>{const t=typeof m.content==='string'?m.content:'[图片]';return '<div class="pi" style="cursor:pointer" onclick="qSend(\''+escA(t.slice(0,50))+'\')"><div class="pi-t">#'+(ums.length-ums.indexOf(m))+': '+esc(t.slice(0,40))+'</div></div>';}).reverse().join('');
+ else if(kind==='q')list=ums.filter(m=>/分析|讲解|题目|这题|这道/.test(String(m.content))).slice(-10).map(m=>'<div class="pi">'+esc(String(m.content).slice(0,60))+'</div>').reverse().join('');
+ else list=ums.filter(m=>/复盘|分析|讲解/.test(String(m.content))).slice(-10).map(m=>'<div class="pi">'+esc(String(m.content).slice(0,60))+'</div>').reverse().join('');
+ const body=document.getElementById('statBody');if(body)body.innerHTML=list||'<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">暂无记录</div>';const ov=document.getElementById('statOv');if(ov)ov.classList.add('show');}
+function closeStat(){const ov=document.getElementById('statOv');if(ov)ov.classList.remove('show')}
+let wqCur=-1;
+function showWqDetail(i){wqCur=i;const q=wqs[i];if(!q)return;const body=document.getElementById('wqDvBody');if(body)body.innerHTML='<div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:4px">【'+(q.subject||'')+'】</div><div style="font-size:13.5px;margin-bottom:6px">'+esc(q.question||'')+'</div><div style="font-size:12px;color:var(--text2)">错因：'+(q.reasons||[]).join('、')||'无'+'</div><div style="font-size:11px;color:var(--text3);margin-top:4px">'+esc(q.time||'')+'</div>';const ov=document.getElementById('wqDvOv');if(ov)ov.classList.add('show');}
+function closeWqDv(){const ov=document.getElementById('wqDvOv');if(ov)ov.classList.remove('show')}
+function delWq(){if(wqCur<0)return;wqs.splice(wqCur,1);wqCur=-1;saveWQ();updWQB();renderWQ();closeWqDv();toast('已删除该错题')}
+function expWqOne(){if(wqCur<0)return;const q=wqs[wqCur];const txt='【'+(q.subject||'')+'】\n题目：'+(q.question||'')+'\n答案：'+(q.answer||'')+'\n错因：'+((q.reasons||[]).join('、'))+'\n时间：'+(q.time||'')+'\n';dl(txt,'错题_'+(q.subject||'wq')+'.txt','text/plain;charset=utf-8');toast('✅ 已导出 TXT')}
+function expWQTxt(){if(!wqs.length){toast('暂无错题');return}const txt=wqs.map((q,i)=>(i+1)+'.【'+(q.subject||'')+'】\n题目：'+(q.question||'')+'\n答案：'+(q.answer||'')+'\n错因：'+((q.reasons||[]).join('、'))+'\n时间：'+(q.time||'')+'\n').join('\n');dl('行测错题集\n'+txt,'行测错题集.txt','text/plain;charset=utf-8');toast('✅ 错题 TXT 已导出')}
+
 function showTyp(){const c=document.getElementById('msgs'),d=document.createElement('div');d.className='msg ai';d.id='typ';d.innerHTML='<div class="typing"><span></span><span></span><span></span></div>';c.appendChild(d);scrollBot()}
 function hideTyp(){const e=document.getElementById('typ');if(e)e.remove()}
 function hideWel(){const e=document.getElementById('welcome');if(e)e.style.display='none'}
@@ -937,7 +961,7 @@ document.addEventListener('click',e=>{const cp=document.getElementById('camPop')
 // ========= WRONG QUESTIONS =========
 function addWQ(s,q,r){wqs.unshift({id:Date.now(),subject:s,question:q,reasons:r||[],time:new Date().toLocaleString()});if(wqs.length>200)wqs=wqs.slice(0,200);saveWQ();updWQB()}
 function updWQB(){const tb=document.getElementById('wqTab');let b=tb.querySelector('.badge');if(!b){b=document.createElement('span');b.className='badge';b.style.cssText='position:absolute;top:-2px;right:-2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:8px;padding:0 4px;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center';tb.style.position='relative';tb.appendChild(b)}b.textContent=wqs.length>99?'99+':wqs.length;b.style.display=wqs.length>0?'':'none'}
-function renderWQ(){const l=document.getElementById('wqlist');if(!wqs.length){l.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3);font-size:44px;margin-bottom:8px;">📋</div><div style="text-align:center;color:var(--text3);font-size:13px;">暂无错题记录<br><span style="font-size:11px;">在对话中说"记录错题"即可添加</span></div>';return}l.innerHTML=wqs.map(q=>`<div class="wi"><div class="ws">${esc(q.subject)}</div><div class="wq">${esc(q.question)}</div><div class="wr">${q.reasons.map(r=>'<span>'+r+'</span>').join('')}</div><div class="wt">${q.time}</div></div>`).join('')}
+function renderWQ(){const l=document.getElementById('wqlist');if(!wqs.length){l.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3);font-size:44px;margin-bottom:8px;">📋</div><div style="text-align:center;color:var(--text3);font-size:13px;">暂无错题记录<br><span style="font-size:11px;">在对话中说"记录错题"即可添加</span></div>';return}l.innerHTML=wqs.map((q,i)=>`<div class="wi" style="cursor:pointer" onclick="showWqDetail(${i})"><div class="ws">${esc(q.subject)}</div><div class="wq">${esc(q.question)}</div><div class="wr">${q.reasons.map(r=>'<span>'+r+'</span>').join('')}</div><div class="wt">${q.time}</div></div>`).join('')}
 function expWQ(){if(!wqs.length)return toast('暂无错题');dl(JSON.stringify(wqs,null,2),'行测错题_'+fmtD()+'.json','application/json');toast(`已导出 ${wqs.length} 道`)}
 function clrWQ(){if(!wqs.length)return;if(confirm('确定清空？')){wqs=[];saveWQ();updWQB();renderWQ();toast('已清空')}}
 
@@ -981,7 +1005,7 @@ function getImgDim(src){return new Promise(res=>{const im=new Image();im.onload=
 function stripMd(t){return String(t||'').replace(/\*\*/g,'').replace(/\*([^*]+)\*/g,'$1').replace(/`([^`]*)`/g,'$1').replace(/^#{1,6}\s*/gm,'').replace(/^>\s*/gm,'').replace(/^[-*+]\s+/gm,'· ').replace(/^\s*[-|\s]+\s*$/gm,'').replace(/\|/g,' ｜ ').replace(/^\s*##+/gm,'');}
 function collectChat(){const items=[];document.querySelectorAll('#msgs .msg').forEach(el=>{const role=el.classList.contains('me')?'user':'ai';const imgs=[...el.querySelectorAll('.msg-img')].map(i=>i.src);const text=(el.innerText||'').trim();if(text||imgs.length)items.push({role,text,imgs});});return items;}
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-async function imgRun(src){const d=await getImgDim(src);const maxW=430;const scale=Math.min(1,maxW/d.w);return new window.docx.ImageRun({data:src.split(',')[1],transformation:{width:Math.round(d.w*scale),height:Math.round(d.h*scale)}});}
+async function imgRun(src){const d=await getImgDim(src);const maxW=600;const scale=Math.min(1,maxW/d.w);return new window.docx.ImageRun({data:src.split(',')[1],transformation:{width:Math.round(d.w*scale),height:Math.round(d.h*scale)}});}
 
 async function buildDocx({title,paragraphs,tables}){
  const {Document,Packer,Paragraph,TextRun,HeadingLevel,AlignmentType,Table,TableRow,TableCell,WidthType}=window.docx;
@@ -1026,7 +1050,7 @@ function getExportPayload(){
  if(expType==='wrong'){if(!wqs.length){toast('暂无错题');return null}const head=['#','板块','题目','答案','错因','时间'];const rows=wqs.map((q,i)=>[String(i+1),q.subject||'',(q.question||'').slice(0,120),q.answer||'',(q.reasons||[]).join('、'),q.time||'']);return {title:'行测 · 错题集',items:[{type:'table',head,rows}],plain:wqs.map((q,i)=>(i+1)+'. 【'+(q.subject||'')+'】'+(q.question||'')+' 答案:'+(q.answer||'')+' 错因:'+((q.reasons||[]).join('、'))).join('\n')};}
  const c=collectChat();if(!c.length){toast('暂无对话');return null}
  if(expType==='review'){const last=c[c.length-1],prev=c[c.length-2]||last;return {title:'行测 · 单题复盘',items:[{type:'h',text:'题目（用户提问）'},{type:'msg',role:'user',text:prev.role==='user'?prev.text:last.text,imgs:prev.role==='user'?prev.imgs:[]},{type:'h',text:'AI 复盘解析'},{type:'msg',role:'ai',text:last.role==='ai'?last.text:'',imgs:last.role==='ai'?last.imgs:[]}],plain:'【题目】'+((prev.role==='user'?prev.text:last.text))+((prev.imgs&&prev.imgs.length)?'\n[含图片]':'')+'\n\n【AI解析】'+(last.role==='ai'?last.text:'')};}
- return {title:'行测 AI 问答 · 对话记录',items:c.map(it=>({type:'msg',role:it.role,text:stripMd(it.text),imgs:it.imgs})),plain:c.map(it=>((it.role==='user'?'【我】':'【AI】')+it.text)).join('\n\n')};
+ const cItems=[];const cParts=[];c.forEach(it=>{if(it.role==='user'){const bk=detectBanKuai(it.text);if(bk)cItems.push({type:'h',text:'【板块：'+bk+'】'});}cItems.push({type:'msg',role:it.role,text:stripMd(it.text),imgs:it.imgs});cParts.push(((it.role==='user'?'【我】':'【AI】')+it.text));});const lastU=c.filter(x=>x.role==='user').slice(-1)[0];const bk2=detectBanKuai(lastU?lastU.text:'');return {title:'行测 AI 问答 · 对话记录'+(bk2?'（'+bk2+'）':''),items:cItems,plain:cParts.join('\n\n')};
 }
 async function doExport(format,polish){
  closeExpOv();
