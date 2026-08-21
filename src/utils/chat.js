@@ -1,0 +1,1 @@
+export function collectChat(){ const items=[]; document.querySelectorAll('#msgs .msg').forEach(el=>{ const role=el.classList.contains('me')?'user':'ai'; const imgs=[...el.querySelectorAll('.msg-img')].map(i=>i.src); const text=(el.innerText||'').trim(); if(text||imgs.length)items.push({role,text,imgs}) }); return items }
