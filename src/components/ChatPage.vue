@@ -5,6 +5,7 @@ import { store, saveMsgs, saveWqs } from '../store'
 import { activeCfg, supportsVision, buildSys, chatStream, detectBanKuai } from '../api'
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
 import { MODE_NAMES } from '../kb'
+import { collectChat } from '../utils/chat'
 const text=ref(''), imgs=ref([]), linkShow=ref(false), linkUrl=ref(''), recogOn=ref(false)
 const live=ref(null) // 当前流式消息 {role:'ai', text, think, thinkOpen}
 const msgsBox=ref(null)
@@ -47,7 +48,7 @@ defineEmits(['export-review'])
 <div v-if="!store.msgs.length && !live" class="welcome"><h2><span>行测 AI</span> 问答助手</h2><p>文字题走 DeepSeek · 图片题走智谱视觉 · 命题人视角教学</p></div>
 <template v-for="(m,i) in store.msgs" :key="i">
 <div class="msg" :class="m.role==='user'?'me':'ai'">
-<div v-if="m.role==='user'" v-html="esc(m.content)"></div>
+<div v-if="m.role==='user'"><template v-if="typeof m.content==='string'"><div v-html="esc(m.content)"></div></template><template v-else><div class="msg-imgs"><img v-for="(im,j) in m.content.imgs" :key="j" class="msg-img" :src="im" @click="viewImg(im)"></div><div v-html="esc(m.content.text)"></div></template></div>
 <template v-else><div v-html="md(m.content)"></div><div class="msg-actions"><button @click="saveWrong()">📌 存错题</button><button @click="$emit('export-review')">📄 导出复盘</button><button @click="toggleSpeak($event)">🔊 朗读</button></div></template>
 </div>
 </template>
