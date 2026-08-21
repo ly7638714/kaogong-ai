@@ -205,13 +205,13 @@ html,body{height:100%;font-family:"Noto Sans SC",system-ui,sans-serif;background
 
 <div class="ov" id="setOv" onclick="if(event.target===this)doCloseSet()"><div class="pnl"><h3>⚙️ API 设置（文字 / 视觉 双模型）</h3>
 <div class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
-<div class="fld"><label>提供商</label><select id="spTProv" onchange="provChg('t')">
+<div class="fld"><label>提供商</label><select id="spTProv" onchange="provChg('T')">
 <option value="ds" selected>DeepSeek (纯文本·便宜)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="anthropic">Anthropic Claude (视觉)</option><option value="zhipu">智谱 GLM-4.6V (视觉·旗舰)</option><option value="moonshot">Moonshot Kimi (纯文本)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
 <div class="fld"><label>API Key</label><input type="text" id="spTKey" placeholder="sk-..."></div>
 <div class="fld"><label>API 地址</label><input type="text" id="spTUrl" placeholder="https://api.deepseek.com/chat/completions"></div>
 <div class="fld"><label>模型名称</label><input type="text" id="spTModel" placeholder="deepseek-chat"></div>
 <div class="sec-t" style="margin-top:14px">👁️ 视觉模型（图片/截图题 · 推荐智谱GLM-4.6V）</div>
-<div class="fld"><label>提供商</label><select id="spVProv" onchange="provChg('v')">
+<div class="fld"><label>提供商</label><select id="spVProv" onchange="provChg('V')">
 <option value="ds">DeepSeek (纯文本·不支持看图)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="anthropic">Anthropic Claude (视觉)</option><option value="zhipu" selected>智谱 GLM-4.6V (视觉·旗舰·推荐)</option><option value="moonshot">Moonshot Kimi (纯文本)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
 <div class="fld"><label>API Key</label><input type="text" id="spVKey" placeholder="粘贴智谱 Key"></div>
 <div class="fld"><label>API 地址</label><input type="text" id="spVUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions"></div>
@@ -480,7 +480,8 @@ let msgs=[],wqs=[],imgs=[],cfg={},streaming=false,abCtrl=null;
 const DEFAULTS={text:{prov:'ds',key:'',url:'https://api.deepseek.com/chat/completions',model:'deepseek-chat'},vision:{prov:'zhipu',key:'',url:'https://open.bigmodel.cn/api/paas/v4/chat/completions',model:'glm-4.6v'}};
 
 (function(){
- loadCfg();loadMsgs();loadWQ();
+ function boot(){try{loadCfg();}catch(e){console.error('loadCfg',e)}try{loadMsgs();}catch(e){}try{loadWQ();}catch(e){}}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
  const t=localStorage.getItem('xa_theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');
  setTimeout(doTest,800);
  syncMode();
@@ -492,7 +493,7 @@ function loadCfg(){
  catch(e){}
  // 迁移旧版单配置
  if(!cfg.text&&!cfg.vision&&cfg.prov){
-  const old={prov:cfg.prov,key:cfg.key||'',url:cfg.url||'',model:(c||cfg).model||''};
+  const old={prov:cfg.prov,key:cfg.key||'',url:cfg.url||'',model:cfg.model||''};
   if(old.prov==='ds'||old.prov==='moonshot'){cfg.text=old;cfg.vision=Object.assign({},DEFAULTS.vision);}
   else if(old.prov==='zhipu'||old.prov==='openai'||old.prov==='qwen'||old.prov==='anthropic'){cfg.vision=old;cfg.text=Object.assign({},DEFAULTS.text);}
   else {cfg.text=old;cfg.vision=Object.assign({},DEFAULTS.vision);}
@@ -500,16 +501,16 @@ function loadCfg(){
  if(!cfg.text)cfg.text=Object.assign({},DEFAULTS.text);
  if(!cfg.vision)cfg.vision=Object.assign({},DEFAULTS.vision);
  cfg.sys=cfg.sys||'';if(cfg.kb===undefined)cfg.kb=true;if(cfg.strm===undefined)cfg.strm=true;cfg.figMode=cfg.figMode||'desc';
- fillSet('t',cfg.text);fillSet('v',cfg.vision);
+ fillSet('T',cfg.text);fillSet('V',cfg.vision);
  document.getElementById('spSys').value=cfg.sys;document.getElementById('spKB').checked=cfg.kb!==false;
  document.getElementById('spStream').checked=cfg.strm!==false;
  if(document.getElementById('figMode'))document.getElementById('figMode').value=cfg.figMode;
  updTag();
 }
-function fillSet(w,c){document.getElementById('sp'+w+'Prov').value=c.prov||'';document.getElementById('sp'+w+'Key').value=c.key||'';document.getElementById('sp'+w+'Url').value=c.url||'';document.getElementById('sp'+w+'Model').value=c.model||'';}
+function fillSet(w,c){const ep=document.getElementById('sp'+w+'Prov');if(ep)ep.value=c.prov||'';const ek=document.getElementById('sp'+w+'Key');if(ek)ek.value=c.key||'';const eu=document.getElementById('sp'+w+'Url');if(eu)eu.value=c.url||'';const em=document.getElementById('sp'+w+'Model');if(em)em.value=c.model||'';}
 function readSet(w){return {prov:document.getElementById('sp'+w+'Prov').value,key:document.getElementById('sp'+w+'Key').value,url:document.getElementById('sp'+w+'Url').value,model:document.getElementById('sp'+w+'Model').value};}
 function doSaveSet(){
- cfg.text=readSet('t');cfg.vision=readSet('v');
+ cfg.text=readSet('T');cfg.vision=readSet('V');
  const ct=PCFG[cfg.text.prov];if(ct&&cfg.text.prov!=='custom'){if(!cfg.text.url)cfg.text.url=ct.url;if(!cfg.text.model)cfg.text.model=ct.model}
  const cv=PCFG[cfg.vision.prov];if(cv&&cfg.vision.prov!=='custom'){if(!cfg.vision.url)cfg.vision.url=cv.url;if(!cfg.vision.model)cfg.vision.model=cv.model}
  cfg.sys=document.getElementById('spSys').value;cfg.kb=document.getElementById('spKB').checked;
