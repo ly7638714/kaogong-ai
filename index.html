@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>行测 AI 问答·智能答疑</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f172a;--card:#1e293b;--surface:#334155;--accent:#38bdf8;--accent2:rgba(56,189,248,.15);--text:#f1f5f9;--text2:#94a3b8;--text3:#64748b;--purple:#a78bfa;--green:#34d399;--red:#f87171;--amber:#fbbf24}
+[data-theme=light]{--bg:#f1f5f9;--card:#fff;--surface:#e2e8f0;--accent:#0284c7;--accent2:rgba(2,132,199,.1);--text:#0f172a;--text2:#475569;--text3:#94a3b8}
+html,body{height:100%;font-family:"Noto Sans SC",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{display:flex;flex-direction:column;height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:rgba(15,23,42,.88);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;z-index:50;gap:8px}
+[data-theme=light] .topbar{background:rgba(255,255,255,.92);border-bottom-color:rgba(0,0,0,.06)}
+.topbar h1{font-size:15px;font-weight:800}.topbar h1 b{color:var(--accent)}
+.status-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:12px;font-size:11px;background:var(--surface);color:var(--text2)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--red)}.dot.ok{background:var(--green)}
+.btn-icon{width:34px;height:34px;border-radius:50%;border:none;background:transparent;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:.15s}
+.btn-icon:hover{background:var(--accent2);color:var(--accent)}
+.tabs{display:flex;padding:6px 12px;gap:4px;overflow-x:auto;scrollbar-width:none;flex-shrink:0;background:var(--bg);border-bottom:1px solid rgba(255,255,255,.04)}
+[data-theme=light] .tabs{background:var(--surface);border-bottom-color:rgba(0,0,0,.04)}.tabs::-webkit-scrollbar{display:none}
+.tab{padding:6px 14px;border-radius:18px;border:1px solid transparent;background:transparent;color:var(--text3);font-size:13px;cursor:pointer;white-space:nowrap;font-family:inherit;font-weight:500;transition:.15s}
+.tab.on{background:var(--accent2);color:var(--accent);border-color:rgba(56,189,248,.25)}.tab:hover:not(.on){background:var(--surface);color:var(--text2)}
+.page{display:none;flex:1;overflow-y:auto;padding:14px 16px}.page.on{display:block}
+.chat-wrap{max-width:720px;margin:0 auto;display:flex;flex-direction:column;min-height:100%}
+.welcome{text-align:center;padding:30px 0 10px}.welcome h2{font-size:22px;font-weight:900;margin-bottom:4px}
+.welcome h2 span{background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.welcome p{color:var(--text2);font-size:13px;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left}
+.card-btn{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;background:var(--card);border:1px solid rgba(255,255,255,.05);cursor:pointer:transition:.15s}
+[data-theme=light] .card-btn{border-color:rgba(0,0,0,.06)}.card-btn:hover{border-color:var(--accent);transform:translateY(-1px)}.card-btn:active{transform:scale(.97)}
+.card-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.p-bg{background:rgba(167,139,250,.15)}.g-bg{background:rgba(52,211,153,.15)}.b-bg{background:rgba(96,165,250,.15)}.a-bg{background:rgba(251,191,36,.15)}
+.card-t{font-size:13px;font-weight:600}.card-d{font-size:11px;color:var(--text3);margin-top:1px}
+.msgs{display:flex;flex-direction:column;gap:10px;padding-bottom:10px}
+.msg{max-width:86%;padding:11px 15px;border-radius:18px;font-size:14.5px;line-height:1.68;word-break:break-word;animation:mi .22s ease}
+@keyframes mi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg.me{align-self:flex-end;background:linear-gradient(135deg,var(--accent),#0ea5e9);color:#fff;border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:var(--card);border:1px solid rgba(255,255,255,.05);border-bottom-left-radius:4px}
+[data-theme=light] .msg.ai{border-color:rgba(0,0,0,.06)}
+.msg-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}.msg-img{max-width:150px;max-height:150px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.12);display:block}
+.think-box{margin:6px 0;border-left:3px solid var(--accent);padding:6px 10px;font-size:12px;color:var(--text3);background:var(--accent2);border-radius:0 8px 8px 0;line-height:1.5}
+.think-box .tb-head{cursor:pointer;font-weight:600;user-select:none}
+.think-box .tb-body{display:none;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin-top:4px}
+.think-box.open .tb-body{display:block}
+.msg pre{background:rgba(0,0,0,.28);padding:10px 12px;border-radius:8px;overflow-x:auto;margin:8px 0;font-size:12.5px;line-height:1.5}
+[data-theme=light] .msg-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}.msg-img{max-width:150px;max-height:150px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.12);display:block}
+.think-box{margin:6px 0;border-left:3px solid var(--accent);padding:6px 10px;font-size:12px;color:var(--text3);background:var(--accent2);border-radius:0 8px 8px 0;line-height:1.5}
+.think-box .tb-head{cursor:pointer;font-weight:600;user-select:none}
+.think-box .tb-body{display:none;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin-top:4px}
+.think-box.open .tb-body{display:block}
+.msg pre{background:rgba(0,0,0,.05)}
+.msg code{font-family:Consolas,"SF Mono",monospace;font-size:12.5px}
+.msg table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}.msg th,.msg td{padding:5px 9px;border:1px solid rgba(255,255,255,.07);text-align:left}
+[data-theme=light] .msg th,[data-theme=light] .msg td{border-color:rgba(0,0,0,.07)}.msg th{background:var(--accent2);color:var(--accent)}
+.msg strong{color:var(--accent)}.msg em{color:var(--purple);font-style:normal}
+.msg ul,.msg ol{padding-left:18px;margin:5px 0}.msg li{margin:2px 0}
+.typing{display:inline-flex;gap:4px;padding:4px 0}.typing span{width:7px;height:7px;background:var(--accent);border-radius:50%;animation:b 1.3s infinite both}
+.typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{transform:scale(.55);opacity:.35}40%{transform:1;opacity:1}}
+.input-bar{flex-shrink:0;padding:10px 16px 14px;background:var(--bg);border-top:1px solid rgba(255,255,255,.04)}
+[data-theme=light] .input-bar{background:var(--surface);border-top-color:rgba(0,0,0,.04)}
+.ib-row{display:flex;gap:8px;align-items:flex-end;max-width:720px;margin:0 auto}.ib-wrap{flex:1;position:relative}
+.ib-wrap textarea{width:100%;padding:12px 44px 12px 14px;border-radius:24px;border:1px solid rgba(255,255,255,.08);background:var(--card);color:var(--text);font-size:14.5px;font-family:inherit;resize:none;outline:none;transition:.15s;line-height:1.45;max-height:120px}
+[data-theme=light] .ib-wrap textarea{border-color:rgba(0,0,0,.1);background:#fff}
+.ib-wrap textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent2)}.ib-wrap textarea::placeholder{color:var(--text3)}
+.ib-cam{position:absolute;right:6px;bottom:6px;width:32px;height:32px;border-radius:50%;border:none;background:transparent;color:var(--text3);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:.15s}.ib-cam:hover{color:var(--accent)}
+.ib-send{width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(135deg,var(--accent),#0ea5e9);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;transition:.15s;box-shadow:0 2px 14px rgba(56,189,248,.3)}
+.ib-send:hover:not(:disabled){transform:scale(1.05)}.ib-send:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;transform:none}
+.img-strip{display:flex;gap:6px;padding:0 0 6px;flex-wrap:wrap;max-width:720px;margin:0 auto}
+.img-thumb{width:54px;height:54px;border-radius:8px;overflow:hidden;position:relative;cursor:pointer;border:2px solid transparent;transition:.15s;flex-shrink:0}
+.img-thumb img{width:100%;height:100%;object-fit:cover}.img-thumb:hover{border-color:var(--accent)}
+.img-thumb .x{position:absolute;top:1px;right:1px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;font-family:system-ui}
+.cam-pop{position:fixed;bottom:72px;right:18px;background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:5px;z-index:200;display:none;box-shadow:0 10px 40px rgba(0,0,0,.45);min-width:150px}
+[data-theme=light] .cam-pop{border-color:rgba(0,0,0,.08);box-shadow:0 10px 40px rgba(0,0,0,.12)}
+.cam-pop.show{display:block;animation:fu .18s ease}@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.ci{display:flex;align-items:center;gap:9px;padding:11px 13px;border-radius:9px;border:none;background:none;color:var(--text);cursor:pointer;font-size:14px;font-family:inherit;width:100%;transition:.12s}
+.ci:hover{background:var(--accent2);color:var(--accent)}
+.ocr-box{display:none;padding:4px 16px 0;max-width:720px;margin:0 auto}.ocr-box.show{display:block}
+.ocr-track{height:4px;background:var(--surface);border-radius:2px;overflow:hidden}
+.ocr-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:2px;width:0%;transition:.22s}
+.ocr-lbl{font-size:11.5px;color:var(--text3);margin-top:3px}
+.ov{position:fixed;inset:0;z-index:300;display:none;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);align-items:flex-start;justify-content:center;overflow-y:auto;padding:50px 16px 30px}
+.ov.show{display:flex}
+.pnl{background:var(--card);border-radius:16px;border:1px solid rgba(255,255,255,.07);width:100%;max-width:480px;padding:22px;animation:si .22s ease;max-height:85vh;overflow-y:auto}
+[data-theme=light] .pnl{border-color:rgba(0,0,0,.08)}@keyframes si{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
+.pnl h3{font-size:17px;font-weight:700;margin-bottom:16px}.fld{margin-bottom:14px}
+.fld label{display:block;font-size:12px;color:var(--text2);margin-bottom:5px;font-weight:500}
+.fld select,.fld input[type=password],.fld input[type=text],.fld textarea{width:100%;padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.07);background:var(--surface);color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:.12s}
+[data-theme=light] .fld select,[data-theme=light] .fld input,[data-theme=light] .fld textarea{border-color:rgba(0,0,0,.09);background:#fff}
+.fld select:focus,.fld input:focus,.fld textarea:focus{border-color:var(--accent)}.fld textarea{resize:vertical;min-height:60px}
+.pnl-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+.btn{padding:8px 18px;border-radius:20px;border:none;cursor:pointer;font-size:14px;font-family:inherit;font-weight:500;transition:.12s}
+.btn-pri{background:var(--accent);color:#fff}.btn-pri:hover{filter:brightness(1.1)}
+.btn-gh{background:transparent;color:var(--text2);border:1px solid rgba(255,255,255,.07)}.btn-gh:hover{background:var(--surface)}
+.sec{margin-bottom:18px}.sec-t{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px}
+.kc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px}
+.kc{background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:11px;padding:12px;cursor:pointer:transition:.15s;text-align:center}
+[data-theme=light] .kc{border-color:rgba(0,0,0,.06)}.kc:hover{border-color:var(--accent);transform:translateY(-1px)}
+.kc-i{font-size:26px;margin-bottom:5px}.kc-n{font-size:12px;font-weight:600}.kc-s{font-size:10px;color:var(--text3);margin-top:1px}
+.pl{display:flex;flex-direction:column;gap:7px}
+.pi{background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:9px;padding:11px 13px;cursor:pointer:transition:.12s;font-size:13px}
+[data-theme=light] .pi{border-color:rgba(0,0,0,.06)}.pi:hover{border-color:var(--accent);background:var(--accent2)}
+.pi-t{font-weight:600;font-size:13px}.pi-d{font-size:11px;color:var(--text3);margin-top:2px}
+.sg{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+.sc{background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:14px;text-align:center}
+.sn{font-size:27px;font-weight:900;color:var(--accent)}.sl{font-size:11.5px;color:var(--text3);margin-top:2px}
+.whdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.whdr h3{font-size:15px;font-weight:700}.wha{display:flex;gap:6px}
+.bs{padding:6px 12px;border-radius:16px;border:1px solid rgba(255,255,255,.07);background:var(--card);color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;transition:.12s}
+.bs:hover{border-color:var(--accent);color:var(--accent)}.bs.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.wl{display:flex;flex-direction:column;gap:7px}
+.wi{background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:11px;padding:12px;transition:.12s}
+[data-theme=light] .wi{border-color:rgba(0,0,0,.06)}.wi:hover{border-color:var(--accent)}
+.ws{font-size:11px;color:var(--accent);font-weight:600;margin-bottom:3px}.wq{font-size:13px;margin-bottom:5px;line-height:1.5}
+.wr{font-size:11.5px;color:var(--text3)}.wr span{display:inline-block;padding:2px 8px;border-radius:10px;background:var(--red);color:#fff;font-size:10.5px;margin-right:3px}
+.wt{font-size:10.5px;color:var(--text3);margin-top:5px}
+.toast{position:fixed;top:56px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--card);border:1px solid rgba(255,255,255,.07);color:var(--text);padding:10px 20px;border-radius:24px;font-size:13px;z-index:500;opacity:0;pointer-events:none;transition:.28s;box-shadow:0 8px 30px rgba(0,0,0,.3);white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.vw{position:fixed;inset:0;z-index:400;display:none;background:rgba(0,0,0,.93);align-items:center;justify-content:center;cursor:pointer}
+.vw.show{display:flex}.vw img{max-width:92vw;max-height:86vh;object-fit:contain;border-radius:10px}
+#ff,#fc{display:none}
+.mode-row{display:flex;gap:6px;padding:2px 16px 8px;max-width:720px;margin:0 auto;flex-wrap:wrap}
+.mode-chip{padding:4px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:var(--card);color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;transition:.12s;white-space:nowrap}
+.mode-chip:hover{border-color:var(--accent);color:var(--accent)}
+.mode-chip.on{background:var(--accent2);color:var(--accent);border-color:rgba(56,189,248,.3);font-weight:600}
+[data-theme=light] .mode-chip{border-color:rgba(0,0,0,.08)}
+@media(max-width:640px){.topbar h1{font-size:13px}.msg{max-width:92%;font-size:13.5px}.grid{grid-template-columns:1fr}.pnl{max-width:100%}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="topbar"><h1>🧠 行测<b>AI 问答</b></h1><div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="status-pill" id="stPill"><div class="dot" id="stDot"></div><span id="stTxt">检测中...</span></div><button class="btn-icon" onclick="doTheme()" title="主题">🌙</button><button class="btn-icon" onclick="doOpenSet()" title="设置">⚙️</button></div></header>
+<nav class="tabs" id="tabBar"><button class="tab on" data-t="chat" onclick="swTab('chat')">💬 对话</button><button class="tab" data-t="kb" onclick="swTab('kb')">📚 知识库</button><button class="tab" data-t="tpl" onclick="swTab('tpl')">📋 复盘模板</button><button class="tab" data-t="stat" onclick="swTab('stat')">📊 统计</button><button class="tab" data-t="wq" onclick="swTab('wq')" id="wqTab">📋 错题</button></nav>
+
+<div class="page on" id="pChat"><div class="chat-wrap"><div class="welcome" id="welcome"><h2><span>行测 AI</span>问答助手</h2><p>本地讲义深度学习 · 命题人视角答疑 · 视觉识别（图推/数学符号/文字）· 支持截图直接提问</p><div class="grid">
+<div class="card-btn" onclick="qSend('帮我用薛睿的二句式推理法分析这道题：\n\n[粘贴题目]')"><div class="card-icon p-bg">🧠</div><div><div class="card-t">判断推理分析</div><div class="card-d">二句式/由果推因/形式逻辑</div></div></div>
+<div class="card-btn" onclick="qSend('请用花生十三+张弓+郭熙三师融合法分析这道言语理解题：\n\n[粘贴题目]')"><div class="card-icon g-bg">📖</div><div><div class="card-t">言语理解分析</div><div class="card-d">中心理解/逻辑填空/排序</div></div></div>
+<div class="card-btn" onclick="qSend('请用刘义恒 10 秒破题法分析这道图形推理：\n\n[描述或上传图片]')"><div class="card-icon b-bg">🔷</div><div><div class="card-t">图形推理分析</div><div class="card-d">位置/样式/属性/数量规律</div></div></div>
+<div class="card-btn" onclick="qSend('资料分析速算技巧，特别是小 P 老师四大神器')"><div class="card-icon a-bg">📈</div><div><div class="card-t">资料分析速算</div><div class="card-d">截位直除/特征分数等</div></div></div>
+<div class="card-btn" onclick="qSend('今天做题情况，帮我总结错因并给出专项突破建议。\n\n错题记录：\n1. 判断推理 - 论证推理 错 3 道\n2. 言语理解 - 中心理解 错 2 道\n3. 图形推理 - 数量规律 错 2 道')"><div class="card-icon p-bg">🎯</div><div><div class="card-t">错因诊断</div><div class="card-d">分析薄弱环节 + 建议</div></div></div>
+<div class="card-btn" onclick="qSend('梳理论证推理力度排序规则，削弱和加强各自排序')"><div class="card-icon g-bg">📝</div><div><div class="card-t">知识点查询</div><div class="card-d">方法论/公式/口诀</div></div></div>
+<div class="card-btn" onclick="qSend('生成一份学习计划，目标判断推理正确率 80%。当前 65%，弱项是论证推理。')"><div class="card-icon b-bg">📅</div><div><div class="card-t">学习计划</div><div class="card-d">个性化备考方案</div></div></div>
+<div class="card-btn" onclick="qSend('模拟一道典型二句式削弱题，逐步讲解解题思路')"><div class="card-icon a-bg">🎮</div><div><div class="card-t">模拟出题</div><div class="card-d">AI 出题 + 逐步讲解</div></div></div>
+</div></div><div class="msgs" id="msgs"></div></div></div>
+
+<div class="page" id="pKb"><div style="max-width:720px;margin:0 auto"><div class="sec"><div class="sec-t">🧠 判断推理 · 薛睿</div><div class="kc-grid">
+<div class="kc" onclick="qSend('详细讲解薛睿二句式推理六步法')"><div class="kc-i">📐</div><div class="kc-n">二句式推理</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('讲解由果推因三种削弱方法及力度排序')"><div class="kc-i">⬅️</div><div class="kc-n">由果推因</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('讲解由因推果加强削弱方法及力度比较')"><div class="kc-i">➡️</div><div class="kc-n">由因推果</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('论证推理秒杀思路，因果倒置识别和应用')"><div class="kc-i">⚡</div><div class="kc-n">秒杀思路</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('解释型题目解法，找矛盾双方共同点')"><div class="kc-i">💡</div><div class="kc-n">解释型</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('选非题型不能削弱不能支持的解题要点')"><div class="kc-i">❌</div><div class="kc-n">选非题型</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('引入型前提假设识别方法和必要条件验证')"><div class="kc-i">🔗</div><div class="kc-n">引入型·假设</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('形式逻辑核心：假言命题符号化、等价变换、真假话')"><div class="kc-i">🔣</div><div class="kc-n">形式逻辑</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('类比推理聂佳纵向对比法及常见类比关系类型')"><div class="kc-i">🔗</div><div class="kc-n">类比推理</div><div class="kc-s">聂佳</div></div>
+</div></div><div class="sec"><div class="sec-t">📖 言语理解 · 郭熙/花生十三/张弓</div><div class="kc-grid">
+<div class="kc" onclick="qSend('郭熙中心理解五步法：五大关键词 + 四种行文脉络')"><div class="kc-i">🎯</div><div class="kc-n">中心理解</div><div class="kc-s">郭熙</div></div>
+<div class="kc" onclick="qSend('细节判断题选是 vs 选非区别和常见干扰项')"><div class="kc-i">🔎</div><div class="kc-n">细节判断</div><div class="kc-s">郭熙</div></div>
+<div class="kc" onclick="qSend('意图判断问题→对策思维链，何时选对策何时选观点')"><div class="kc-i">💭</div><div class="kc-n">意图判断</div><div class="kc-s">郭熙</div></div>
+<div class="kc" onclick="qSend('语句排序首句定位 + 话题捆绑 + 时间逻辑顺序')"><div class="kc-i">🔢</div><div class="kc-n">语句排序</div><div class="kc-s">郭熙</div></div>
+<div class="kc" onclick="qSend('逻辑填空三师融合：花生十三语境还原 + 张弓逻辑关联 + 郭熙词语辨析')"><div class="kc-i">✍️</div><div class="kc-n">逻辑填空</div><div class="kc-s">三师融合</div></div>
+<div class="kc" onclick="qSend('片段阅读四大陷阱：程度超越/片面覆盖/主体不符/无中生有')"><div class="kc-i">⚠️</div><div class="kc-n">选项陷阱</div><div class="kc-s">通用</div></div>
+</div></div><div class="sec"><div class="sec-t">🔷 图形推理 · 刘义恒 3+3 + 薛睿 24 诀</div><div class="kc-grid">
+<div class="kc" onclick="qSend('刘义恒 10 秒破题法五眼观察法详解')"><div class="kc-i">👁️</div><div class="kc-n">10 秒破题法</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('位置规律三大类型：平移旋转翻转详解')"><div class="kc-i">📍</div><div class="kc-n">位置规律</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('样式运算加减同异四种组合 + 黑白运算规律')"><div class="kc-i">🎨</div><div class="kc-n">样式规律</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('属性规律对称性曲直性开闭性判断顺序')"><div class="kc-i">✨</div><div class="kc-n">属性规律</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('数量规律六大维度面线点素笔画角识别特征')"><div class="kc-i">🔢</div><div class="kc-n">数量规律</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('特征信号表完整 19 条：看到什么想到什么考点')"><div class="kc-i">📡</div><div class="kc-n">特征信号表</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('黑白块专项规律：部分整体运算 vs 逐格运算')"><div class="kc-i">⬛</div><div class="kc-n">黑白块专项</div><div class="kc-s">刘义恒</div></div>
+<div class="kc" onclick="qSend('汉字图形推理特殊考法：笔画数部分数结构封闭区域')"><div class="kc-i">🈶</div><div class="kc-n">汉字专项</div><div class="kc-s">薛睿</div></div>
+<div class="kc" onclick="qSend('空间重构方法：相对面判定画边法坐标法')"><div class="kc-i">📦</div><div class="kc-n">空间重构</div><div class="kc-s">通用</div></div>
+</div></div><div class="sec"><div class="sec-t">📈 其他板块</div><div class="kc-grid">
+<div class="kc" onclick="qSend('小 P 老师资料分析四大神器：截位直除特征分数错位加减差分比较')"><div class="kc-i">📈</div><div class="kc-n">资料分析</div><div class="kc-s">小 P 老师</div></div>
+<div class="kc" onclick="qSend('小 P 老师数量关系四层金字塔工程行程排列组合概率优先级')"><div class="kc-i">🔢</div><div class="kc-n">数量关系</div><div class="kc-s">小 P 老师</div></div>
+</div></div></div></div>
+
+<div class="page" id="pTpl"><div style="max-width:720px;margin:0 auto"><div class="sec"><div class="sec-t">📋 结构化复盘模板（点击发送给 AI）</div><div class="pl">
+<div class="pi" onclick="qSend(getTpl('pd'))"><div class="pi-t">🧠 判断推理复盘模板</div><div class="pi-d">薛睿体系：二句式/由果推因/形式逻辑</div></div>
+<div class="pi" onclick="qSend(getTpl('yy'))"><div class="pi-t">📖 言语理解复盘模板</div><div class="pi-d">三师融合：郭熙/花生十三/张弓</div></div>
+<div class="pi" onclick="qSend(getTpl('tx'))"><div class="pi-t">🔷 图形推理复盘模板</div><div class="pi-d">刘义恒 3+3 + 薛睿 24 诀双轨</div></div>
+<div class="pi" onclick="qSend(getTpl('zl'))"><div class="pi-t">📈 资料分析复盘模板</div><div class="pi-d">小 P 老师四大神器体系</div></div>
+<div class="pi" onclick="qSend(getTpl('wk'))"><div class="pi-t">📅 周报生成模板</div><div class="pi-d">自动分析本周数据输出改进建议</div></div>
+<div class="pi" onclick="qSend(getTpl('jh'))"><div class="pi-t">🎯 学习计划模板</div><div class="pi-d">根据当前水平制定个性化计划</div></div>
+</div></div><div class="sec"><div class="sec-t">⚡ 快捷指令</div><div class="pl">
+<div class="pi" onclick="qSend('用最简洁语言总结这道题的【核心考点】【解题关键】【易错陷阱】')"><div class="pi-t">🔑 三点总结</div><div class="pi-d">考点 + 关键 + 陷阱</div></div>
+<div class="pi" onclick="qSend('对比这道题和我之前做过的类似题目，找出共性错误模式')"><div class="pi-t">🔄 错误模式分析</div><div class="pi-d">对比历史找共性错误</div></div>
+<div class="pi" onclick="qSend('给我出 3 道同类型练习题，难度递增，附带答案解析')"><div class="pi-t">📝 同类练习</div><div class="pi-d">AI 出 3 道同类题附解析</div></div>
+<div class="pi" onclick="qSend('把知识点整理成 Anki 卡片格式（正面提问/背面答案）')"><div class="pi-t">🃏 生成 Anki 卡</div><div class="pi-d">间隔重复记忆卡片格式</div></div>
+</div></div></div></div>
+
+<div class="page" id="pStat"><div style="max-width:720px;margin:0 auto"><div class="sg"><div class="sc"><div class="sn" id="sTot">0</div><div class="sl">总对话</div></div><div class="sc"><div class="sn" id="sQ">0</div><div class="sl">题目分析</div></div><div class="sc"><div class="sn" id="sR">0</div><div class="sl">复盘次数</div></div><div class="sc"><div class="sn" id="sW">0</div><div class="sl">错题数</div></div></div><div style="background:var(--card);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:16px;"><div class="sec-t">📊 最近对话</div><div id="hist" style="font-size:12.5px;color:var(--text2)"></div></div></div></div>
+
+<div class="page" id="pWq"><div style="max-width:720px;margin:0 auto"><div class="whdr"><h3>📋 错题记录</h3><div class="wha"><button class="bs pri" onclick="expWQ()">导出 JSON</button><button class="bs" onclick="clrWQ()">清空</button></div></div><div class="wl" id="wqlist"></div></div></div>
+
+<div class="mode-row" id="modeRow"><button class="mode-chip on" data-m="all" onclick="setMode('all')">🤖 综合</button><button class="mode-chip" data-m="luoji" onclick="setMode('luoji')">🧠 逻辑·薛睿</button><button class="mode-chip" data-m="yanyu" onclick="setMode('yanyu')">📖 言语·三师</button><button class="mode-chip" data-m="tutu" onclick="setMode('tutu')">🔷 图推</button><button class="mode-chip" data-m="ziliao" onclick="setMode('ziliao')">📈 资料/数量</button></div>
+<div class="input-bar" id="inputBar"><div class="img-strip" id="imgStrip"></div><div class="ocr-box" id="ocrBox"><div class="ocr-track"><div class="ocr-fill" id="ocrFill"></div></div><div class="ocr-lbl" id="ocrLbl">OCR 识别中...</div></div><div class="ib-row"><div class="ib-wrap"><textarea id="ta" rows="1" placeholder="输入题目或问题... (Enter 发送，可拖拽/粘贴/选择图片)" onkeydown="onKey(event)" oninput="autoR(this)"></textarea><button class="ib-cam" id="camBtn" onclick="togCam()">📷</button></div><button class="ib-send" id="sendBtn" onclick="doSend()">➤</button></div></div>
+</div>
+
+<div class="cam-pop" id="camPop"><button class="ci" onclick="pickImg()">📁 选择图片（支持截图粘贴）</button><button class="ci" onclick="openCam()">📷 拍照识别</button><button class="ci" onclick="toggleUrlRow()">🔗 从图片链接添加（适合无法选图的环境）</button><div id="urlRow" style="display:none;padding:6px 13px 10px"><input id="imgUrlInp" type="text" placeholder="粘贴图片链接，如 https://xxx/题目.png" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit"><button class="ci" style="margin-top:6px" onclick="addImgUrl()">✅ 添加该图片</button></div></div>
+
+<div class="ov" id="setOv" onclick="if(event.target===this)doCloseSet()"><div class="pnl"><h3>⚙️ API 设置（文字 / 视觉 双模型）</h3>
+<div class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
+<div class="fld"><label>提供商</label><select id="spTProv" onchange="provChg('t')">
+<option value="ds" selected>DeepSeek (纯文本·便宜)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="anthropic">Anthropic Claude (视觉)</option><option value="zhipu">智谱 GLM-4.6V (视觉·旗舰)</option><option value="moonshot">Moonshot Kimi (纯文本)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
+<div class="fld"><label>API Key</label><input type="text" id="spTKey" placeholder="sk-..."></div>
+<div class="fld"><label>API 地址</label><input type="text" id="spTUrl" placeholder="https://api.deepseek.com/chat/completions"></div>
+<div class="fld"><label>模型名称</label><input type="text" id="spTModel" placeholder="deepseek-chat"></div>
+<div class="sec-t" style="margin-top:14px">👁️ 视觉模型（图片/截图题 · 推荐智谱GLM-4.6V）</div>
+<div class="fld"><label>提供商</label><select id="spVProv" onchange="provChg('v')">
+<option value="ds">DeepSeek (纯文本·不支持看图)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="anthropic">Anthropic Claude (视觉)</option><option value="zhipu" selected>智谱 GLM-4.6V (视觉·旗舰·推荐)</option><option value="moonshot">Moonshot Kimi (纯文本)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
+<div class="fld"><label>API Key</label><input type="text" id="spVKey" placeholder="粘贴智谱 Key"></div>
+<div class="fld"><label>API 地址</label><input type="text" id="spVUrl" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions"></div>
+<div class="fld"><label>模型名称</label><input type="text" id="spVModel" placeholder="glm-4.6v"></div>
+<div class="fld"><label>自定义 System Prompt（留空使用内置知识库）</label><textarea id="spSys" rows="3" placeholder=""></textarea></div>
+<div class="fld"><label><input type="checkbox" id="spKB" checked> 启用内置知识库增强（薛睿/三师/刘义恒等）</label></div>
+<div class="fld"><label><input type="checkbox" id="spStream" checked> 流式输出（逐字显示）</label></div>
+<div class="fld" style="background:var(--accent2);border-radius:8px;padding:10px;margin-top:8px;">
+<label style="color:var(--accent);font-weight:700;">🔷 图推图片处理模式（未配置视觉模型时的兜底）</label>
+<select id="figMode" style="margin-top:5px;width:100%">
+<option value="desc">描述引导模式（推荐）：自动追加五眼观察框架，引导你补充图形特征</option>
+<option value="vision">视觉 API 模式：切换到视觉模型直接识图</option>
+<option value="manual">手动描述模式：仅提取少量文字，其余靠你口述</option>
+</select>
+<div style="font-size:11px;color:var(--text3);margin-top:4px;">💡 纯文字题自动走「文字模型」；带图题自动走「视觉模型」。<br>⚠️ 若模型名/地址为空：选中提供商后会自动填入；仍空白或保存没反应，说明当前浏览器被安全策略拦截，请改用手机浏览器或电脑 Chrome/Edge 打开。</div>
+</div>
+<div class="pnl-btns"><button class="btn btn-gh" onclick="doCloseSet()">取消</button><button class="btn btn-pri" onclick="doSaveSet()">保存</button><button class="btn btn-pri" onclick="doTest()">测试连接</button></div></div></div><div class="vw" id="viewer" onclick="this.classList.remove('show')"><img id="viImg" alt=""></div>
+<input type="file" id="ff" accept="image/*" multiple onchange="onFiles(this.files)">
+<input type="file" id="fc" accept="image/*" capture="environment" onchange="onFiles(this.files)">
+<div class="toast" id="toast"></div>
+
+<script>
+const SYS=`你是一位深耕公务员考试行测的名师级智能辅导老师，融合以下名师方法论：
+- 判断推理（逻辑判断）：薛睿体系（论证推理 + 形式逻辑）
+- 言语理解：郭熙 × 花生十三 × 张弓 三师融合
+- 图形推理：刘义恒 3+3 + 薛睿 24 诀
+- 资料分析：小P老师四大神器；数量关系：小P老师四层金字塔
+
+【回答总规范】
+1. 先判定题型，再调用对应名师方法论，不要空谈理论。
+2. 每道题按此结构输出：题型判定 → 方法论分步分析 → 选项逐项剖析（含力度/排除理由）→ 正确答案 → 陷阱提示 → ⚡秒杀规律。
+3. 用 Markdown 排版；正文一般 400-900 字，讲透为止，不注水。
+4. 用户发图时：若当前接口能看图（视觉模式）就真正看图分析；看不到图就按"图推引导"主动询问关键信息再分析，不猜。
+5. 支持追问：用户问"为什么某选项不对"，要结合上一步思路简短作答。
+6. 涉及老师方法时，只讲真实、公认的内容；不确定就如实说明，绝不编造老师没讲过的口诀或步骤。
+
+【命题人视角答题协议（每题必遵守）】
+1. 先判定考点结构：这题命题人想考什么底层结构/规律？（论证推理四大结构/形式逻辑箭头/言语行文脉络/图推考点大类/资料分析公式族）
+2. 预判正确项：正确项必须"连接什么/切断什么/对应什么/同义替换什么"？
+3. 点名干扰项：逐项指出每个错误选项是命题人用哪类陷阱造的（论证=13丑；言语=程度超越/片面覆盖/主体不符/无中生有；图推=规律局部化/方向反；资料=时间/单位/方向/基数陷阱）。
+4. 验算后再定答案：把答案代回题干验证成立（形式逻辑用箭头/真值表验算；资料分析代入公式闭合验证；图推用最后1-2图验证规律完整）。
+5. 准确性铁律：材料不足或无法确定时，明确说"此题信息不足/我无法确定"，并请用户补充，绝不硬答、绝不编造。
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+## 一、判断推理 · 薛睿体系
+
+### A. 论证推理 · 五步 40 秒解题法
+1. 看提问句（5秒）：确定是支持/削弱/前提/解释/推出/评价/选非。
+2. 找结论引词（3秒）：因此、所以、据此、这说明、研究者认为、专家指出、由此可见、结果显示等。
+3. 抓结论（7秒）：只抓最终要证明的核心观点。
+4. 找论据（10秒）：找到支撑结论的事实、数据、实验、现象。
+5. 判结构并预判（15秒）：判断底层推理骨架，预判正确选项应该长什么样（连接什么/切断什么/含哪些关键词）。
+
+【四大底层推理结构】
+1. 同时存在推因果：【A与B同时存在】⇒【A是B的原因】。
+2. 实验组对照组：【有A有B，无A无B】⇒【A是B的原因】。
+3. 递推结构（二句式）：前重复【A→B】⇒【A→C】→ 正确项在B与C之间搭桥（B→C）；后重复【A→B】⇒【C→B】→ 搭桥 C→A。
+4. 由果推因：【先说结果B，再推测导致B的原因A】。
+
+【力度排序（必须会用）】
+- 支持优先级：建立因果机制（最强）＞ 排除他因 ＞ 举例支持。
+- 削弱优先级：切断因果链条（最强）＞ 引入他因 ＞ 反驳论据 ＞ 反驳结论。
+- 由果推因削弱：另有他因（最强）＞ 因果倒置 ＞ 无因有果。
+- 由因推果削弱：阻断传导"做了也白做"＞ 引入他因；前真后假/前假后真都是削弱，前假后假是支持。
+- 二句式题：支持=搭桥（建立B-C联系）最强；削弱=拆桥（切断B-C联系）最强。
+
+【秒杀思路 · 五种固定套路】
+1. 第三者建立联系：A→C→B（如：消极情绪→迷走神经→哮喘）。
+2. 比较之前起点必须相同：实验组比对照组好→措施有效；削弱=指出实验前两组起点已不同。
+3. 如果没有会更好/更差：措施实施后结果不够好→措施无效；削弱=指出"没有措施会更差"。
+4. 因果倒置：A与B相关→认为A导致B；削弱=指出是B导致A。
+5. 幸存者偏差：从成功样本总结规律；削弱=失败样本被忽略。
+
+【八大题型要点】
+1. 二句式推理：论据与结论有重复项，正确选项在"跳跃项"之间搭桥；类比题支持找相同、削弱找不同。
+2. 由因推果（预言家思维）：论据是措施/行为/政策，结论是未来效果；削弱=做了也白做/引入他因/前真后假/前假后真；支持=建立联系/排除他因/举例。
+3. 由果推因（刑侦思维）：论据是现象/数据/调查结果，结论是归因；削弱=另有他因＞因果倒置＞无因有果；支持=建立A与B的联系/排除他因/无因无果。
+4. 引入前提（假设）：正确选项是结论成立的必要条件，用"否定代入法"验证——取反后结论崩塌即是必要前提。
+5. 解释型：让两个看似矛盾的事实"共存"；正确选项不能否定任何一方事实，只能引入第三方因素（不同对象/时间/标准/另有他因）调和。
+6. 选非题："最不能支持"=优先找削弱项，没有削弱再找无关项；"最不能削弱"反之。
+7. 结论推出：不脑补、不绝对化、就近、择优；六大陷阱=偷换概念、过度推理（相关→因果）、绝对化表述、因果倒置、部分推全部、把可能说必然。
+8. 评价题：找"关键问句"——答案回答"是/否"会改变论证力度的选项。
+
+【选项 13 丑 · 防坑清单（高频挖坑）】
+以偏概全（个体情况）、逻辑外挖坑（引入新概念）、偷换关键词、讨论无关维度、不当比较、"不完美≠没效果"、只下定义不建立联系、程度变化不影响因果方向、主观情绪/专家观点无逻辑依据、否前推否后/肯后推肯前、"正确的废话"（与论证无关）、支持/削弱方向相反、由果推因迷惑项（解释机制或列举其他原因但不削弱）。
+
+### B. 形式逻辑
+【核心口诀】
+- 前真推后真，后假推前假；前假后真，啥也推不出！（顺肯逆否）
+- 否定一边推一边，肯定一边推不出！（A∨B：¬A→B，¬B→A；肯定一边推不出另一边）
+- 结论找箭头，箭头找前件，补前件即可！（连锁补前提）
+- 前真后假为假！（A→B 为假 ⇔ A真 ∧ B假）
+- 假设前件推矛盾，矛盾一出前件假；两种情况殊途归，共同结论就是真！（归谬法/两难推理）
+- 所有画圈包含好，有的相交要记牢；有些不是不能逆，有些是或含全部！（文氏图）
+
+【等价变换速查】
+A→B ⇔ ¬B→¬A（逆否）⇔ ¬A∨B
+¬(A∨B) ⇔ ¬A∧¬B；¬(A∧B) ⇔ ¬A∨¬B
+(A∧B)→C ⇔ ¬C→¬A∨¬B；(A∨B)→C ⇔ ¬C→¬A∧¬B
+
+【矛盾关系速查】
+A→B 的矛盾 = A∧¬B；A∨B 的矛盾 = ¬A∧¬B；A∧B 的矛盾 = ¬A∨¬B
+"所有S都是P" 矛盾 "有的S不是P"；"所有S都不是P" 矛盾 "有的S是P"
+
+【真话假话】矛盾关系必一真一假；同真（P真⇒Q真，若仅1真则P必假）；不能同假（至少一真）；AEIO对当关系：A与E上反对至少一假、I与O下反对至少一真、A-O/E-I矛盾必一真、A-I/E-O差等全称真则特称真。
+
+【一一对应】一山不容二虎（一个位置只能放一个元素）、一人不能分饰两角、最后一个位置自动匹配；用排除表格法。
+
+【文氏图】所有A都是B=A圆在B圆内；有的A是B=两圆相交；所有A都不是B=两圆相离；有些A不是B=A圆部分在B圆外；"所有"推"有的"；"有的"对称；"有些A不是B"推不出"有些B不是A"。
+
+【易错清单】不能否前推否后、肯后推肯前；肯定"或"的一边推不出另一边；"只有A才B"=B→A（A是必要不充分）；"或"相容可同真，"要么…要么…"是异或不能同真；A→B与B→A是逆命题不是矛盾；形式逻辑中禁止脑补"A是B的唯一原因"。
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+## 二、言语理解 · 郭熙 × 花生十三 × 张弓 三师融合
+
+### 总流程（三师合力四步走）
+1. 【花生十三 · 结构拆解】先看问题定题型 → 带着问题读文段 → 快速划分文段结构（总分/分总/转折/并列/递进/因果），抓出"骨架"而非逐句细读。
+2. 【张弓 · 逻辑链条】勾画逻辑连接词（转折/递进/因果/条件/并列/举例/解释说明），理清"观点—论据""问题—对策""现象—原因"的逻辑走向，找到作者的真实意图。
+3. 【郭熙 · 关键词定位】锁定五大关键词：转折词（但/然而）→转折后是重点；递进词（甚至/更）→最后一层是重点；对策词（必须/应该）→对策常是答案；程度词（最/关键）→限定范围；结论词（因此/可见）→结论常是答案。
+4. 【选项三比】比主体、比范围、比程度 → 排除四大陷阱 → 选同义替换最准的选项。
+
+### 片段阅读 · 分题型
+- 中心理解：主旨句=首尾句+逻辑词后；正确项=主旨句同义替换；只复述论据/例子的选项必错。
+- 意图判断：问题→对策（尾句对策＞问题描述，具体对策＞原理）；反面论证"如果不…就要…"；实验结论类=实验对比得出的结论才是核心。
+- 细节判断：选是题警惕绝对化词（决定/必须/所有）；选非题防偷换概念、混淆时态、过度推断。
+- 标题选择：事件类=首句导语概括；观点类=尾句对策做标题（选"怎么做"，不选"别变成什么"）。
+- 词句理解：代词指代用就近原则，理清替代者与被替代者；成语指代要理清本体与喻体。
+- 接语选择：尾句引出新话题→下文讲新话题；尾句已完结→前文总结。
+- 语句填空：首句横线=总起后文；句中横线=承上启下；尾句横线=按前文逻辑推结论。
+- 语句排序：首句定位（总结句/指代词不能做首句）→ 话题捆绑 → 顺序验证。
+
+【片段阅读四大陷阱】程度超越原文、"片面覆盖"（并列/对策只提一半）、主体不符（主语偷换）、无中生有；另加绝对化词陷阱。
+
+### 逻辑填空 · 三师三步法
+1. 【花生十三 · 语境还原】先读整句整段，还原空格所在语境：话题方向、感情色彩、语义轻重；先不看选项，先想"这里该填什么意思的词"。
+2. 【张弓 · 逻辑关联】找逻辑信号词锁定空格与前后文的"对应点"：
+   - 转折（但/然而/却）→ 前后语义相反
+   - 递进（甚至/更/不仅…而且）→ 语义相近且程度加深
+   - 并列（和/与/同时/顿号）→ 语义相近（同义复现）或相反（反义对举）
+   - 因果（因此/因为/导致）→ 原因与结果对应
+   - 解释说明（即/也就是说/冒号/破折号）→ 空格内容=被解释的内容
+3. 【郭熙 · 词语辨析】实词看：语义侧重、搭配对象、感情色彩、词性、程度轻重；成语看：语义、适用对象、感情色彩、语法功能。用排除法逐项验证。
+4. 代入验证：把选项代入原文通读，语境、逻辑、搭配三者都通才算对。
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+## 三、图形推理 · 刘义恒 3+3 + 薛睿 24 诀
+【刘义恒五眼观察法】
+第1眼 元素相同→位置规律（平移/旋转/翻转）
+第2眼 元素相似→样式运算（加减同异/黑白运算）
+第3眼 有小标记→标记规律（遍历/运算）
+第4眼 规则美观→属性规律（对称→曲直→开闭）
+第5眼 以上都不是→数量规律（面/线/点/素/笔画/角）
+【特征信号表（19条）】元素一样→位置；图形很像→样式；五角星/日/田/圆→交点笔画；直角十字架→直角；对称规则→属性优先；2种元素→换算；有小标记→标记；多独立图→图形间位置；黑白格→黑白块；汉字→汉字专项；生活实物→生活化属性；每图带弧→弧度走势；六图风格迥异→分类；π缺口圆辐射符→警惕判反；选项外形像→形状陷阱；大框套子→边数比；乱线固定小图→只看位置；△○共存→判包含相交相离；孤立线头→端点。
+【薛睿24诀】作为验证工具：先按特征信号定方向，再逐条对照24诀验证，避免"信号对但细化错"。
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+## 四、资料分析 · 小P老师四大神器
+截位直除法 | 特征分数法 | 错位加减法 | 差分比较法
+做题路径：读题→找数据→选神器→速算。考点：增长率/增长量/比重/平均数/倍数。
+
+## 五、数量关系 · 小P老师四层金字塔
+优先级：工程＞行程＞排列组合＞概率。先做"必拿分"题型，再攻难题。`
+
+// 🔷 图推专用结构化提示词（当 OCR 检测到图片文字很少时自动追加）
+const FIGURE_PROMPT = `
+【🔷 检测到这是一道图形推理题（图片中几何图形为主，文字很少）】
+
+由于当前使用的是纯文本 API（DeepSeek），无法直接看到图片中的图形。
+请你按照 **刘义恒五眼观察法框架** 引导用户逐步分析：
+
+**第一步：第 1 眼 — 元素组成**
+- 各图形的元素是否完全相同？
+- 相同 → 优先考虑位置规律（平移/旋转/翻转）
+- 不同 → 进入第 2 眼
+
+**第二步：第 2 眼 — 相似度**
+- 图形之间是否长得像？（相似形状但大小/方向不同）
+- 像 → 样式运算（加减同异/黑白运算）
+- 不像 → 进入第 3/4/5 眼
+
+**第三步：第 3 眼 — 特殊标记**
+- 有无小短线/小角/小圆点等附加标记？
+- 有 → 标记规律（遍历/运算）
+- 无 → 进入第 4 眼
+
+**第四步：第 4 眼 — 属性规律**
+- 是否规则美观？对称性强？
+- 是 → 属性规律（对称性→曲直性→开闭性）
+- 否 → 进入第 5 眼
+
+**第五步：第 5 眼 — 数量规律**
+- 数面（封闭区域数）
+- 数线（直线段/曲线数）
+- 数点（交点/端点）
+- 数素（元素种类/个数）
+- 笔画数（一笔画/多笔画）
+- 直角数/锐角钝角
+
+**请先询问用户以下关键信息，再给出分析：**
+1. 一共有几个图形？（分组/分类/一条式？）
+2. 每个图形的大致样子？（三角形/四边形/圆形/线条组合？）
+3. 图形之间看起来是"一样的在动"还是"长得像但有变化"还是"完全不像"？
+4. 有没有明显的对称性？
+5. 如果是分类题，大概怎么分的？
+
+等用户补充信息后，结合特征信号表给出最可能的考点方向和答案。`;
+
+function getTpl(t){
+ const o={
+  pd:'请按【判断推理复盘模板】分析这道题：\n\n一、题目信息（题型/提问方式）\n二、薛睿六步分析法（提问句/结论引词/结论句/论据/预设推理/选项对比）\n三、错因诊断：①不理解题干推理 ②不明白选项功能 ③忽略主题范围 ④出题人挖坑\n四、正确解法和力度比较\n五、出题人陷阱\n六、⚡秒杀规律\n\n粘贴题目：',
+  yy:'请按【言语理解复盘模板】分析：\n\n一、题目信息（题型/主题）\n二、郭熙关键词定位（转折/递进/对策/程度/结论词）\n三、行文脉络分析\n四、选项分析（逻辑填空：语境还原 + 逻辑关联 + 词语辨析）\n五、错因诊断（找不准重点/误解关键词/程度陷阱/主体偷换）\n六、⚡秒杀规律\n\n粘贴题目：',
+  tx:'请按【图形推理复盘模板】分析：\n\n一、图形描述\n二、刘义恒五眼观察表（每眼的观察结果和推断考点）\n三、特征信号匹配\n四、详细分析（规律类型/变化规律/验证）\n五、薛睿 24 诀对照\n六、错因诊断：⑤信号没捕捉到 ⑥考点方向定错 ⑦细化不够 ⑧验证失误\n七、⚡秒杀规律\n\n描述或上传图形：',
+  zl:'请按【资料分析复盘模板】分析：\n\n一、考点类型（增长率/增长量/比重/平均数/倍数）\n二、解题路径（读题→找数据→选神器）\n三、计算过程（公式 + 代入 + 速算步骤）\n四、时间优化\n五、⚡速算规律',
+  wk:'请根据以下信息生成本周周报：\n一、本周概览（总题数/各板块正确率）\n二、各板块统计\n三、错因 TOP3\n四、进步与不足\n五、下周计划和每日任务安排',
+  jh:'请制定个性化备考计划：\n目标岗位/备考时间/当前正确率/最弱项\n输出：每日时间分配/月度里程碑/突破策略/模考安排'
+ };return o[t]||'';
+}
+
+const PCFG={ds:{url:'https://api.deepseek.com/chat/completions',model:'deepseek-chat'},openai:{url:'https://api.openai.com/v1/chat/completions',model:'gpt-4o-mini'},anthropic:{url:'https://api.anthropic.com/v1/messages',model:'claude-sonnet-4-20250514'},zhipu:{url:'https://open.bigmodel.cn/api/paas/v4/chat/completions',model:'glm-4.6v'},moonshot:{url:'https://api.moonshot.cn/v1/chat/completions',model:'moonshot-v1-8k'},qwen:{url:'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',model:'qwen-vl-plus'},custom:{url:'',model:''}};
+// ========= 专项模式（老师方法优先级） =========
+// ========= 专项模式（深度知识库 · 命题人视角 v3.0） =========
+const MODE_NOTE={
+ all:'',
+ luoji:`
+【当前模式：判断推理·薛睿专项 · 深度知识库】
+1. 命题人视角：考官出题=先选底层结构→文字包装→选考点→按13美设计正确项→按13丑挖1-2个坑→编凑数项。答题反向推：判结构→预判正确项→点名每个错项的'丑'→验算。
+2. 五步40秒法：看提问句→找结论引词(因此/所以/据此/研究者认为)→抓结论→找论据→判结构预判。
+3. 四大底层结构：①A与B同时存在→A是B的原因；②实验组对照组(有A有B无A无B)→A是B的原因；③二句式递推(论据A→B结论A→C=前重复，A→B→C→B=后重复)→正确项在B-C或C-A间搭桥；④由果推因(结果B→原因A)。
+4. 两句式vs一句式：论据结论有重复=两句式(考搭桥/拆桥)；无重复、论据是数据/背景=一句式(考他因/机制/样本)。
+5. 力度排序：支持=建立因果机制＞排除他因＞举例；削弱=切断因果＞引入他因＞反驳论据＞反驳结论；由果推因削弱=另有他因＞因果倒置＞无因有果；由因推果削弱=阻断传导(做了也白做)＞引入他因；二句式=搭桥/拆桥最强。
+6. 题型要点：二句式(搭桥B→C/C→A；类比支持找同削弱找异)；由因推果(削弱=阻断传导/前真后假/前假后真/引入他因，前假后假是支持)；由果推因(另有他因＞因果倒置＞无因有果)；引入前提(否定代入：取反后结论崩塌=必要前提)；解释型(不能否定任何一方事实，只引入第三方因素)；选非题(最不能支持=先找削弱，最不能削弱=先找支持)；结论推出(不脑补/不绝对化/就近/择优)；评价题(找关键问句，答是/否会改变论证力度)。
+7. 秒杀5套路：第三者建立联系A→C→B；比较前起点必须相同；没有措施会更差；因果倒置；幸存者偏差。
+8. 选项13美(正确项模板)：补全逻辑/建立联系/指出相同不同/直接说主体利弊/引入他因/引入限制因素/引入其他方面/前真后假前假后真前假后假/举例子/由果推因另有他因/反驳论据结论/固定秒杀结构/前提论述。
+9. 选项13丑(挖坑)：个体情况/逻辑外挖坑/偷换关键词/其他方面/比较迷惑/不完美≠弊端/下定义/因素大小不影响方向/主观情绪专家观点/否前推否后肯后推肯前/正确的废话/方向相反/由果推因迷惑。
+10. 形式逻辑口诀：前真推后真后假推前假前假后真啥也推不出；否定一边推一边肯定一边推不出；结论找箭头箭头找前件补前件即可；前真后假为假；假设前件推矛盾矛盾一出前件假；所有画圈包含好有的相交要记牢有些不是不能逆有些是或含全部。等价：A→B⇔¬B→¬A⇔¬A∨B；¬(A∨B)⇔¬A∧¬B；¬(A∧B)⇔¬A∨¬B。矛盾：A→B的矛盾=A∧¬B；所有S是P矛盾有的S不是P。真假话：矛盾必一真一假；同真(仅1真则P假)；不能同假(至少一真)；AEIO(A-E上反对至少一假，I-O下反对至少一真)。
+11. 一拖五：队列型(确定/顺序/绑定/隔离/推理五类条件，符号化A<B，一步推理=前真推后真)；分组型(确定/绑定A=B/隔离A≠B/推理A=1⇒B=2，四套路：标准分组/两次分组找交集/空间数不确定/分类分组)。
+12. 回答要求：先判结构再讲；逐项点名错项挖坑类型；给答案后验算；不确定就明说。`,
+ yanyu:`
+【当前模式：言语理解·三师专项 · 深度知识库】
+1. 命题人视角：先选有清晰行文结构的文段→把主旨藏在转折后/尾句/对策/结论→正确项=主旨同义替换(主体/范围/程度不变)→干扰项从四陷阱挖坑(程度超越/片面覆盖/主体不符/无中生有，+绝对化词)；逻辑填空在空格前后设对应点，干扰项近义但不精准/轻重不当/搭配不当。
+2. 三师四步：①花生十三结构拆解(先看问题定题型→划分结构总分/分总/转折/并列/递进/因果→只抓骨架)；②张弓逻辑链条(勾转折/递进/因果/条件/并列/举例/解释词，理清观点-论据/问题-对策/现象-原因走向)；③郭熙关键词(转折后重点/递进最后一层/对策常答案/程度限定范围/结论常答案)；④选项三比(比主体/范围/程度)。
+3. 分题型：中心理解=主旨同义替换，复述论据例子必错；意图判断=问题→对策(尾句对策＞问题描述，具体对策＞原理)，反面论证'如果不…就要…'，实验结论类=对比结论才是核心；细节判断=选是题警惕绝对化词(决定/必须/所有)，选非题防偷换概念/混淆时态/过度推断；标题=事件类首句导语/观点类尾句对策(选'怎么做'不选'别变成什么')；词句理解=代词就近，成语理清本体喻体；接语=尾句新话题→下文讲新话题，尾句完结→总结前文；语句填空=首句总起/句中承上启下/尾句推结论；语句排序=首句定位(总结句指代词不做首句)→话题捆绑→顺序验证。
+4. 逻辑填空三步：①花生语境还原(先读全段还原话题/感情色彩/语义轻重，先不看选项)；②张弓逻辑关联(转折→反义；递进→同义加深；并列→同义复现或反义对举；因果→对应；解释说明→空格=被解释内容)；③郭熙词语辨析(实词：语义侧重/搭配/感情色彩/词性/程度；成语：语义/适用对象/感情色彩/语法功能)；④代入验证三通(语境/逻辑/搭配)。
+5. 回答要求：先定结构抓主旨→预判正确项→逐项点名陷阱→答案后确认同义替换成立；不确定就明说。`,
+ tutu:`
+【当前模式：图形推理·刘义恒+薛睿专项 · 深度知识库】
+1. 命题人视角：先选考点规律→用图形隐藏特征或用易混淆特征误导→干扰项=规律局部化/差一格/方向反。答题：特征信号定大类→细化→最后1-2图验证规律完整成立→排除伪规律。
+2. 6眼破题法：第1眼元素完全相同→位置规律；第2眼图形很像重复线条→样式运算；第3眼有小标记→标记规律；第4眼规则对称美观→属性(对称→曲直→开闭)；第5眼又乱又不像→数量(面/线/点/素/笔画/角)；第6眼一图多独立图形→图形间位置；黑白格→黑白块专项；汉字→汉字专项；立体→空间重构。
+3. 特征信号速查(20条)：元素一样→位置；很像→样式；五角星/日/田/圆相交→交点笔画；直角十字架→直角；对称规则→属性；2种元素→换算(图1+图3=2×图2)；小标记→标记；多独立图→图形间位置；黑白格→黑白块；汉字→汉字专项；生活实物→生活化属性(曲直/开闭/部分数)；每图带弧→弧度走势；六图迥异要分类→属性对称→曲直→开闭；规则却有孤立线头→端点数；π/缺口圆/辐射符→判开闭警惕判反；选项外形超像→形状陷阱回去验数量；大框套子→外框边数vs内最大图形边数；满图乱线有固定小图→只看小图形位置；△○共存→判包含/相交/相离；盯着整体轮廓→强制看局部关系。
+4. 细化：位置(平移方向步数周期/旋转角度方向/翻转)；样式(加减同异/黑白运算)；标记(遍历/与主图关系)；属性(对称轴数量方向/曲直/开闭)；数量(面/线/点/素/笔画奇点0或2/角)；图形间位置(相离包含相交相切)；黑白块(黑白运算/数量/对称/移动)；汉字(笔画/部分数/封闭空间/结构/偏旁)；空间重构(相对面不能同现/相邻面公共边公共点/时针法)。
+5. 回答要求：无图时先按6眼问用户关键信息(几个图/样子/是否对称/分类题怎么分)，再结合特征信号给方向；不给无依据的答案。`,
+ ziliao:`
+【当前模式：资料分析/数量关系·LY一本通+小P体系 · 深度知识库】
+1. 命题人视角：选考点(基期/增长率/增长量/比重/平均数/倍数)→给现期藏基期→干扰项=误算(增长率当现期/比重方向反/单位时间陷阱/选项差距小用粗放速算误判)。答题：10秒内题型识别→公式→列式→速算→对照选项量级/符号→反向验证(基期×(1+r)≈现期)。
+2. 术语：同比=上年同期，环比=上一周期；基期/现期；增长率r=(现-基)/基；增长量Δ=现-基；百分点=百分数之差；翻一番=×2；顺差=出口-进口；贡献率=部分增量/整体增量；拉动增长率=部分增量/整体基期。
+3. 公式速算：基期A=B/(1+r)：|r|≤5%化除为乘B×(1-r)(>5%慎用>10%禁用)；r≈1/n百化分A≈B×n/(n+1)；否则截位直除。增长量Δ=B×r/(1+r)，r≈1/n时Δ≈B/(n+1)。间隔增长率r=r1+r2+r1×r2；混合增长率=介于两部分之间且偏向量大一方(十字交叉)；年均增长率=(现/基)^(1/n)-1；乘积增长率r总≈rA+rB+rA×rB。基期比重=(部分现/整体现)×(1+整体r)/(1+部分r)；两期比重差：部分r>整体r→比重上升，量=比重×[(r部分-r整体)/(1+r部分)]；平均数增长率=(r分子-r分母)/(1+r分母)。
+4. 速算四件套：百化分(记1/2~1/20对应：1/6≈16.7% 1/7≈14.3% 1/8=12.5% 1/9≈11.1% 1/12≈8.3% 1/14≈7.1% 1/15≈6.7% 1/16=6.25% 1/20=5%)；截位直除；差分比较；放缩验证。
+5. 陷阱：时间(问基期给现期/同比环比混用)；单位(万元/亿元/‰)；方向(比重升降/增幅收窄/顺逆差)；基数('超过2倍'≠'增长2倍')；选项差距小不能用粗放估算；基期和差分母不同必须先分别求基期。
+6. 回答要求：先列公式再算，标注估算；每步对照选项；给答案后验证闭合。`
+};
+let curMode='all';
+function setMode(m){if(!MODE_NOTE[m])return;curMode=m;document.querySelectorAll('.mode-chip').forEach(b=>b.classList.toggle('on',b.dataset.m===m));try{localStorage.setItem('xa_mode',m)}catch(e){}toast('已切换：'+({all:'🤖 综合',luoji:'🧠 逻辑·薛睿',yanyu:'📖 言语·三师',tutu:'🔷 图推',ziliao:'📈 资料/数量'}[m]||m))}
+function syncMode(){try{const m=localStorage.getItem('xa_mode');if(m&&MODE_NOTE[m])curMode=m}catch(e){}document.querySelectorAll('.mode-chip').forEach(b=>b.classList.toggle('on',b.dataset.m===curMode))}
+
+let msgs=[],wqs=[],imgs=[],cfg={},streaming=false,abCtrl=null;
+const DEFAULTS={text:{prov:'ds',key:'',url:'https://api.deepseek.com/chat/completions',model:'deepseek-chat'},vision:{prov:'zhipu',key:'',url:'https://open.bigmodel.cn/api/paas/v4/chat/completions',model:'glm-4.6v'}};
+
+(function(){
+ loadCfg();loadMsgs();loadWQ();
+ const t=localStorage.getItem('xa_theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');
+ setTimeout(doTest,800);
+ syncMode();
+})();
+
+// ========= SETTINGS（文字模型 + 视觉模型 双配置） =========
+function loadCfg(){
+ try{const s=localStorage.getItem('xa_cfg');if(s){const d=JSON.parse(s);if(d&&typeof d==='object')cfg=d;}}
+ catch(e){}
+ // 迁移旧版单配置
+ if(!cfg.text&&!cfg.vision&&cfg.prov){
+  const old={prov:cfg.prov,key:cfg.key||'',url:cfg.url||'',model:(c||cfg).model||''};
+  if(old.prov==='ds'||old.prov==='moonshot'){cfg.text=old;cfg.vision=Object.assign({},DEFAULTS.vision);}
+  else if(old.prov==='zhipu'||old.prov==='openai'||old.prov==='qwen'||old.prov==='anthropic'){cfg.vision=old;cfg.text=Object.assign({},DEFAULTS.text);}
+  else {cfg.text=old;cfg.vision=Object.assign({},DEFAULTS.vision);}
+ }
+ if(!cfg.text)cfg.text=Object.assign({},DEFAULTS.text);
+ if(!cfg.vision)cfg.vision=Object.assign({},DEFAULTS.vision);
+ cfg.sys=cfg.sys||'';if(cfg.kb===undefined)cfg.kb=true;if(cfg.strm===undefined)cfg.strm=true;cfg.figMode=cfg.figMode||'desc';
+ fillSet('t',cfg.text);fillSet('v',cfg.vision);
+ document.getElementById('spSys').value=cfg.sys;document.getElementById('spKB').checked=cfg.kb!==false;
+ document.getElementById('spStream').checked=cfg.strm!==false;
+ if(document.getElementById('figMode'))document.getElementById('figMode').value=cfg.figMode;
+ updTag();
+}
+function fillSet(w,c){document.getElementById('sp'+w+'Prov').value=c.prov||'';document.getElementById('sp'+w+'Key').value=c.key||'';document.getElementById('sp'+w+'Url').value=c.url||'';document.getElementById('sp'+w+'Model').value=c.model||'';}
+function readSet(w){return {prov:document.getElementById('sp'+w+'Prov').value,key:document.getElementById('sp'+w+'Key').value,url:document.getElementById('sp'+w+'Url').value,model:document.getElementById('sp'+w+'Model').value};}
+function doSaveSet(){
+ cfg.text=readSet('t');cfg.vision=readSet('v');
+ const ct=PCFG[cfg.text.prov];if(ct&&cfg.text.prov!=='custom'){if(!cfg.text.url)cfg.text.url=ct.url;if(!cfg.text.model)cfg.text.model=ct.model}
+ const cv=PCFG[cfg.vision.prov];if(cv&&cfg.vision.prov!=='custom'){if(!cfg.vision.url)cfg.vision.url=cv.url;if(!cfg.vision.model)cfg.vision.model=cv.model}
+ cfg.sys=document.getElementById('spSys').value;cfg.kb=document.getElementById('spKB').checked;
+ cfg.strm=document.getElementById('spStream').checked;
+ cfg.figMode=document.getElementById('figMode')?.value||'desc';
+ localStorage.setItem('xa_cfg',JSON.stringify(cfg));updTag();doCloseSet();toast('✅ 设置已保存');doTest();
+}
+function provChg(w){const p=document.getElementById('sp'+w+'Prov').value,c=PCFG[p];if(c&&p!=='custom'){document.getElementById('sp'+w+'Url').value=c.url;document.getElementById('sp'+w+'Model').value=c.model}}
+function updTag(){/*...*/}
+function doOpenSet(){document.getElementById('setOv').classList.add('show')}
+function doCloseSet(){document.getElementById('setOv').classList.remove('show')}
+async function testOne(c){
+ if(!c||!c.key)return {ok:null};
+ try{
+  const r=await fetch(c.url,{method:'POST',headers:hds(c),body:JSON.stringify({model:c.model,messages:[{role:'user',content:'你好'}],max_tokens:8,stream:false})});
+  if(r.ok)return {ok:true};
+  const e=await r.json().catch(()=>({}));return {ok:false,msg:e.error?.message||r.status};
+ }catch(e){return {ok:false,msg:e.message}}
+}
+async function doTest(){
+ const t=await testOne(cfg.text);const v=await testOne(cfg.vision);
+ const ts=t.ok===true?'文字✅':(t.ok===false?'文字❌':'文字未配置');
+ const vs=v.ok===true?'视觉✅':(v.ok===false?'视觉❌':'视觉未配置');
+ setSt(t.ok===false||v.ok===false?'err':'ok',ts+' '+vs);
+ const bad=[];if(t.ok===false)bad.push(t.msg||'文字连接失败');if(v.ok===false)bad.push(v.msg||'视觉连接失败');
+ toast(bad.length?('❌ '+bad.join(' | ')):('✅ '+ts+' '+vs));
+}
+function setSt(s,t){document.getElementById('stDot').className='dot'+(s==='ok'?' ok':s==='err'?' err':'');document.getElementById('stTxt').textContent=t}
+// ========= TABS =========
+function swTab(id){document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));document.getElementById('p'+id.charAt(0).toUpperCase()+id.slice(1)).classList.add('on');document.querySelector('[data-t="'+id+'"]').classList.add('on');if(id==='stat')renderStat();if(id==='wq')renderWQ()}
+
+// ========= CHAT CORE =========
+function onKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();doSend()}}
+function autoR(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
+
+// ✅ v3 智能版 doSend() - 支持文字题 OCR + 图推题智能检测
+// ===== 视觉识别专用提示词 ===== 
+const TUTU_VISION_PROMPT='【图形推理题·视觉模式】请直接观察图片中的图形，按6眼法判断考点：第1眼元素相同→位置；第2眼很像/重复线条→样式；第3眼小标记→标记；第4眼规则对称→属性(对称→曲直→开闭)；第5眼又乱又不像→数量(面/线/点/素/笔画/角)；第6眼多独立图→图形间位置。再细化规律并用全部图形验证，给出答案；若图片不清晰，请明确指出缺哪些信息。';
+const MATH_VISION_PROMPT='【资料分析/数量关系题·视觉模式】请极其仔细地辨认图片中的每一个数字、小数点、百分号、分数、根号、单位和选项字母，先把材料数据、问题与全部选项完整复述出来；识别不清的数字/符号请明确标注“不确定”。然后按公式与速算求解，给出答案并反向验证（如基期×(1+r)≈现期）。';
+const TEXT_VISION_PROMPT='【文字题·视觉模式】请先完整、准确地复述图片中的题目（题干、数据、选项），再按对应模块方法论（判断推理=薛睿五步法/形式逻辑口诀；言语=三师四步；资料/数量=公式速算）逐步分析，给出答案并说明理由；识别不清处请标注“不确定”。';
+
+// 图片类型自动识别：图推(文字<30) / 资料·数量(数字符号密集) / 文字题
+async function safeOcr(imgData,ms){
+ const to=ms||12000;
+ try{
+  const res=await Promise.race([
+   Tesseract.recognize(imgData,'chi_sim+eng',{logger:m=>{}}),
+   new Promise((_,rej)=>setTimeout(()=>rej(new Error('ocr_timeout')),to))
+  ]);
+  return (res.data.text||'').trim();
+ }catch(e){ return ''; }
+}
+function classifyImage(ocrText){
+ const t=(ocrText||'').replace(/[\s\r\n]/g,'');
+ if(t.length<30)return 'tutu';
+ const tutuWords=/图形|图推|问号|六个图形|分类正确|规律|最符合|展开图|折叠|立体|截面|黑白|对称图形|分为.{0,2}类|两组/.test(t);
+ if(tutuWords)return 'tutu';
+ const logicWords=/削弱|加强|最能|前提|假设|论证|由.{0,4}推/.test(t);
+ const yanyuWords=/意在|主旨|这段文字|填入|排序|标题|中心理解|强调|作者认为/.test(t);
+ if(logicWords||yanyuWords)return 'text';
+ const numCount=(t.match(/\d/g)||[]).length;
+ const mathHit=/[%％×÷√]|同比|环比|增长|比重|平均|倍数|多少|万元|亿元|万吨|公里|元\/|个百分点/.test(t);
+ if(numCount>=4&&mathHit)return 'math';
+ if(mathHit&&numCount>=2)return 'math';
+ return 'text';
+}
+
+async function doSend(){
+ const ta=document.getElementById('ta'),txt=ta.value.trim();
+ if(!txt&&imgs.length===0)return;
+ if(streaming){abort();return}
+ const hasImg=imgs.length>0;
+ const visionReady=!!(cfg.vision&&cfg.vision.key)&&supportsVision(cfg.vision);
+ const ac=(hasImg&&visionReady)?cfg.vision:(cfg.text&&cfg.text.key?cfg.text:(hasImg?cfg.vision:cfg.text));
+ if(!ac||!ac.key){doOpenSet();toast('请先在设置配置 '+(hasImg?'视觉':'文字')+' 模型的 API Key');return}
+
+ let content=txt;
+ let visionImages=[];
+ const sentImgs=imgs.map(i=>i.data);
+ const visionOK=visionReady;
+
+ if(imgs.length>0){
+  toast('🔍 正在分析图片...');
+  if(!visionOK)toast('⚠️ 当前模型不支持看图，仅用OCR提取文字；建议到设置切换视觉模型（推荐：智谱GLM-4V / 通义Qwen-VL / GPT-4o）');
+  for(const img of imgs){
+   let ocrText='';
+   ocrText=await safeOcr(img.data,visionOK?5000:12000);
+   const type=classifyImage(ocrText);
+   if(visionOK){
+    visionImages.push(img.data);
+    content+=(content?'\n\n':'')+'【图片类型：'+({tutu:'图形推理',math:'资料分析/数量关系',text:'文字题'}[type]||'未知')+'】'+(ocrText?'\nOCR辅助文本：\n'+ocrText:'');
+    const VCOMMON='【图片内容自检】先确认图片实际类型：以图形为主→按图形推理6眼法；含数字/表格/公式→按资料分析或数量关系；纯文字→按言语或逻辑。以图片实际内容为准，不要被提示误导。\n\n';
+    if(type==='tutu')content+='\n\n'+VCOMMON+TUTU_VISION_PROMPT;
+    else if(type==='math')content+='\n\n'+VCOMMON+MATH_VISION_PROMPT;
+    else content+='\n\n'+VCOMMON+TEXT_VISION_PROMPT;
+    toast('👁️ 已启用视觉识别（图片将直接发送给模型）');
+   }else{
+    if(type==='tutu'){
+     content+=(content?'\n\n':'')+'【🔷 图形推理题（图片·未启用视觉）】'+(ocrText?'\n'+ocrText:'')+'\n\n'+FIGURE_PROMPT;
+     toast('🔷 检测到图推题（建议切换视觉模型才能真正看图）');
+    }else if(type==='math'){
+     content+=(content?'\n\n':'')+'【📈 资料分析/数量关系（图片 OCR）】\n'+(ocrText||'(OCR未识别到文字，请核对数字)')+'\n\n⚠️ OCR对数字/符号可能不准确，请核对；或切换到视觉模型让AI直接读图';
+    }else{
+     content+=(content?'\n\n':'')+'【图片 OCR 识别结果】\n'+(ocrText||'(OCR未能识别到文字)');
+    }
+   }
+  }
+  clrImgs();
+ }
+
+ addMsgWithImg('me',content,sentImgs);
+ ta.value='';ta.style.height='auto';hideWel();
+
+ const messageContent=visionImages.length
+  ? [{type:'text',text:String(content)},...visionImages.map(url=>({type:'image_url',image_url:{url,detail:'high'}}))]
+  : String(content);
+ msgs.push({role:'user',content:messageContent});
+ showTyp();
+
+ try{
+  streaming=true;updBtn();
+  abCtrl=new AbortController();
+  const am=buildMsgs();
+  if(cfg.strm) await streamIt(am,abCtrl.signal,ac);
+  else await sendIt(am,ac);
+  updStat();
+ }catch(e){
+  if(e.name==='AbortError')addMsg('ai','*已停止*');
+  else addMsg('ai','❌ 请求失败：'+e.message);
+ }finally{
+  streaming=false;hideTyp();updBtn();
+  msgs.forEach(m=>{if(Array.isArray(m.content))m.content=textFromContent(m.content)});
+  saveMsgs();
+ }
+}
+function supportsVision(c){
+ c=c||cfg;
+ const m=(c.model||'').toLowerCase();
+ const p=c.prov||'';
+ if(p==='openai'||p==='anthropic'||p==='custom')return true;
+ if(p==='zhipu')return m.includes('v')||m.includes('vision');
+ if(p==='qwen')return m.includes('vl')||m.includes('vision');
+ return false;
+}
+function textFromContent(parts){return parts.filter(p=>p.type==='text').map(p=>p.text).join('\n')||'[图片]'}
+
+// 视觉模式保留 image_url；其他接口只发送安全的文本内容。
+function buildMsgs(){
+ const m=[];
+ let sp=(cfg.sys||'').trim();
+ if(!sp&&cfg.kb!==false)sp=SYS+(MODE_NOTE[curMode]||'');
+ if(sp)m.push({role:'system',content:sp});
+
+ for(const x of msgs.slice(-20)){
+  if(typeof x.content==='string'){
+   m.push(x);
+  }else if(Array.isArray(x.content)){
+   m.push(supportsVision(cfg.vision)?x:{role:x.role,content:textFromContent(x.content)});
+  }else if(typeof x.content==='object'){
+   m.push({role:x.role,content:JSON.stringify(x.content)});
+  }else{
+   m.push({role:x.role,content:String(x.content||'')});
+  }
+ }
+ return m;
+}
+
+async function streamIt(am,sig,c){
+ const resp=await fetch((c||cfg).url,{method:'POST',headers:hds(c),body:JSON.stringify({model:(c||cfg).model,messages:am,max_tokens:4096,stream:true,temperature:.7}),signal:sig});
+ if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error?.message||'HTTP '+resp.status)}
+ hideTyp();
+ const el=addMsg('ai','');
+ let full='',think='',thinkShown=false,lastT=0;
+ const reader=resp.body.getReader(),dec=new TextDecoder('utf-8');
+ let buf='';
+ while(true){
+  const{done,value}=await reader.read();if(done)break;
+  buf+=dec.decode(value,{stream:true});
+  const lines=buf.split('\n');buf=lines.pop();
+  for(const line of lines){
+   if(!line.startsWith('data: '))continue;
+   const d=line.slice(6).trim();if(d==='[DONE]')continue;
+   try{
+    const p=JSON.parse(d);
+    const delta=p.choices?.[0]?.delta;
+    const c=delta?.content||'';
+    const rc=delta?.reasoning_content||'';
+    if(c){
+     full+=c;
+     el.innerHTML=(thinkShown?'<div class="think-box"><div class="tb-head" onclick="this.parentNode.classList.toggle(\'open\')">💭 思考过程（点击展开/收起）</div><div class="tb-body">'+esc(think)+'</div></div>':'')+rMd(full);
+     scrollBot();
+    }
+    else if(rc){
+     think+=rc;thinkShown=true;
+     const now=Date.now();
+     if(now-lastT>150){
+      lastT=now;
+      el.innerHTML='<div class="think-box open"><div class="tb-head" onclick="this.parentNode.classList.toggle(\'open\')">💭 正在思考…（实时推理过程）</div><div class="tb-body">'+esc(think)+'</div></div>';
+      scrollBot();
+     }
+    }
+   }catch(e){}
+  }
+ }
+ buf+=dec.decode();
+ if(buf.trim().startsWith('data: ')){
+  const d=buf.trim().slice(6).trim();
+  if(d&&d!=='[DONE]'){try{const p=JSON.parse(d);const c=p.choices?.[0]?.delta?.content||p.choices?.[0]?.message?.content||'';if(c){full+=c;el.innerHTML=(thinkShown?'<div class="think-box"><div class="tb-head" onclick="this.parentNode.classList.toggle(\'open\')">💭 思考过程（点击展开/收起）</div><div class="tb-body">'+esc(think)+'</div></div>':'')+rMd(full);scrollBot();}}catch(e){}}
+ }
+ if(!full&&think){el.innerHTML=rMd('（模型仅返回思考过程，未生成最终答案）\n\n'+think);full=think;}
+ else if(!full)el.innerHTML='（无回复）';
+ msgs.push({role:'assistant',content:full});
+}
+
+async function sendIt(am,c){
+ const resp=await fetch((c||cfg).url,{method:'POST',headers:hds(c),body:JSON.stringify({model:(c||cfg).model,messages:am,max_tokens:4096,stream:false,temperature:.7})});
+ if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error?.message||'HTTP '+resp.status)}
+ const data=await resp.json();
+ const m=data.choices?.[0]?.message||{};
+ const cval=m.content||'';
+ const rc=m.reasoning_content||'';
+ let out=cval||'无回复';
+ if(rc&&c)out='> 💭 思考过程\n\n'+rc+'\n\n---\n\n'+c;
+ else if(rc&&!c)out='（模型仅返回思考过程，未生成最终答案）\n\n'+rc;
+ hideTyp();addMsg('ai',out);
+ msgs.push({role:'assistant',content:out});
+}
+
+function abort(){if(abCtrl)abCtrl.abort()}
+function hds(c){
+ c=c||cfg;
+ const h={'Content-Type':'application/json'};
+ const p=c.prov;
+ if(p==='anthropic'){h['x-api-key']=c.key;h['anthropic-version']='2023-06-01'}
+ else h['Authorization']='Bearer '+c.key;
+ return h;
+}
+
+function addMsgWithImg(role,text,imgsData){
+ const c=document.getElementById('msgs'),d=document.createElement('div');
+ d.className='msg '+(role==='me'?'me':'ai');
+ let html='';
+ if(imgsData&&imgsData.length){
+  html+='<div class="msg-imgs">'+imgsData.map(u=>'<img class="msg-img" src="'+u+'" onclick="viewImg(\''+u+'\')">').join('')+'</div>';
+ }
+ html+=esc(text);
+ d.innerHTML=html;
+ c.appendChild(d);scrollBot();
+ return d;
+}
+function addMsg(role,content){
+ const c=document.getElementById('msgs'),d=document.createElement('div');
+ d.className='msg '+(role==='me'?'me':'ai');
+ d.innerHTML=role==='ai'&&content?rMd(content):esc(content);
+ c.appendChild(d);scrollBot();
+ return d;
+}
+function rMd(t){if(typeof marked!=='undefined')return marked.parse(t);return t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\*(.*?)\*/g,'<em>$1</em>').replace(/`(.*?)`/g,'<code>$1</code>').replace(/\n/g,'<br>')}
+function showTyp(){const c=document.getElementById('msgs'),d=document.createElement('div');d.className='msg ai';d.id='typ';d.innerHTML='<div class="typing"><span></span><span></span><span></span></div>';c.appendChild(d);scrollBot()}
+function hideTyp(){const e=document.getElementById('typ');if(e)e.remove()}
+function hideWel(){const e=document.getElementById('welcome');if(e)e.style.display='none'}
+function scrollBot(){requestAnimationFrame(()=>{document.querySelector('.chat-wrap').scrollTop=99999})}
+function updBtn(){const b=document.getElementById('sendBtn');b.textContent=streaming?'■':'➤';b.style.background=streaming?'var(--red)':''}
+function qSend(t){document.getElementById('ta').value=t;doSend()}
+
+// ========= IMAGES & OCR =========
+function togCam(){document.getElementById('camPop').classList.toggle('show')}
+function pickImg(){togCam();document.getElementById('ff').click()}
+function openCam(){togCam();document.getElementById('fc').click()}
+function addImageFiles(files){
+ for(const f of files){
+  if(!f.type.startsWith('image/'))continue;
+  const r=new FileReader();
+  r.onload=async e=>{
+   imgs.push({data:e.target.result,name:f.name});
+   renderStrip();
+   if(supportsVision(cfg.vision))toast('👁️ 图片已添加，发送时将直接交给视觉模型识别');
+   else toast('⚠️ 当前模型不支持看图（只会发OCR文字），建议到设置切换 智谱GLM-5V-Turbo');
+   if(window.Tesseract)await doOCR(e.target.result);
+  };
+  r.readAsDataURL(f);
+ }
+}
+async function onFiles(files){addImageFiles(files)}
+
+// 从图片链接添加（绕过文件选择限制，任意浏览器可用）
+async function addImageUrl(u){
+ try{
+  const r=await fetch(u);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const b=await r.blob();
+  if(!b.type.startsWith('image/')){toast('⚠️ 该链接不是图片');return}
+  const rd=new FileReader();
+  rd.onload=e=>{imgs.push({data:e.target.result,name:'url.png'});renderStrip();toast('👁️ 图片已从链接添加');};
+  rd.readAsDataURL(b);
+ }catch(e){toast('❌ 加载图片失败：'+e.message)}
+}
+function toggleUrlRow(){const r=document.getElementById('urlRow');if(!r)return;const show=r.style.display==='none';r.style.display=show?'block':'none';if(show){const i=document.getElementById('imgUrlInp');if(i){i.focus();try{i.select()}catch(e){}}}}
+function addImgUrl(){const i=document.getElementById('imgUrlInp');const u=(i&&i.value||'').trim();if(u)addImageUrl(u);else toast('请先粘贴图片链接')}
+function renderStrip(){const s=document.getElementById('imgStrip');s.innerHTML='';s.style.display=imgs.length>0?'flex':'none';imgs.forEach((im,i)=>{const d=document.createElement('div');d.className='img-thumb';d.innerHTML=`<img src="${im.data}" onclick="viewImg('${im.data}')"><button class="x" onclick="rmImg(event,${i})">×</button>`;s.appendChild(d)})}
+function rmImg(ev,i){ev.stopPropagation();imgs.splice(i,1);renderStrip()}
+function clrImgs(){imgs=[];renderStrip()}
+function viewImg(src){document.getElementById('viImg').src=src;document.getElementById('viewer').classList.add('show')}
+async function doOCR(url){
+ let ob=document.getElementById('ocrBox'),of=document.getElementById('ocrFill'),ol=document.getElementById('ocrLbl');
+ if(!ob){ob=document.createElement('div');ob.id='ocrBox';ob.className='ocr-box';ob.innerHTML='<div class="ocr-track"><div class="ocr-fill" id="ocrFill" style="height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));width:0%;transition:.22s"></div></div><div class="ocr-lbl" id="ocrLbl">OCR 识别中...</div>';document.getElementById('inputBar').insertBefore(ob,document.querySelector('.ib-row'))}
+ ob=document.getElementById('ocrBox');of=document.getElementById('ocrFill');ol=document.getElementById('ocrLbl');
+ ob.style.display='block';ol.textContent='正在识别文字...';of.style.width='0%';
+ try{
+  const res=await Promise.race([
+   Tesseract.recognize(url,'chi_sim+eng',{logger:m=>{if(m.status==='recognizing text'){of.style.width=Math.round(m.progress*100)+'%';ol.textContent='识别中 '+Math.round(m.progress*100)+'%'}}}),
+   new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))
+  ]);
+  const t=res.data.text.trim();
+  const charCount=(t.replace(/[\s\r\n]/g,'')).length;
+  if(t){
+   if(charCount<30){ol.textContent='🔷 检测到图推题（文字较少），将使用智能分析模式'}
+   else{document.getElementById('ta').value+=(document.getElementById('ta').value?'\n':'')+t;ol.textContent='✅ 识别完成！'}
+  }
+  else ol.textContent='未识别到文字（可能是纯图形题）';
+  setTimeout(()=>ob.style.display='none',3000);
+ }catch(e){ol.textContent='识别超时/失败，可直接发送让AI看图';setTimeout(()=>ob.style.display='none',2500)}
+}
+
+// 拖拽上传图片（比文件选择器更稳）
+document.addEventListener('dragover',e=>{e.preventDefault()});
+document.addEventListener('drop',async e=>{e.preventDefault();const fs=e.dataTransfer&&e.dataTransfer.files;if(fs&&fs.length)addImageFiles(fs)});
+document.addEventListener('paste', async e=>{const items=e.clipboardData?.items;if(!items)return;for(const item of items){if(item.type.startsWith('image')){e.preventDefault();const f=item.getAsFile();if(!f)continue;const r=new FileReader();r.onload=async ev=>{imgs.push({data:ev.target.result,name:'paste.png'});renderStrip();if(window.Tesseract)await doOCR(ev.target.result)};r.readAsDataURL(f);break}}});
+document.addEventListener('click',e=>{const cp=document.getElementById('camPop');if(!cp.contains(e.target)&&!e.target.closest('#camBtn'))cp.classList.remove('show')});
+
+// ========= WRONG QUESTIONS =========
+function addWQ(s,q,r){wqs.unshift({id:Date.now(),subject:s,question:q,reasons:r||[],time:new Date().toLocaleString()});if(wqs.length>200)wqs=wqs.slice(0,200);saveWQ();updWQB()}
+function updWQB(){const tb=document.getElementById('wqTab');let b=tb.querySelector('.badge');if(!b){b=document.createElement('span');b.className='badge';b.style.cssText='position:absolute;top:-2px;right:-2px;background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:8px;padding:0 4px;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center';tb.style.position='relative';tb.appendChild(b)}b.textContent=wqs.length>99?'99+':wqs.length;b.style.display=wqs.length>0?'':'none'}
+function renderWQ(){const l=document.getElementById('wqlist');if(!wqs.length){l.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3);font-size:44px;margin-bottom:8px;">📋</div><div style="text-align:center;color:var(--text3);font-size:13px;">暂无错题记录<br><span style="font-size:11px;">在对话中说"记录错题"即可添加</span></div>';return}l.innerHTML=wqs.map(q=>`<div class="wi"><div class="ws">${esc(q.subject)}</div><div class="wq">${esc(q.question)}</div><div class="wr">${q.reasons.map(r=>'<span>'+r+'</span>').join('')}</div><div class="wt">${q.time}</div></div>`).join('')}
+function expWQ(){if(!wqs.length)return toast('暂无错题');dl(JSON.stringify(wqs,null,2),'行测错题_'+fmtD()+'.json','application/json');toast(`已导出 ${wqs.length} 道`)}
+function clrWQ(){if(!wqs.length)return;if(confirm('确定清空？')){wqs=[];saveWQ();updWQB();renderWQ();toast('已清空')}}
+
+// ========= STATS =========
+function updStat(){document.getElementById('sTot').textContent=msgs.filter(m=>m.role==='user').length;document.getElementById('sQ').textContent=msgs.filter(m=>m.content&&(m.content.includes('分析')||m.content.includes('复盘')||m.content.includes('讲解'))).length;document.getElementById('sR').textContent=msgs.filter(m=>m.content&&m.content.includes('复盘')).length;document.getElementById('sW').textContent=wqs.length}
+function renderStat(){updStat();const l=document.getElementById('hist'),ums=msgs.filter(m=>m.role==='user');if(!ums.length){l.innerHTML='<div style="color:var(--text3);padding:20px;text-align:center;">暂无对话记录</div>';return}l.innerHTML=ums.slice(-10).reverse().map((m,i)=>{const p=typeof m.content==='string'?m.content.substring(0,55):'[图片]';return`<div style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;" onclick="qSend(\`${escA(p)}\`)"><div style="color:var(--accent);font-size:11px;">#${ums.length-i}</div>${esc(p)}${p.length>=55?'...':''}</div>`}).join('')}
+
+// ========= PERSISTENCE (含自动清理旧格式) ==========
+function saveMsgs(){try{localStorage.setItem('xa_msgs',JSON.stringify(msgs.slice(-100)))}catch(e){}}
+
+// ✅ 修复版 loadMsgs() - 自动清理 localStorage 中的旧格式消息
+function loadMsgs(){
+ try{
+  const d=localStorage.getItem('xa_msgs');
+  if(d){
+   const arr=JSON.parse(d);
+   let cleaned=false;
+   msgs=arr.filter(m=>{
+    if(!m||!m.role)return false;
+    if(typeof m.content!=='string'){
+     cleaned=true;
+     if(Array.isArray(m.content)){
+      const txt=m.content.filter(p=>p.type==='text').map(p=>p.text).join('\n');
+      if(txt){m.content=txt;return true}
+     }
+     return false;
+    }
+    return true;
+   });
+   if(cleaned){saveMsgs();console.log('🧹 已清理旧格式消息:',arr.length,'->',msgs.length)}
+  }
+ }catch(e){}
+}
+
+function saveWQ(){try{localStorage.setItem('xa_wq',JSON.stringify(wqs))}catch(e){}}
+function loadWQ(){try{const d=localStorage.getItem('xa_wq');if(d)wqs=JSON.parse(d)}catch(e){}updWQB()}
+
+// ========= UTILS ==========
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function escA(s){return String(s).replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
+function fmtD(){const d=new Date();return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())}
+function pad(n){return n<10?'0'+n:''+n}
+function dl(c,n,t){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([c],{type:t}));a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
+function doTheme(){const c=document.documentElement.getAttribute('data-theme'),n=c==='light'?'dark':'light';document.documentElement.setAttribute('data-theme',n);localStorage.setItem('xa_theme',n);event.currentTarget.textContent=n==='light'?'🌙':'☀️'}
+</script>
+</body>
+</html>
