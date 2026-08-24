@@ -2,6 +2,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Tabl
 import { store } from '../store'
 import { aiPolish } from '../api'
 import { collectChat } from './chat'
+import { renderMd } from './renderMd'
 
 export function stripMd(t){ return String(t||'').replace(/\*\*/g,'').replace(/\*([^*]+)\*/g,'$1').replace(/`([^`]*)`/g,'$1').replace(/^#{1,6}\s*/gm,'').replace(/^>\s*/gm,'').replace(/^[-*+]\s+/gm,'· ').replace(/^\s*[-|\s]+\s*$/gm,'').replace(/\|/g,' ｜ ').replace(/^\s*##+/gm,'') }
 export function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
@@ -15,7 +16,7 @@ function pdfHtml(title, items){
  let h='<html><head><meta charset="utf-8"><title>'+escHtml(title)+'</title><style>'+CSS+'</style></head><body>'
  h+='<h1>'+escHtml(title)+'</h1><div class="meta">导出时间：'+escHtml(new Date().toLocaleString())+'</div>'
  for(const it of items){
-  if(it.type==='msg'){ h+='<div class="msg '+(it.role==='user'?'u':'a')+'"><div class="role">'+(it.role==='user'?'🙋 我':'🤖 AI')+'</div><div>'+escHtml(it.text).replace(/\n/g,'<br>')+'</div>'; for(const s of it.imgs||[])h+='<div><img src="'+s+'"></div>'; h+='</div>' }
+  if(it.type==='msg'){ h+='<div class="msg '+(it.role==='user'?'u':'a')+'"><div class="role">'+(it.role==='user'?'🙋 我':'🤖 AI')+'</div><div class="md">'+renderMd(it.text)+'</div>'; for(const s of it.imgs||[])h+='<div class="im"><img src="'+s+'"></div>'; h+='</div>' }
   else if(it.type==='table'){ h+='<table>'; if(it.head)h+='<tr>'+it.head.map(c=>'<th>'+escHtml(c)+'</th>').join('')+'</tr>'; for(const r of it.rows)h+='<tr>'+r.map(c=>'<td>'+escHtml(c)+'</td>').join('')+'</tr>'; h+='</table>' }
   else if(it.type==='h') h+='<h2>'+escHtml(it.text)+'</h2>'
  }
@@ -28,7 +29,7 @@ export function getPayload(type){
  if(type==='wrong'){ if(!store.wqs.length)return null; const head=['#','板块','题目','答案','错因','时间']; const rows=store.wqs.map((q,i)=>[String(i+1),q.subject||'',(q.question||'').slice(0,120),q.answer||'',(q.reasons||[]).join('、'),q.time||'']); return { title:'行测 · 错题集', items:[{type:'table',head,rows}], plain:store.wqs.map((q,i)=>(i+1)+'. 【'+(q.subject||'')+'】'+(q.question||'')+' 答案:'+(q.answer||'')+' 错因:'+((q.reasons||[]).join('、'))).join('\n') } }
  const c=collectChat(); if(!c.length)return null
  if(type==='review'){ const last=c[c.length-1],prev=c[c.length-2]||last; return { title:'行测 · 单题复盘', items:[{type:'h',text:'题目（用户提问）'},{type:'msg',role:'user',text:prev.role==='user'?prev.text:last.text,imgs:prev.role==='user'?prev.imgs:[]},{type:'h',text:'AI 复盘解析'},{type:'msg',role:'ai',text:last.role==='ai'?last.text:'',imgs:last.role==='ai'?last.imgs:[]}], plain:'【题目】'+((prev.role==='user'?prev.text:last.text))+((prev.imgs&&prev.imgs.length)?'\n[含图片]':'')+'\n\n【AI解析】'+(last.role==='ai'?last.text:'') } }
- const cItems=[],cParts=[]; c.forEach(it=>{ cItems.push({type:'msg',role:it.role,text:stripMd(it.text),imgs:it.imgs}); cParts.push(((it.role==='user'?'【我】':'【AI】')+it.text)) })
+ const cItems=[],cParts=[]; c.forEach(it=>{ cItems.push({type:'msg',role:it.role,text:it.text,imgs:it.imgs}); cParts.push(((it.role==='user'?'【我】':'【AI】')+it.text)) })
  return { title:'行测 AI 问答 · 对话记录', items:cItems, plain:cParts.join('\n\n') }
 }
 export async function doExport(type, format, polish){
@@ -52,3 +53,51 @@ async function buildDocx({title,paragraphs,tables}){
  return await Packer.toBlob(new Document({sections:[{children:kids}]}))
 }
 export function exportWrongTxt(){ if(!store.wqs.length){ alert('暂无错题'); return } const txt='行测错题集\n'+store.wqs.map((q,i)=>(i+1)+'.【'+(q.subject||'')+'】\n题目：'+(q.question||'')+'\n答案：'+(q.answer||'')+'\n错因：'+((q.reasons||[]).join('、'))+'\n时间：'+(q.time||'')+'\n').join('\n'); downloadText(txt,'行测错题集.txt') }
+
+// ===== Markdown 导出（新增）=====
+function mdCell(v){ return String(v==null?'':v).replace(/\|/g,'\\|').replace(/\n/g,' ') }
+function itemsToMd(title, items){
+ const L=[]; L.push('# '+title); L.push(''); L.push('> 导出时间：'+new Date().toLocaleString()); L.push('')
+ for(const it of items){
+  if(it.type==='h'){ L.push(''); L.push('## '+it.text); L.push('') }
+  else if(it.type==='table'){
+    const head=it.head||[]; const rows=it.rows||[]
+    if(!head.length){ continue }
+    L.push('| '+head.map(mdCell).join(' | ')+' |'); L.push('| '+head.map(()=>'---').join(' | ')+' |')
+    for(const r of rows){ L.push('| '+r.map(mdCell).join(' | ')+' |') }
+    L.push('')
+  }
+  else if(it.type==='msg'){
+    L.push('**'+(it.role==='user'?'🙋 我':'🤖 AI')+'**'); L.push('')
+    String(it.text||'').split('\n').forEach(ln=>L.push(ln)); L.push('')
+    for(const s of it.imgs||[]) L.push('![图片]('+s+')')
+  }
+ }
+ return L.join('\n')
+}
+// 按 payload 导出 markdown（错题/对话/复盘通用）
+export function exportDataMd(type){
+ const pay=getPayload(type); if(!pay){ alert('暂无可导出的内容'); return }
+ const md=itemsToMd(pay.title, pay.items)
+ downloadText(md, pay.title+'.md', 'text/markdown;charset=utf-8')
+}
+// 直接导出错题集 markdown（含复盘字段，比通用表更友好）
+export function exportWrongMd(){
+ if(!store.wqs.length){ alert('暂无错题'); return }
+ const L=[]; L.push('# 行测·错题集'); L.push(); L.push('> 导出时间：'+new Date().toLocaleString()); L.push()
+ store.wqs.forEach((q,i)=>{
+  L.push((i+1)+'. **【'+(q.subject||'未分类')+'】** '+(q.reviewed?'✅已复盘':'⏳待复盘')); L.push('')
+  L.push('   题目：'+(q.question||'')); L.push('')
+  if(q.answer)L.push('   - ✅ 正确答案：'+q.answer)
+  if(q.reasons&&q.reasons.length)L.push('   - 🔍 错因：'+q.reasons.join('、'))
+  if(q.method)L.push('   - ⚡ 秒杀规律：'+q.method)
+  if(q.note)L.push('   - 📝 笔记：'+String(q.note).replace(/\n/g,'\n     '))
+  L.push('   - 🕒 '+q.time)
+  L.push('')
+ })
+ downloadText(L.join('\n'), '行测错题集.md', 'text/markdown;charset=utf-8')
+}
+export function exportDataAuto(type, format){
+ if(format==='md'){ exportDataMd(type); return }
+ doExport(type, format, false)
+}
