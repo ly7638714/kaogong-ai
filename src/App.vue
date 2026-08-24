@@ -72,8 +72,8 @@ function resetAll(){ if(!confirm('确认清空所有本地数据（设置/错题
 // 提供商预设：切换提供商自动填 url/model（含 DeepSeek 视觉模型，OpenAI 兼容格式）
 function fillProv(kind){
   const ps={
-    ds:{url:'https://api.deepseek.com/chat/completions', model:'deepseek-chat'},
-    zhipu:{url:'https://open.bigmodel.cn/api/paas/v4/chat/completions', model:'glm-4.6v'},
+    ds:{url:'https://api.deepseek.com/chat/completions', model:'deepseek-v4-flash'},
+    zhipu:{url:'https://open.bigmodel.cn/api/paas/v4/chat/completions', model:'glm-5v-turbo'},
     openai:{url:'https://api.openai.com/v1/chat/completions', model:'gpt-4o'},
     qwen:{url:'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model:'qwen-vl-max'},
     custom:{url:'', model:''}
@@ -117,10 +117,10 @@ function useDsVision(){ store.cfg.vision.prov='ds'; store.cfg.vision.url='https:
 <div class="fld"><label>API Key</label><input v-model="store.cfg.text.key" placeholder="sk-..." type="text"></div>
 <div class="fld"><label>API 地址</label><input v-model="store.cfg.text.url"></div>
 <div class="fld"><label>模型名称</label><input v-model="store.cfg.text.model"></div>
-<div class="sec-t">👁️ 视觉模型（图片/截图题 · 推荐智谱 GLM-4.6V）</div>
-<div class="vis-tip">📌 <b>截图/图片题必须配此模型才能看图</b>（图推图形、资料表格、数学公式）。启用步骤：①提供商选「智谱」②粘贴你的 Key ③点下方「保存并测试」。若未配置，发图时会提示改用文字描述。</div>
-<div class="fld"><label>提供商</label><select v-model="store.cfg.vision.prov" @change="fillProv('vision')"><option value="zhipu">智谱 GLM-4.6V (视觉·推荐)</option><option value="ds">DeepSeek (视觉·deepseek-v4-flash-vision-exp)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
-<div class="fld"><label>API Key</label><input v-model="store.cfg.vision.key" type="text" placeholder="粘贴智谱 Key"></div>
+<div class="sec-t">👁️ 视觉模型（图片/截图题 · 默认 DeepSeek 视觉，可选智谱 GLM-5V）</div>
+<div class="vis-tip">📌 <b>截图/图片题必须配此模型才能看图</b>（图推图形、资料表格、数学公式）。启用步骤：①提供商选「DeepSeek（推荐，用同一个 Key）」或「智谱」②粘贴你的 Key ③点下方「保存并测试」。若未配置，发图时会提示改用文字描述。</div>
+<div class="fld"><label>提供商</label><select v-model="store.cfg.vision.prov" @change="fillProv('vision')"><option value="ds">DeepSeek (视觉·deepseek-v4-flash-vision-exp·推荐)</option><option value="zhipu">智谱 GLM-5V (视觉·glm-5v-turbo)</option><option value="openai">OpenAI GPT-4o (视觉)</option><option value="qwen">通义 Qwen-VL (视觉)</option><option value="custom">自定义 API</option></select></div>
+<div class="fld"><label>API Key</label><input v-model="store.cfg.vision.key" type="text" placeholder="粘贴视觉模型的 Key（DeepSeek 用 DeepSeek Key）"></div>
 <div class="fld"><label>API 地址</label><input v-model="store.cfg.vision.url"></div>
 <div class="fld"><label>模型名称</label><input v-model="store.cfg.vision.model"></div>
 <div class="fld"><label>自定义 System Prompt（留空用内置知识库）</label><textarea v-model="store.cfg.sys" rows="3"></textarea></div>
@@ -154,7 +154,7 @@ function useDsVision(){ store.cfg.vision.prov='ds'; store.cfg.vision.url='https:
 <div class="fld"><label>起始月份（默认 2025-10 起）</label><input type="month" v-model="store.cfg.szFrom" @change="saveCfg()"></div>
 <div class="fld"><label>截止月份（留空 = 动态到今天）</label><input type="month" v-model="store.cfg.szTo" @change="saveCfg()"><div style="font-size:11px;color:var(--text3);margin-top:4px">悬浮窗时政只推送该时间范围内的国内/贵州事件。</div></div>
 <div class="sec-t">ℹ️ 模型说明</div>
-<div style="font-size:12px;color:var(--text3);line-height:1.7">文字题（纯文字）走「文字模型」，推荐 DeepSeek（便宜、中文好）；带图/公式题走「视觉模型」，推荐智谱 GLM-4.6V（能看图、识别公式符号）。截图提问需配置视觉模型。</div>
+<div style="font-size:12px;color:var(--text3);line-height:1.7">文字题（纯文字）走「文字模型」，默认 DeepSeek deepseek-v4-flash（便宜、中文好）；带图/公式题走「视觉模型」，默认 DeepSeek deepseek-v4-flash-vision-exp（能看图、识别公式符号），也可在设置里换智谱 GLM-5V。截图提问需配置并勾选视觉模型。</div>
 <div class="pnl-btns"><button class="btn btn-gh" @click="setShow=false">取消</button><button class="btn btn-pri" @click="saveSet()">保存并测试</button></div>
 </div></div>
 <!-- 导出弹窗 -->

@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 const D = () => ({
-  text:{ prov:'ds', key:'', url:'https://api.deepseek.com/chat/completions', model:'deepseek-chat' },
-  vision:{ prov:'zhipu', key:'', url:'https://open.bigmodel.cn/api/paas/v4/chat/completions', model:'glm-4.6v' },
+  text:{ prov:'ds', key:'', url:'https://api.deepseek.com/chat/completions', model:'deepseek-v4-flash' },
+  vision:{ prov:'ds', key:'', url:'https://api.deepseek.com/chat/completions', model:'deepseek-v4-flash-vision-exp' },
   sys:'', kb:true, strm:true, tts:true, ttsOn:true, ttsScene:'natural', ttsRate:0.98, ttsPitch:null, fontSize:14.5, examDate:'2026-11-29', szFrom:'2025-10', szTo:''
 })
 export const store = reactive({ cfg:D(), mode:'all', msgs:[], wqs:[], myMem:[], tab:'chat', busy:false })

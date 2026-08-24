@@ -18,16 +18,43 @@ async function pickImage(ev){ const files=ev.target.files||[]; for(const f of fi
 function addImageUrl(){ const u=linkUrl.value.trim(); if(!u){ alert('请粘贴图片链接'); return } fetch(u).then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.blob() }).then(b=>{ if(!b.type.startsWith('image/')){ alert('该链接不是图片'); return } const rd=new FileReader(); rd.onload=e=>{ imgs.value.push(e.target.result); linkShow.value=false; linkUrl.value='' }; rd.readAsDataURL(b) }).catch(e=>alert('加载图片失败：'+e.message)) }
 function rmImg(i){ imgs.value.splice(i,1) }
 async function send(){
- const txt=text.value.trim(); if(!txt&&!imgs.value.length)return;
- const hasImg=imgs.value.length>0; const c=activeCfg(hasImg); if(!c||!c.key){ alert('请先在设置配置 '+(hasImg?'视觉':'文字')+' 模型 API Key'); return }
- if(hasImg && !supportsVision(c)){ alert('当前「'+store.cfg.vision.model+'」不是视觉模型/未配置视觉Key：无法识别图片。\n请到 ⚙️设置→视觉模型 配置智谱 GLM-4.6V 等视觉接口；或在下方输框删掉图片、改用文字描述题目。'); return }
+ if(store.busy)return; store.busy=true;
+ const txt=text.value.trim(); if(!txt&&!imgs.value.length){ store.busy=false; return }
+ const hasImg=imgs.value.length>0; const c=activeCfg(hasImg); if(!c||!c.key){ store.busy=false; alert('请先在设置配置 '+(hasImg?'视觉':'文字')+' 模型 API Key'); return }
+ if(hasImg && !supportsVision(c)){ store.busy=false; alert('当前「'+store.cfg.vision.model+'」不是可识图模型/未配置视觉Key。\n请到 ⚙️设置→视觉模型 选 DeepSeek（deepseek-v4-flash-vision-exp）或智谱 GLM-5V 并填 Key；或删掉图片改用文字描述题目。'); return }
  const userMsg={role:'user', content:hasImg?{text:txt,imgs:imgs.value.slice()}:txt}; store.msgs.push(userMsg); saveMsgs(); text.value=''; const sentImgs=imgs.value.slice(); imgs.value=[]; scroll();
- const sys=buildSys(); const history=store.msgs.slice(-20).map(m=>{ if(typeof m.content==='string')return {role:m.role,content:m.content}; return {role:m.role,content:[{type:'text',text:m.content.text},...m.content.imgs.map(u=>({type:'image_url',image_url:{url:u}}))]} });
- live.value={text:'',think:'',thinkOpen:true}; scroll();
- try{ const full=await chatStream([{role:'system',content:sys},...history], c, (d)=>{ if(d.type==='think'){ live.value.think=d.think } else { live.value.text=d.text } scroll() });
+ // 综合模式(mode=all)默认只发通用 SYS(约7k字)，不带专项方法论，专业题回复易泛化。
+ // 此处按题目板块用 detectBanKuai 命中对应专项 KB 追加注入，让模型拿到该板块名师方法论，提升针对性。
+ let sys=buildSys()
+ if(store.mode==='all'&&store.cfg.kb!==false){ const bm=detectBanKuai(txt); if(bm){ sys=buildSys(PLATE_MODE[bm]||'') } }
+ // 质量优先：历史尽量完整保留（不激进省 token），保障「解决具体提问」不缺上文。
+ // 仅做兜底防爆：跳过空/失败消息、图片按视觉能力保留；回答过长才截断、历史总量过大才丢更早。
+ const visOk=supportsVision(c)
+ const _AICAP=4000  // 单条 assistant 回答最多发送字符（回复要点集中在开头，安全裁剪超长尾部）
+ const _HIS=20      // 最多 20 条
+ const _BUDGET=35000 // 历史总字符预算，超出才丢更早（默认对话量远达不到）
+ const history=[]; let cum=0
+ for(let i=store.msgs.length-1;i>=0&&history.length<_HIS;i--){
+   const m=store.msgs[i]; let item=null
+   try{
+     if(m.role==='assistant'){ const t=typeof m.content==='string'?m.content.trim():''; if(!t||/^[❌⚠️⏳🔄🎯✍️]+/.test(t))continue; item={role:m.role,content:t.slice(0,_AICAP)} }
+     else { if(typeof m.content==='string'){ if(!(m.content||'').trim())continue; item={role:m.role,content:m.content} }
+       else if(m.content&&(m.content.text||'').trim()){ const parts=[{type:'text',text:m.content.text}]
+         if(visOk&&Array.isArray(m.content.imgs)){ for(const u of m.content.imgs) if(u) parts.push({type:'image_url',image_url:{url:u}}) }
+         item={role:m.role,content:parts} } }
+   }catch(e){}
+   if(!item)continue
+   const clen=typeof item.content==='string'?item.content.length:600
+   if(cum+clen>_BUDGET&&history.length>0)break
+   cum+=clen; history.unshift(item)
+ }
+ live.value={text:'',think:'',thinkOpen:false}; scroll();
+ try{
+  const full=await chatStream([{role:'system',content:sys},...history], c, (d)=>{ if(d.type==='think'){ live.value.think=d.think } else { live.value.text=d.text } scroll() });
   live.value=null; addMsg({role:'assistant',content:full});
   if(store.cfg.ttsOn) autoSpeak(full);
  }catch(e){ live.value=null; addMsg({role:'assistant',content:'❌ 请求失败：'+e.message}); }
+ store.busy=false
 }
 function saveWrong(){ const c=collectChat(); if(c.length<2){ alert('请先完成一次问答'); return } const u=c[c.length-2]; const bk=detectBanKuai(u?u.text:'')||'判断推理'; const q=(u?u.text:'').slice(0,200)+(u&&u.imgs&&u.imgs.length?'\n[含图片]':''); store.wqs.unshift({id:Date.now(),subject:bk,question:q,reasons:[],time:new Date().toLocaleString()}); saveWqs(); alert('✅ 已存入错题本（板块：'+bk+'）') }
 function getLastUserText(){ const c=collectChat(); let x=null; for(let i=c.length-1;i>=0;i--){ if(c[i].role==='user'){ x=c[i].text; break } } return x||'' }
@@ -59,7 +86,7 @@ async function train(kind, opts={}){
   else return
   const userMsg={role:'user', content:userText}
   store.msgs.push(userMsg); saveMsgs(); scroll()
-  live.value={text:'',think:'',thinkOpen:true}; store.busy=true; scroll()
+  live.value={text:'',think:'',thinkOpen:false}; store.busy=true; scroll()
   try{
     const full=await chatStream([{role:'system',content:sys},{role:'user',content:userText}], c, (d)=>{ if(d.type==='think'){live.value.think=d.think}else{live.value.text=d.text}; scroll() })
     live.value=null; addMsg({role:'assistant',content:full})

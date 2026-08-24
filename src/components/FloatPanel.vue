@@ -79,7 +79,7 @@ async function askQuiz(kind){
     if(kind==='quiz'){
       const m=txt.match(/\{[\s\S]*\}/); if(!m){ throw new Error('AI返回格式异常') }
       const j=JSON.parse(m[0]); quiz.value={q:j.问题,opts:j.选项||[],ans:j.答案,考点:j.考点||'常识'}
-    } else seeExplain.value=txt
+    } else seeExplain.value=txt||'（模型未生成内容，请重试）'
   }catch(e){ alert('生成失败：'+e.message) }
   finally{ quizBusy.value=false }
 }
@@ -91,8 +91,7 @@ function choose(i){
   // 答错 → 存错题集
   if(!right){ const q='【常识出题自测】'+quiz.value.q+' | 知识点源：'+(cur.value||'').slice(0,60); store.wqs.unshift({id:Date.now(),subject:'常识判断',question:q,answer:String.fromCharCode(65+quiz.value.ans),reasons:[right?'':'知识点遗忘'],time:new Date().toLocaleString()}); saveWqs(); alert('❌ 已加入错题集（常识判断）') }
 }
-async function askFollow(){ if(!followQ.value.trim())return; seeExplain.value='（追问中…）'; const t='用户追问：'+followQ.value.trim()+' 请结合该知识点精炼作答（100-200字）。\n知识点：'+(cur.value||'').slice(0,150); try{ const c=activeCfg(false); seeExplain.value=await chatOnce(c,[{role:'system',content:'你是考公名师，简明精准作答。'},{role:'user',content:t}],600) }catch(e){ seeExplain.value='追问失败：'+e.message } }
-
+async function askFollow(){ if(!followQ.value.trim())return; seeExplain.value='（追问中…）'; const t='用户追问：'+followQ.value.trim()+' 请结合该知识点精炼作答（100-200字）。\n知识点：'+(cur.value||'').slice(0,150); try{ const c=activeCfg(false); seeExplain.value=(await chatOnce(c,[{role:'system',content:'你是考公名师，简明精准作答。'},{role:'user',content:t}],600))||'（模型未生成内容，请重试）' }catch(e){ seeExplain.value='追问失败：'+e.message } }
 // 拖动
 const drag=ref(null), panel=ref(null)
 function onDown(e){ const r=panel.value.getBoundingClientRect(); drag.value={dx:e.clientX-r.left, dy:e.clientY-r.top} }
