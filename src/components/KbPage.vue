@@ -1,32 +1,213 @@
 <script setup>
+import { ref, computed } from 'vue'
 import { store } from '../store'
-import { MODE_NAMES } from '../kb'
-const cards=[
- {icon:'🧠',name:'薛睿五步法',mode:'luoji',q:'请讲解薛睿论证推理五步40秒解题法'}, {icon:'⬅️',name:'由果推因',mode:'luoji',q:'讲解由果推因三种削弱方法及力度排序'}, {icon:'⚡',name:'选项13美丑',mode:'luoji',q:'讲解选项13美和13丑，各举一个真题例子'}, {icon:'📐',name:'形式逻辑口诀',mode:'luoji',q:'列出形式逻辑全部口诀（顺肯逆否/矛盾/文氏图）'},
- {icon:'🧭',name:'张弓三层分析法',mode:'zhanggong',q:'讲解张弓文段三层分析法（背景层/论点层/展开层）和中心理解七大关系'}, {icon:'📝',name:'逻辑填空三步法',mode:'zhanggong',q:'讲解张弓逻辑填空三步法和近70%靠语境锁答案的原理'}, {icon:'🕳️',name:'张弓陷阱六类',mode:'zhanggong',q:'讲解张弓命题陷阱六类（偷换概念/以偏概全/无中生有/因果倒置/时态/程度错位）'}, {icon:'🔢',name:'整除秒杀',mode:'shuliang',q:'讲解数量关系整除/奇偶/倍数联动和不定方程五大技法'}, {icon:'🎯',name:'行程工程',mode:'shuliang',q:'讲解行程问题(多次相遇/流水/牛吃草)和工程问题秒杀技法'}, {icon:'🎲',name:'排列概率',mode:'shuliang',q:'讲解排列组合概率(捆绑/插空/隔板/错位/环形/独立重复)口诀'}, {icon:'⚖️',name:'容斥最值',mode:'shuliang',q:'讲解容斥公式和鸽巢原理/和定最值/均值不等式最值'},
- {icon:'🔗',name:'类比三步定位',mode:'leibi',q:'讲解类比推理三步定位法（看词数→判关系→比强弱）和关系判定矩阵'}, {icon:'⚖️',name:'类比二级辨析',mode:'leibi',q:'讲解类比推理二级辨析五维度，举几个易混关系真题'}, {icon:'📋',name:'定义四步破题',mode:'dingyi',q:'讲解定义判断四步破题法和五要件（主客方目果）记忆法'}, {icon:'🕳️',name:'定义十大陷阱',mode:'dingyi',q:'讲解定义判断十大高频陷阱和命题人选项三母版'}, {icon:'📖',name:'三师片段阅读',mode:'yanyu',q:'讲片段阅读三师四步法（结构/逻辑/关键词/三比）'}, {icon:'✏️',name:'逻辑填空三步',mode:'yanyu',q:'讲逻辑填空三师三步法（语境还原/逻辑关联/词语辨析）'}, {icon:'🔷',name:'图推6眼法',mode:'tutu',q:'讲解刘义恒6眼破题法和特征信号表'}, {icon:'📈',name:'资料公式',mode:'ziliao',q:'列资料分析核心公式（基期/增长率/比重/平均数）'}, {icon:'💯',name:'速算百化分',mode:'ziliao',q:'讲解百化分速算和常见百分数对应'}, {icon:'🔢',name:'数量金字塔',mode:'shuliang',q:'讲数量关系四层金字塔和必拿分题型'},
- {icon:'🏛️',name:'政治·新思想',mode:'zhengzhi',q:'讲解习近平新时代中国特色社会主义思想总论和五大新发展理念口诀'}, {icon:'🛡️',name:'政治·马原',mode:'zhengzhi',q:'讲解马克思主义哲学基本问题、物质与意识、唯物辩证法考点和易混点'}, {icon:'📜',name:'政治·五位一体',mode:'zhengzhi',q:'讲解五位一体(经济政治文化社会生态)和四个全面核心考点'}, {icon:'🌍',name:'常识蒙题',mode:'changshi',q:'讲解常识判断蒙题技巧和绝对化词排除、积累框架'}, {icon:'🧠',name:'常识考点',mode:'changshi',q:'讲常识判断常见考点(时政/法律/科技/人文/地理/经济)答题要点'},
+import { readBooks } from '../kb'
+import ShelfScene from './ShelfScene.vue'
+
+const books = readBooks()
+const activeShelf = ref('all')
+// 视图：默认 2D 速查（快、省资源），3D 书柜为可切换的沉浸式展示
+const showShelf = ref(false)
+
+const shelvesList = [
+  { key: 'all', name: '📚 全部' },
+  { key: '判断推理', name: '🧠 判断推理' },
+  { key: '言语理解', name: '📖 言语理解' },
+  { key: '数量关系', name: '🔢 数量' },
+  { key: '资料分析', name: '📈 资料' },
+  { key: '政治理论', name: '🏛️ 政治' },
+  { key: '常识判断', name: '🌍 常识' },
+  { key: '类比推理', name: '🔗 类比' },
+  { key: '定义判断', name: '📋 定义' },
+  { key: '图形推理', name: '🔷 图推' }
 ]
-// 按板块分组
-const groups=[
- {title:'🧠 判断推理',emoji:'🧠',modes:['luoji','leibi','dingyi','tutu']},
- {title:'📖 言语理解',emoji:'📖',modes:['zhanggong','yanyu']},
- {title:'📈 资料分析 / 数量',emoji:'📈',modes:['ziliao','shuliang']},
- {title:'🏛️ 政治 / 常识',emoji:'🏛️',modes:['zhengzhi','changshi']},
-]
-const byGroup=(modes)=>cards.filter(c=>modes.includes(c.mode))
-function ask(c){ store.mode=c.mode; store.tab='chat'; setTimeout(()=>window.dispatchEvent(new CustomEvent('xc-ask',{detail:c.q})),50) }
+const shownBooks = computed(() =>
+  activeShelf.value === 'all' ? books : books.filter((b) => b.shelf === activeShelf.value)
+)
+// 按板块分组，2D 速查更好扫
+const groupedBooks = computed(() => {
+  const m = {}
+  for (const b of shownBooks.value) (m[b.shelf] = m[b.shelf] || []).push(b)
+  return Object.entries(m).map(([shelf, items]) => ({ shelf, items }))
+})
+// 板块名 → mode key
+function mapMode(shelf) {
+  const map = {
+    判断推理: 'luoji',
+    言语理解: 'zhanggong',
+    数量关系: 'shuliang',
+    资料分析: 'ziliao',
+    政治理论: 'zhengzhi',
+    常识判断: 'changshi',
+    类比推理: 'leibi',
+    定义判断: 'dingyi',
+    图形推理: 'tutu'
+  }
+  return map[shelf] || 'all'
+}
+// 点击书 → 切到对话页并填入该书提问（点击即问）
+function ask(b) {
+  store.mode = mapMode(b.shelf)
+  store.tab = 'chat'
+  setTimeout(() => window.dispatchEvent(new CustomEvent('xc-ask', { detail: b.q })), 60)
+}
+// 2D 卡片展开：查看内置要点（离线可用，不耗 API）
+const open = ref(null)
+function toggleBook(b) {
+  open.value = open.value === b.name ? null : b.name
+}
+function studyTip(type) {
+  return {
+    理论: '先理解方法逻辑 → 问 AI 讲透 → 再做 2 道例题检验',
+    技巧: '先背口诀/步骤 → 限时练 3 道 → 把易错点记进错题本',
+    例题: '先自己做（不看解析）→ 再对解析 → 记录错因与秒杀规律'
+  }[type] || '先问 AI 讲透 → 做例题检验 → 把易错点记进错题本'
+}
+function quizBook(b) {
+  store.mode = mapMode(b.shelf)
+  store.tab = 'chat'
+  setTimeout(() => window.dispatchEvent(new CustomEvent('xc-ask', { detail: '请针对「' + b.name + '」这个方法出一道检验题，输出选项并单独一行输出【正确答案】X' })), 60)
+}
 </script>
+
 <template>
-<div class="page on"><div class="page-inner">
-<div class="sec-t">📚 方法速查（点击即可提问）</div>
-<div v-for="g in groups" :key="g.title" class="kb-group">
-  <div class="kg-title">{{ g.title }}</div>
-  <div class="kc-grid">
-    <div class="kc" v-for="c in byGroup(g.modes)" :key="c.name" @click="ask(c)">
-      <div class="kc-i">{{ c.icon }}</div><div class="kc-n">{{ c.name }}</div><div class="kc-s">{{ MODE_NAMES[c.mode] }}</div>
+  <div class="page on kb-page">
+    <div class="page-inner kb-inner">
+      <div class="sec-t">📚 知识宝典（2D 速查为主 · 点击即问；3D 书柜可选展示）</div>
+      <div class="kb-view-toggle">
+        <button class="kb-vt" :class="{ on: !showShelf }" @click="showShelf = false">📚 2D 速查</button>
+        <button class="kb-vt" :class="{ on: showShelf }" @click="showShelf = true">🕹️ 3D 书柜</button>
+      </div>
+      <!-- 板块抽屉切换 -->
+      <div class="shelf-tabs">
+        <button
+          v-for="s in shelvesList"
+          :key="s.key"
+          class="shelf-tab"
+          :class="{ on: activeShelf === s.key }"
+          @click="activeShelf = s.key"
+        >
+          {{ s.name }}
+        </button>
+      </div>
+      <!-- 3D 沉浸式书柜（可选展示） -->
+      <div v-if="showShelf" class="shelf-wrap">
+        <ShelfScene @ask="ask" />
+      </div>
+      <!-- 2D 方法速查（默认主界面）：按板块分组，点击即问 -->
+      <div class="kb-list">
+        <div v-for="g in groupedBooks" :key="g.shelf" class="kb-group">
+          <div class="kl-title">{{ g.shelf }}</div>
+          <div class="kl-grid">
+            <div
+              v-for="b in g.items"
+              :key="b.name"
+              class="kb-book-card"
+              :class="{ open: open === b.name }"
+              @click="toggleBook(b)"
+            >
+              <div class="kb-card-top">
+                <span class="kb-em">{{ b.icon }}</span>
+                <span class="kb-type" :class="'t-' + (b.type || '')">{{ b.type || '知识' }}</span>
+              </div>
+              <div class="kb-n">{{ b.name }}</div>
+              <div class="kb-s">{{ b.shelf }} · 点击看要点</div>
+              <div v-if="open === b.name" class="kb-open">
+                <div class="ko-line">📖 类型：{{ b.type || '知识' }}</div>
+                <div class="ko-line">💡 核心：{{ b.q }}</div>
+                <div class="ko-tip">🧭 {{ studyTip(b.type) }}</div>
+                <div class="ko-acts">
+                  <button class="btn btn-pri" @click.stop="ask(b)">💬 问 AI 讲透</button>
+                  <button class="btn btn-gh" @click.stop="quizBook(b)">🎲 出题检验</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
-</div>
-</div></div>
 </template>
+
+<style scoped>
+.kb-page { padding: 10px 12px; }
+.kb-inner { min-height: 100%; }
+.kb-view-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.kb-vt {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.kb-vt.on {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(59, 130, 246, 0.22));
+  border-color: var(--hud-cyan);
+  color: #fff;
+}
+.shelf-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.shelf-tab {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.shelf-tab.on {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(59, 130, 246, 0.22));
+  border-color: var(--hud-cyan);
+  color: #fff;
+}
+.shelf-wrap {
+  position: relative;
+  height: 260px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  margin-bottom: 16px;
+}
+.kb-group { margin-bottom: 16px; }
+.kl-title { font-size: 13px; font-weight: 700; color: var(--hud-cyan); margin-bottom: 8px; }
+.kl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.kb-book-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(10px);
+}
+.kb-book-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--glass-border-hi);
+  box-shadow: var(--grad-glow);
+}
+.kb-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.kb-em { font-size: 20px; }
+.kb-type { font-size: 10px; padding: 1px 7px; border-radius: 6px; font-weight: 700; }
+.t-理论 { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
+.t-技巧 { background: rgba(34, 211, 238, 0.16); color: #7dd3fc; }
+.t-例题 { background: rgba(251, 191, 36, 0.16); color: #fbbf24; }
+.kb-n { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+.kb-s { font-size: 11px; color: var(--text3); }
+</style>

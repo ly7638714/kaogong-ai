@@ -2,25 +2,45 @@
 import katex from 'katex'
 import { marked } from 'marked'
 
-function katexHtml(src, display){
-  try{ return katex.renderToString(src, { throwOnError:false, displayMode:!!display, strict:false }) }
-  catch(e){ return '<code>'+src+'</code>' }
+function katexHtml(src, display) {
+  try {
+    return katex.renderToString(src, { throwOnError: false, displayMode: !!display, strict: false })
+  } catch (e) {
+    return '<code>' + src + '</code>'
+  }
 }
-const KXMARK='@@KX@'
+const KXMARK = '@@KX@'
 
 // 渲染 markdown + LaTeX 数学公式为 HTML
-export function renderMd(t){
-  const chunks=[]
-  let s=String(t||'')
-  const put=(html)=>{ const id=KXMARK+(chunks.length)+'@@'; chunks.push(html); return id }
+export function renderMd(t) {
+  const chunks = []
+  let s = String(t || '')
+  const put = (html) => {
+    const id = KXMARK + chunks.length + '@@'
+    chunks.push(html)
+    return id
+  }
   // 块级公式 $$...$$ 和 \[...\]
-  s=s.replace(/\$\$([\s\S]+?)\$\$/g, (m,c)=>put(katexHtml(c,true)))
-  s=s.replace(/\\\[([\s\S]+?)\\\]/g, (m,c)=>put(katexHtml(c,true)))
+  s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, c) => put(katexHtml(c, true)))
+  s = s.replace(/\\\[([\s\S]+?)\\\]/g, (m, c) => put(katexHtml(c, true)))
   // 行内公式 \(...\)
-  s=s.replace(/\\\(([^)]+?)\\\)/g, (m,c)=>put(katexHtml(c,false)))
+  s = s.replace(/\\\(([^)]+?)\\\)/g, (m, c) => put(katexHtml(c, false)))
   // 行内公式 $...$
-  s=s.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (m,c)=>put(katexHtml(c,false)))
-  let html=''
-  try{ html=marked.parse(s) }catch(e){ html=String(s).replace(/\n/g,'<br>') }
-  return html.replace(new RegExp('@@KX@(\\d+)@@','g'), (m,id)=>chunks[Number(id)])
+  s = s.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (m, c) => put(katexHtml(c, false)))
+  let html = ''
+  try {
+    html = marked.parse(s)
+  } catch (e) {
+    html = String(s).replace(/\n/g, '<br>')
+  }
+  html = html.replace(new RegExp('@@KX@(\\d+)@@', 'g'), (m, id) => chunks[Number(id)])
+  // 给代码块包裹"复制"容器：<pre><code>...</code></pre> → div.code-wrap + button.code-copy
+  html = html.replace(
+    /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g,
+    (m, inner) =>
+      '<div class="code-wrap"><button class="code-copy" type="button" aria-label="复制代码">⧉ 复制</button><pre><code>' +
+      inner +
+      '</code></pre></div>'
+  )
+  return html
 }
