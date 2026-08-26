@@ -34,6 +34,8 @@ export function renderMd(t) {
     html = String(s).replace(/\n/g, '<br>')
   }
   html = html.replace(new RegExp('@@KX@(\\d+)@@', 'g'), (m, id) => chunks[Number(id)])
+  // 表格外包一层可横向滚动容器（防止宽表格撑破手机屏幕）
+  html = html.replace(/<table>([\s\S]*?)<\/table>/g, '<div class="table-scroll"><table>$1</table></div>')
   // 给代码块包裹"复制"容器：<pre><code>...</code></pre> → div.code-wrap + button.code-copy
   html = html.replace(
     /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g,

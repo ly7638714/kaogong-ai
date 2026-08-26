@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, computed, onMounted, onUnmounted, watch } from 'vue'
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
 import { parseQuiz } from '../utils/quiz'
@@ -10,15 +10,19 @@ function md(t) {
 function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
-import { store, saveMsgs, saveWqs } from '../store'
+import { store, saveMsgs, saveWqs, saveCfg, saveNotes } from '../store'
 import { activeCfg, supportsVision, buildSys, chatStream, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
+import { analyzeFigImage, figCfg } from '../api/figEnhance'
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
 import { MODE_NAMES } from '../kb'
 import { collectChat } from '../utils/chat'
 import { showToast } from '../utils/toast'
-import ExamSim from './ExamSim.vue'
+import { navOpen, navBack } from '../utils/nav'
+import { buildReview } from '../utils/review'
+import ExamPanel from './ExamPanel.vue'
 import { addPoints as petAddPoints } from '../utils/pet'
-import PaperImport from './PaperImport.vue'
+
+import SolidTrain from './SolidTrain.vue'
 const toolsCollapsed = ref(false)
 try { toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
 function toggleTools() { toolsCollapsed.value = !toolsCollapsed.value; try { localStorage.setItem('xc_chat_tools', toolsCollapsed.value ? '1' : '0') } catch (e) {} }
@@ -52,15 +56,15 @@ function addMsg(m) {
     m.answerTime = undefined
     const t = typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''
     lastAskText = t
-    // 按问题数限时：1 问=1 分钟（问号数估，至少 1）
-    startStopwatch(countQuestions(t) * 60)
+    // 考场计时：开启后按问数限时（1 问=1 分钟）；默认关闭，避免每问弹提示打扰
+    if (store.cfg.examMode) startStopwatch(countQuestions(t) * 60)
   }
   if (m.role === 'assistant') {
     stopStopwatch()
     // 归属板块：基于最近一次用户提问识别（与消息头/存错题同源）
     m.bk = detectBanKuai(lastAskText) || ''
-    // 完整回复才弹用时统计；停止/失败/无耗时则不弹
-    if (!m.err && !m.stopped && runSec.value > 0) {
+    // 考场计时开启时才弹用时统计（默认关闭避免打扰）；停止/失败/无耗时则不弹
+    if (store.cfg.examMode && !m.err && !m.stopped && runSec.value > 0) {
       const t0 = assessTime()
       if (t0.over > 0) {
         showToast(`⏱ 用时 ${fmtSec(t0.used)} · 超时 ${t0.over} 秒（限 ${fmtSec(t0.limit)}）`, 'error')
@@ -135,11 +139,15 @@ async function pickImage(ev) {
   const files = ev.target.files || []
   for (const f of files) {
     if (!f.type.startsWith('image/')) continue
-    const r = new FileReader()
-    r.onload = (e) => {
-      imgs.value.push(e.target.result)
-    }
-    r.readAsDataURL(f)
+    const raw = await new Promise((res) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result)
+      r.onerror = () => res(null)
+      r.readAsDataURL(f)
+    })
+    if (!raw) continue
+    // 入列前压缩：既控 localStorage 体积（避免大图被 saveMsgs 清理导致历史丢失），也减小 API 载荷
+    imgs.value.push(await compressImage(raw, 1000, 0.78))
   }
   ev.target.value = ''
 }
@@ -160,8 +168,8 @@ function addImageUrl() {
         return
       }
       const rd = new FileReader()
-      rd.onload = (e) => {
-        imgs.value.push(e.target.result)
+      rd.onload = async (e) => {
+        imgs.value.push(await compressImage(e.target.result, 1000, 0.78))
         linkShow.value = false
         linkUrl.value = ''
       }
@@ -207,6 +215,8 @@ async function send() {
     return
   }
   const userMsg = { role: 'user', content: hasImg ? { text: txt, imgs: imgs.value.slice() } : txt }
+  const sentImgs = hasImg ? userMsg.content.imgs.slice() : []
+  pushRecent(txt)
   addMsg(userMsg) // 经 addMsg 统一处理（含考场倒计时启动/保存/滚动）
   text.value = ''
   imgs.value = []
@@ -243,7 +253,10 @@ async function send() {
         } else if (m.content && (m.content.text || '').trim()) {
           const parts = [{ type: 'text', text: m.content.text }]
           if (visOk && Array.isArray(m.content.imgs)) {
-            for (const u of m.content.imgs) if (u) parts.push({ type: 'image_url', image_url: { url: u } })
+            for (const u of m.content.imgs) {
+              // 只发合法图片：data:image 或 http(s)，跳过被截断/占位符等无效 URL（避免 API 报 Unsupported image_url format）
+              if (u && /^(data:image|https?:\/\/)/i.test(String(u))) parts.push({ type: 'image_url', image_url: { url: u } })
+            }
           }
           item = { role: m.role, content: parts }
         }
@@ -267,8 +280,16 @@ async function send() {
       scroll()
     }, abortCtrl.signal)
     live.value = null
-    addMsg({ role: 'assistant', content: full })
-    if (store.cfg.ttsOn) autoSpeak(full)
+    // 高效复盘指引：模型已按 SYS 输出则以模型为准；缺失时按板块本地复盘库兜底
+    const review = buildReview(full, detectBanKuai(txt), txt)
+    const finalContent = review ? full + '\n\n' + review : full
+    addMsg({ role: 'assistant', content: finalContent })
+    // 图形理解增强（可选·独立模型）：把用户截图复刻成图贴进回复，后台执行不阻塞主回复
+    if (sentImgs.length) {
+      const lastAi = store.msgs[store.msgs.length - 1]
+      maybeFigEnhance(lastAi, sentImgs, txt)
+    }
+    if (store.cfg.ttsOn) autoSpeak(finalContent)
   } catch (e) {
     live.value = null
     if (e.name === 'AbortError') {
@@ -280,6 +301,68 @@ async function send() {
   abortCtrl = null
   store.busy = false
 }
+// ===== 图形理解增强（可选）：独立开源视觉模型复刻原图 =====
+const figView = ref(null)
+function figZoom(f) {
+  if (f && f.svg) figView.value = f
+}
+function closeFigZoom() { figView.value = null }
+async function maybeFigEnhance(msg, imgs, q) {
+  const c = figCfg()
+  if (!c || !imgs || !imgs.length) return
+  const raw = imgs[0]
+  if (!raw || !String(raw).startsWith('data:image')) return
+  msg.figBusy = true
+  scroll()
+  try {
+    const small = await compressImage(raw, 900, 0.75)
+    const res = await analyzeFigImage(small, q)
+    if (res && res.ok) {
+      msg.fig = { ok: true, type: res.type, summary: res.summary, tips: res.tips, svg: res.svg }
+    } else {
+      msg.fig = { ok: false, err: (res && res.err) || '模型未返回可复刻的图形（可能该截图无需画图）' }
+    }
+  } catch (e) {
+    msg.fig = { ok: false, err: (e && e.message) || '未知错误' }
+  }
+  msg.figBusy = false
+  saveMsgs()
+  scroll()
+}
+// 手动/重试图形增强：找到该回复前面最近一条带图提问的图片
+function findPrevUserImg(m) {
+  const idx = store.msgs.indexOf(m)
+  for (let i = idx - 1; i >= 0; i--) {
+    const u = store.msgs[i]
+    if (u.role !== 'user') continue
+    const imgs = u.content && Array.isArray(u.content.imgs) ? u.content.imgs : []
+    const valid = imgs.find(x => x && String(x).startsWith('data:image'))
+    return valid || null
+  }
+  return null
+}
+function prevHasImg(m) {
+  return !!findPrevUserImg(m)
+}
+async function retryFigEnhance(m) {
+  if (m.figBusy) return
+  const img = findPrevUserImg(m)
+  if (!img) { showToast('没有找到对应的题目图片，无法复刻', 'error'); return }
+  m.fig = null
+  m.figBusy = true
+  scroll()
+  try {
+    const small = await compressImage(img, 900, 0.75)
+    const res = await analyzeFigImage(small, textOf(m))
+    m.fig = res && res.ok ? { ok: true, type: res.type, summary: res.summary, tips: res.tips, svg: res.svg } : { ok: false, err: (res && res.err) || '模型未返回可复刻的图形' }
+  } catch (e) {
+    m.fig = { ok: false, err: (e && e.message) || '未知错误' }
+  }
+  m.figBusy = false
+  saveMsgs()
+  scroll()
+}
+
 function retryLast() {
   const last = store.msgs[store.msgs.length - 1]
   if (!last || !last.err) return
@@ -376,8 +459,31 @@ function textOf(m) {
 }
 // 存错题板块选择器
 const bkShow = ref(false)
-const examShow = ref(false) // 整卷模拟
-const paperShow = ref(false) // 真题组卷
+const examShow = ref(false) // 统一：模拟组卷
+const examPanelSrc = ref('ai') // ai=AI出题 / import=导入 / wrong=错题
+function openExam(src) {
+  examPanelSrc.value = src || 'ai'
+  examShow.value = true
+  navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : (src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : '模拟组卷') })
+}
+function closeExam() {
+  examShow.value = false
+  navBack()
+}
+function openSolid() {
+  solidShow.value = true
+  navOpen({ id: 'solid', label: '立体图推' })
+}
+function closeSolid() {
+  solidShow.value = false
+  navBack()
+}
+function onNavBack(e) {
+  const ids = (e && e.detail) || []
+  if (ids.includes('exam')) examShow.value = false
+  if (ids.includes('solid')) solidShow.value = false
+}
+const solidShow = ref(false) // 立体图推训练
 const bkPick = ref('判断推理')
 const bkOrigin = ref({ q: '', imgs: [], msgIdx: -1 })
 const BK_OPTIONS = [
@@ -447,7 +553,29 @@ function getLastUserText() {
   }
   return x || ''
 }
+// 找"最近一轮 AI 出题消息"（含 A/B/C/D 选项），作为变式题的完整原题上下文。
+// 修复：此前取 getLastUserText()，用户在选择题点选后最后一条用户消息只是选项字母（如"C"），
+// 导致变式题发给 AI 的是残缺文本、无法出题。
+function getLastQuizText() {
+  const quizRe = /^\s*[A-D][.、．:：]/m
+  for (let i = store.msgs.length - 1; i >= 0; i--) {
+    const m = store.msgs[i]
+    if (!m || m.role !== 'assistant' || m.err || m.stopped || m.live) continue
+    const t = textOf(m)
+    if (!t) continue
+    const hasOptions = (m.quiz && Array.isArray(m.quiz.options) && m.quiz.options.length >= 2) || quizRe.test(t)
+    if (hasOptions) return t.slice(0, 1600)
+  }
+  return ''
+}
 const trainPlate = ref('判断推理')
+const quizDiff = ref('mid') // 出题难度：易/中/难/真题级（出题考我·攻克薄弱）
+const QUIZ_DIFF_NAME = { easy: '易', mid: '中', hard: '难', real: '真题级' }
+const quizDiffName = () => QUIZ_DIFF_NAME[quizDiff.value] || '中'
+function cycleQuizDiff() {
+  const order = ['easy', 'mid', 'hard', 'real']
+  quizDiff.value = order[(order.indexOf(quizDiff.value) + 1) % order.length]
+}
 const plates = Object.keys(PLATE_MODE)
 const modeHint = {
   all: '输入题目或问题，或直接提问某个知识点',
@@ -523,7 +651,7 @@ async function train(kind, opts = {}) {
   else if (kind === 'variant') {
     userText =
       '请针对我刚才问的那道题，出一道【考点题型完全相同、题干素材全新】的变式检验题。原题：' +
-      String(opts.prev || getLastUserText()).slice(0, 600)
+      String(opts.prev || getLastQuizText() || getLastUserText()).slice(0, 1500)
   } else if (kind === 'diag') {
     userText = '我的学习数据如下，请诊断：\n' + collectStat()
   } else return
@@ -582,7 +710,7 @@ function trainWeak() {
     return
   }
   showToast('正在针对薄弱板块「' + w.plate + '」出题…', 'info')
-  train('quiz', { plate: w.plate, mode: w.mode })
+  train('quiz', { plate: w.plate, mode: w.mode, difficulty: 'mid' })
 }
 function autoSpeak(t) {
   if (store.cfg.ttsOn !== false && t)
@@ -591,6 +719,12 @@ function autoSpeak(t) {
       rate: store.cfg.ttsRate,
       pitch: store.cfg.ttsPitch
     })
+}
+function toggleTts() {
+  store.cfg.ttsOn = store.cfg.ttsOn === false
+  saveCfg()
+  if (store.cfg.ttsOn === false) stopSpeak()
+  showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
 }
 function toggleSpeak(ev) {
   const btn = ev.currentTarget
@@ -626,6 +760,22 @@ function toggleMic() {
   recogOn.value = recogActive()
 }
 const modes = Object.keys(MODE_NAMES)
+const modeOpen = ref(false)
+// 模式分组（用于顶部紧凑选择器）
+const MODE_GROUPS = [
+  { k: 'all', t: '🌟 综合模式', items: ['all'] },
+  { k: 'pd', t: '🧠 判断推理', items: ['luoji', 'leibi', 'dingyi', 'tutu'] },
+  { k: 'yy', t: '📖 言语理解', items: ['zhanggong', 'yanyu'] },
+  { k: 'zl', t: '📈 资料 / 数量', items: ['ziliao', 'shuliang'] },
+  { k: 'cs', t: '🏛️ 常识 / 政治', items: ['zhengzhi', 'changshi'] }
+]
+function modeIcon(m) {
+  return String(MODE_NAMES[m] || '🧭').split(/[\s·]/)[0] || '🧭'
+}
+function modeName(m) {
+  // 去掉名称前的 emoji，图标单独展示，避免重复
+  return String(MODE_NAMES[m] || m).replace(/^\S+\s*/, '')
+}
 function setMode(m) {
   store.mode = m
   localStorage.setItem('xc_mode', m)
@@ -636,9 +786,81 @@ const quickCards = [
   { ic: '🔷', t: '图形推理', s: '图推 24 诀', bg: 'b', mode: 'tutu', q: '这道图推题怎么找规律（上传图片）' },
   { ic: '📊', t: '资料分析', s: '四大神器', bg: 'y', mode: 'ziliao', q: '基期比重公式是什么，何时用' },
   { ic: '🏛️', t: '政治理论', s: '小黑口诀', bg: 'p', mode: 'zhengzhi', q: '新思想五大新发展理念和口诀' },
-  { ic: '🔢', t: '数量关系', s: '四层金字塔', bg: 'r', mode: 'shuliang', q: '工程问题设最小公倍数的秒杀法' }
+  { ic: '🔢', t: '数量关系', s: '四层金字塔', bg: 'r', mode: 'shuliang', q: '工程问题设最小公倍数的秒杀法' },
+  { ic: '🧊', t: '立体图推', s: '空间重构训练', bg: 'c', mode: 'luoji', q: '空间重构/立体图形的三视图怎么快速判断？请讲方法' },
+  { ic: '✍️', t: '出题考我', s: '命题专家出题', bg: 'g', act: 'quiz' },
+  { ic: '🎯', t: '考点总结', s: '高频考点', bg: 'y', mode: 'all', q: '行测判断推理模块有哪些高频考点？请按考频排序总结' },
+  { ic: '⚡', t: '秒杀技巧', s: '快解套路', bg: 'b', mode: 'all', q: '资料分析有哪些秒杀速算技巧？举例说明' },
+  { ic: '📝', t: '错题诊断', s: '错因分析', bg: 'p', mode: 'all', q: '请分析我最近的错题，指出共性错因和改进方法' }
 ]
+// 立体图推 → 发到主对话继续深挖
+function onSolidQuestion(q) {
+  const t = String(q || '').trim()
+  if (!t) return
+  text.value = t
+  scroll()
+  send()
+}
+// ===== 提问历史（最近提问，点击快速重发）=====
+const recentQs = ref([])
+try { recentQs.value = JSON.parse(localStorage.getItem('xc_recent_qs') || '[]') || [] } catch (e) {}
+function pushRecent(t) {
+  const k = String(t || '').trim()
+  if (!k || k.length < 4) return
+  recentQs.value = [k, ...recentQs.value.filter((x) => x !== k)].slice(0, 8)
+  try { localStorage.setItem('xc_recent_qs', JSON.stringify(recentQs.value)) } catch (e) {}
+}
+function useRecent(t) {
+  text.value = t
+  scroll()
+  send()
+}
+// ===== 草稿自动保存 =====
+let draftTimer = null
+watch(text, (v) => {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(() => {
+    try { localStorage.setItem('xc_chat_draft', String(v || '')) } catch (e) {}
+  }, 600)
+})
+function restoreDraft() {
+  try {
+    const d = localStorage.getItem('xc_chat_draft')
+    if (d && !text.value) { text.value = d; localStorage.removeItem('xc_chat_draft') }
+  } catch (e) {}
+}
+// ===== 回复反馈 / 追问 / 收藏 =====
+function toggleFb(m, v) {
+  if (!m) return
+  m.fb = m.fb === v ? '' : v
+  saveMsgs()
+  showToast(m.fb ? (v === 1 ? '👍 已标记有用' : '👎 已标记待改进') : '已取消标记', 'info')
+}
+function followUp(m) {
+  const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
+  const brief = String(t).replace(/[#*`>|_]/g, '').slice(0, 200)
+  text.value = '请基于你刚才的讲解（' + brief + '…）继续深入：'
+  scroll()
+  const tb = document.querySelector('.input-bar textarea')
+  if (tb) tb.focus()
+}
+function collectMsg(m) {
+  const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
+  if (!t) { showToast('没有可收藏的内容', 'info'); return }
+  const title = String(t).replace(/[#*`>|_]/g, '').slice(0, 24) + '…'
+  store.notes.unshift({ title: '📌 ' + title, body: t, t: new Date().toLocaleString() })
+  saveNotes()
+  showToast('✅ 已收藏到我的笔记', 'success')
+}
+// 长回复折叠
+const expanded = ref({})
+function toggleExpand(i) { expanded.value[i] = !expanded.value[i] }
+function isLong(t) { return String(t || '').length > 700 }
 function askQuick(c) {
+  if (c.act === 'quiz') {
+    train('quiz', { plate: trainPlate.value || '判断推理', difficulty: c.difficulty || quizDiff.value || 'mid' })
+    return
+  }
   store.mode = c.mode
   text.value = c.q
   scroll()
@@ -713,10 +935,66 @@ function onGotoMsg(e) {
     }
   }, 120)
 }
-onMounted(() => window.addEventListener('xc-ask', onAsk))
-onMounted(() => window.addEventListener('xc-open-exam', () => (examShow.value = true)))
-onMounted(() => window.addEventListener('xc-open-paper', () => (paperShow.value = true)))
+// ===== 消息文字选区工具栏：选中后弹出 复制/全选/复制全文 =====
+const selBar = ref({ show: false, x: 0, y: 0, msgIdx: -1 })
+let selTimer = null
+function updateSelBar() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) { selBar.value.show = false; return }
+  const node = sel.anchorNode
+  // 兼容 anchor 是文本节点或元素节点两种情况
+  const msgEl =
+    node && node.nodeType === 1
+      ? node.closest('.msg')
+      : node && node.parentElement
+        ? node.parentElement.closest('.msg')
+        : null
+  if (!msgEl) { selBar.value.show = false; return }
+  const r = sel.getRangeAt(0).getBoundingClientRect()
+  selBar.value = { show: true, x: Math.max(60, Math.min(window.innerWidth - 60, r.left + r.width / 2)), y: Math.max(90, r.top - 8), msgIdx: Number(msgEl.dataset.i) }
+}
+function onDocMouseUp() { if (selTimer) clearTimeout(selTimer); selTimer = setTimeout(updateSelBar, 10) }
+function onSelChange() { if (selTimer) clearTimeout(selTimer); selTimer = setTimeout(updateSelBar, 80) }
+function hideSelBar() { selBar.value.show = false }
+function selMsg() {
+  return store.msgs[selBar.value.msgIdx] || null
+}
+async function copySelected() {
+  const t = window.getSelection() ? window.getSelection().toString() : ''
+  if (!t) return
+  try { await navigator.clipboard.writeText(t); showToast('✅ 已复制选中内容', 'success') } catch (e) { showToast('复制失败：' + e.message, 'error') }
+  hideSelBar()
+}
+function selectAllMsg() {
+  const m = selMsg()
+  if (!m) return
+  const el = msgsBox.value && msgsBox.value.querySelector('.msg[data-i="' + selBar.value.msgIdx + '"]')
+  if (!el) return
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel.removeAllRanges()
+  sel.addRange(range)
+  selBar.value = { show: true, x: selBar.value.x, y: selBar.value.y, msgIdx: selBar.value.msgIdx }
+}
+async function copyFullMsg() {
+  const m = selMsg()
+  if (!m) return
+  try { await navigator.clipboard.writeText(textOf(m)); showToast('✅ 已复制整条消息', 'success') } catch (e) { showToast('复制失败：' + e.message, 'error') }
+  hideSelBar()
+}
+
+onMounted(() => { restoreDraft(); window.addEventListener('xc-ask', onAsk) })
+onMounted(() => window.addEventListener('xc-open-exam', () => openExam('ai')))
+onMounted(() => document.addEventListener('click', (e) => { if (modeOpen.value && !(e.target && e.target.closest && e.target.closest('.mode-pick'))) modeOpen.value = false }))
+onMounted(() => window.addEventListener('xc-open-paper', () => openExam('import')))
 onUnmounted(() => window.removeEventListener('xc-ask', onAsk))
+onMounted(() => window.addEventListener('app:nav-back', onNavBack))
+onUnmounted(() => window.removeEventListener('app:nav-back', onNavBack))
+onMounted(() => document.addEventListener('mouseup', onDocMouseUp))
+onMounted(() => document.addEventListener('selectionchange', onSelChange))
+onUnmounted(() => document.removeEventListener('mouseup', onDocMouseUp))
+onUnmounted(() => document.removeEventListener('selectionchange', onSelChange))
 
 onMounted(() => window.addEventListener('xc-goto-msg', onGotoMsg))
 onUnmounted(() => window.removeEventListener('xc-goto-msg', onGotoMsg))
@@ -776,22 +1054,43 @@ defineEmits(['export-review'])
           <button class="cth-btn" @click="toggleTools()">{{ toolsCollapsed ? '▾ 展开' : '▴ 收起' }}</button>
         </div>
         <div v-show="!toolsCollapsed" class="chat-tools-bd">
-          <div class="mode-row">
-            <button v-for="m in modes" :key="m" class="mode-chip" :class="{ on: store.mode === m }" @click="setMode(m)">
-              {{ MODE_NAMES[m] }}
+          <div class="mode-pick">
+            <button class="mode-pick-btn" :title="'当前模式：' + MODE_NAMES[store.mode] + '，点击切换专项模式'" @click.stop="modeOpen = !modeOpen">
+              <span class="mp-ic">{{ modeIcon(store.mode) }}</span>
+              <span class="mp-name">{{ modeName(store.mode) }}</span>
+              <span class="mp-arrow">{{ modeOpen ? '▴' : '▾' }}</span>
             </button>
+            <div v-if="modeOpen" class="mode-pop" @click.self="modeOpen = false">
+              <div v-for="g in MODE_GROUPS" :key="g.k" class="mp-group">
+                <div class="mp-group-t">{{ g.t }}</div>
+                <div class="mp-group-items">
+                  <button v-for="m in g.items" :key="m" class="mp-item" :class="{ on: store.mode === m }" @click="setMode(m); modeOpen = false">
+                    <span class="mp-item-ic">{{ modeIcon(m) }}</span>
+                    <span class="mp-item-t">{{ modeName(m) }}</span>
+                    <span v-if="store.mode === m" class="mp-check">✓</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="train-bar">
         <span class="tb-l">🎯 智能训练</span>
-        <select v-model="trainPlate" class="tb-sel">
+        <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
           <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
         </select>
-        <button class="btn btn-gh tb-btn" @click="train('quiz', { plate: trainPlate, mode: PLATE_MODE[trainPlate] })">
-          🎲 模拟出题
-        </button>
-        <button class="btn btn-gh tb-btn" title="整卷限时模拟考试：AI 组卷、自动批改、错题入库" @click="examShow = true">📝 整卷模拟</button>
-        <button class="btn btn-gh tb-btn" title="上传真题截图→AI识别组卷→作答批改" @click="paperShow = true">📥 真题组卷</button>
+        <button class="btn btn-gh tb-btn" title="出题难度：点击循环切换（易→中→难→真题级），出题考我/攻克薄弱使用"
+          style="padding: 3px 8px; font-size: 12px" @click="cycleQuizDiff()">🎚 {{ quizDiffName() }}</button>
+        <button class="btn btn-gh tb-btn" title="单题快练（原模拟出题）：选板块随机出1题，即时批改·可再来一题·错题入库" @click="openExam('single')">⚡ 单题快练</button>
+        <button class="btn btn-gh tb-btn" title="统一考场：国考/省考卷面模板·AI智能出题·导入材料识别·错题组卷·限时作答批改" @click="openExam('ai')">📝 模拟组卷</button>
+        
         <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
+            <button
+              class="btn tb-btn"
+              :class="store.cfg.examMode ? 'btn-pri' : 'btn-gh'"
+              title="考场计时：开启后每次提问按问数限时（1 问=1 分钟），AI 回复后统计用时；关闭则不打扰"
+              @click="store.cfg.examMode = !store.cfg.examMode; saveCfg()"
+            >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
+            <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
             <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
           </div>
         </div>
@@ -824,6 +1123,12 @@ defineEmits(['export-review'])
               </div>
             </div>
           </div>
+          <div v-if="recentQs.length" class="hero-recents">
+            <div class="hr-t">🕘 最近提问</div>
+            <div class="hr-list">
+              <button v-for="(rq, ri) in recentQs" :key="ri" class="hr-chip" @click="useRecent(rq)">{{ rq.slice(0, 26) }}</button>
+            </div>
+          </div>
           <div class="hero-motto">💡 {{ motto }}</div>
         </div>
         <template v-for="(m, i) in store.msgs" :key="i">
@@ -833,7 +1138,9 @@ defineEmits(['export-review'])
 </template>
               <template v-else>
                 <div class="msg-imgs">
-                  <img v-for="(im, j) in m.content.imgs" :key="j" class="msg-img" :src="im" @click="viewImg(im)" />
+                  <template v-for="(im, j) in m.content.imgs" :key="j">
+                    <img v-if="im" class="msg-img" :src="im" @click="viewImg(im)" />
+                  </template>
                 </div>
                 <div v-html="esc(m.content.text)"></div>
 </template>
@@ -874,12 +1181,36 @@ defineEmits(['export-review'])
                   <button class="btn btn-gh" @click="saveQuizWrong(m)">📌 存错题本</button>
                 </div>
 </template>
-              <div v-else v-html="md(m.content)"></div>
+              <div v-else>
+                <div v-html="md(isLong(textOf(m)) && !expanded[i] ? textOf(m).slice(0, 700) + '…' : textOf(m))"></div>
+                <button v-if="isLong(textOf(m))" class="fold-btn" @click="toggleExpand(i)">
+                  {{ expanded[i] ? '🔼 收起全文' : '🔽 展开全文（' + textOf(m).length + ' 字）' }}
+                </button>
+                <div v-if="m.figBusy" class="fig-busy"><span class="fig-spin"></span>🖼 图形增强：正在用独立模型把截图复刻成图…</div>
+                <div v-if="m.fig && m.fig.ok" class="fig-card">
+                  <div class="fig-hd">
+                    <span>🖼 AI 图形复刻 · {{ m.fig.type }}</span>
+                    <button class="btn btn-gh" @click="figZoom(m.fig)">⛶ 放大</button>
+                  </div>
+                  <div class="fig-svg" v-html="m.fig.svg" @click="figZoom(m.fig)"></div>
+                  <div v-if="m.fig.summary" class="fig-summary">📝 {{ m.fig.summary }}</div>
+                  <div v-if="m.fig.tips" class="fig-tips">💡 {{ m.fig.tips }}</div>
+                </div>
+                <div v-if="m.fig && m.fig.ok === false" class="fig-fail">
+                  <div>🖼 图形增强未生成图像（不影响本题解答）——可能该截图无需画图，或模型未返回有效图形。{{ m.fig.err ? '（' + m.fig.err + '）' : '' }}</div>
+                  <button class="btn btn-gh" :disabled="m.figBusy" @click="retryFigEnhance(m)">🔄 重试复刻</button>
+                </div>
+              </div>
               <div class="msg-actions">
                 <button v-if="m.err" class="retry-btn" @click="retryLast()">↻ 重试</button>
+                <button v-if="!m.err && prevHasImg(m) && figCfg()" :disabled="m.figBusy" @click="retryFigEnhance(m)" :title="'用独立模型把题目截图复刻成图'">🖼 {{ m.fig && m.fig.ok ? '重绘' : '图形增强' }}</button>
                 <button v-if="!m.err" @click="saveWrong()">📌 存错题</button>
-                <button v-if="!m.err" @click="train('variant', { prev: getLastUserText() })">🔁 出变式题</button>
-                <button v-if="!m.err" @click="$emit('export-review')">📄 导出复盘</button>
+                <button v-if="!m.err" @click="train('variant', { prev: getLastQuizText() })">🔁 变式题</button>
+                <button v-if="!m.err" @click="$emit('export-review')">📄 复盘</button>
+                <button @click="followUp(m)" title="基于这条回复继续追问">💬 追问</button>
+                <button @click="collectMsg(m)" title="收藏到我的笔记">📌 收藏</button>
+                <button :class="{ 'fb-on': m.fb === 1 }" @click="toggleFb(m, 1)" title="这条回复对你有用">👍</button>
+                <button :class="{ 'fb-on': m.fb === -1 }" @click="toggleFb(m, -1)" title="这条回复需改进">👎</button>
                 <button @click="copyMsg($event)">📋 复制</button>
                 <button @click="toggleSpeak($event)">🔊 朗读</button>
               </div>
@@ -931,6 +1262,13 @@ defineEmits(['export-review'])
         />
         <button class="btn btn-pri" style="margin-top: 6px" @click="addImageUrl()">添加该图片</button>
       </div>
+      <div v-if="recentQs.length" class="recent-bar">
+        <span class="rb-t">🕘</span>
+        <div class="rb-list">
+          <button v-for="(rq, ri) in recentQs.slice(0, 6)" :key="ri" class="rb-chip" :title="rq" @click="useRecent(rq)">{{ rq.slice(0, 18) }}</button>
+        </div>
+        <button class="rb-clear" title="清空提问历史" @click="recentQs = []; try{localStorage.removeItem('xc_recent_qs')}catch(e){}">✕</button>
+      </div>
       <div class="input-bar">
         <div v-if="store.busy" class="stopwatch" :class="{ warn: left === 0 }">
           <span class="sw-ic">⏱</span>
@@ -944,6 +1282,7 @@ defineEmits(['export-review'])
             :placeholder="inputPh"
             @keydown.enter.exact.prevent="send()"
           ></textarea>
+          <button class="ib-btn" :class="{ on: store.cfg.ttsOn !== false }" :title="(store.cfg.ttsOn !== false ? '自动朗读已开启，点击关闭' : '自动朗读已关闭，点击开启')" @click="toggleTts()">{{ store.cfg.ttsOn !== false ? '🔊' : '🔇' }}</button>
           <button class="ib-btn" :style="{ color: recogOn ? 'var(--red)' : '' }" @click="toggleMic()">🎤</button>
           <button class="ib-btn" @click="linkShow = !linkShow">🔗</button>
           <label class="ib-btn" style="display: flex; align-items: center; justify-content: center; cursor: pointer">
@@ -961,12 +1300,35 @@ defineEmits(['export-review'])
       </div>
     </div>
   </div>
+  <!-- 消息文字选区工具栏 -->
+  <div v-if="selBar.show" class="sel-bar" :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }" @mousedown.prevent>
+    <button @click="copySelected()">📋 复制选中</button>
+    <button @click="selectAllMsg()">全选本消息</button>
+    <button @click="copyFullMsg()">复制全文</button>
+  </div>
+
   <!-- 图片全屏预览 -->
   <div v-if="imgView" class="img-view" @click.self="closeImg()">
     <img :src="imgView" class="iv-img" @click.stop />
     <div class="iv-bar">
       <button type="button" class="iv-btn" @click.stop.prevent="downloadImg()">💾 保存原图</button>
       <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeImg()">✕ 关闭</button>
+    </div>
+  </div>
+
+  <!-- 图形增强放大弹窗 -->
+  <div v-if="figView" class="img-view" @click.self="closeFigZoom()">
+    <div class="iv-body fig-zoom" v-html="figView.svg"></div>
+    <div class="iv-bar">
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeFigZoom()">✕ 关闭</button>
+    </div>
+  </div>
+
+  <!-- 图形增强放大弹窗 -->
+  <div v-if="figView" class="img-view" @click.self="closeFigZoom()">
+    <div class="iv-body fig-zoom" v-html="figView.svg"></div>
+    <div class="iv-bar">
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeFigZoom()">✕ 关闭</button>
     </div>
   </div>
   <!-- 存错题板块选择器 -->
@@ -989,6 +1351,7 @@ defineEmits(['export-review'])
       </div>
     </div>
   </div>
-  <ExamSim v-if="examShow" @close="examShow = false" />
-  <PaperImport v-if="paperShow" @close="paperShow = false" />
+  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" @close="closeExam" />
+  
+  <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
 </template>

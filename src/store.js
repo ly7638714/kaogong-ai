@@ -16,6 +16,7 @@ const D = () => ({
   ttsVoice: '',
   ttsRate: 0.98,
   ttsPitch: null,
+  examMode: false, // 考场计时：开启后按问数限时并统计用时
   fontSize: 14.5,
   examDate: '2026-11-29',
   obsidian: true,
@@ -28,6 +29,14 @@ const D = () => ({
   bgAuto: false,
   view3d: false,
   themeMode: 'default',
+  // 图形理解增强（可选 · 独立开源视觉模型，不影响文字/视觉主模型）
+  fig: {
+    on: false,
+    prov: 'sf',
+    key: '',
+    url: 'https://api.siliconflow.cn/v1/chat/completions',
+    model: 'Qwen/Qwen2.5-VL-7B-Instruct'
+  },
   webdav: { url: '', user: '', pass: '' },
   szFrom: '2025-10',
   szTo: ''
@@ -40,7 +49,8 @@ export function load() {
       const d = JSON.parse(s)
       store.cfg = Object.assign(D(), d, {
         text: Object.assign(D().text, d.text || {}),
-        vision: Object.assign(D().vision, d.vision || {})
+        vision: Object.assign(D().vision, d.vision || {}),
+        fig: Object.assign(D().fig, d.fig || {})
       })
     }
   } catch (e) {}
@@ -74,8 +84,9 @@ export const saveMsgs = () => {
   try {
     // 压缩过大的图片 dataURL，避免 localStorage 超限导致历史丢失（用户用图提问截图常很大）
     const slim = JSON.stringify(store.msgs.slice(-200), (k, v) => {
-      if (typeof v === 'string' && v.length > 200000 && v.startsWith('data:image')) {
-        return '[大图已压缩存储]'
+      // 超大图直接置空（避免占位符字符串被当成图片 URL 发到 API 报 Unsupported image_url format）
+      if (typeof v === 'string' && v.length > 800000 && v.startsWith('data:image')) {
+        return ''
       }
       return v
     })

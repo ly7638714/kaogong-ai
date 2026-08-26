@@ -372,9 +372,12 @@ onUnmounted(clearTimers)
 <template>
   <div class="ov show sim-ov" @click.self="emit('close')">
     <div class="pnl sim-pnl pp-pnl">
+      <div class="pnl-top">
+        <button class="pnl-top-b" title="返回上一层" @click="emit('close')">← 返回</button>
+        <span class="pnl-top-t">📥 真题组卷</span>
+      </div>
       <!-- 配置 -->
       <div v-if="phase === 'config'" class="pp-config">
-        <h3>📥 真题组卷（多格式导入 · 智能出卷）</h3>
         <div class="pp-src">
           <button class="fp-b" :class="{ on: srcMode === 'import' }" @click="srcMode = 'import'">📂 导入材料</button>
           <button class="fp-b" :class="{ on: srcMode === 'wrong' }" @click="srcMode = 'wrong'">📋 错题集组卷</button>

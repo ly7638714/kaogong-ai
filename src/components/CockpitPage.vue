@@ -133,6 +133,7 @@ function goTask(t) {
     setTimeout(() => window.dispatchEvent(new CustomEvent('xc-focus-wrong')), 60)
   } else {
     store.tab = 'ths'
+    showToast('💡 积累页已打开：选 常识/时政/成语/实词 → 看一条 → 点「记住了」按艾宾浩斯排期复习', 'info')
   }
 }
 // 学习时长（studyTick 心跳驱动刷新）

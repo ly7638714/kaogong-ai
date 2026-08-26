@@ -12,7 +12,7 @@ import {
   ImageRun
 } from 'docx'
 import { store } from '../store'
-import { aiPolish } from '../api'
+import { aiPolish, chatOnce, activeCfg } from '../api'
 import { collectChat } from './chat'
 import { renderMd } from './renderMd'
 import { showToast } from './toast'
@@ -144,19 +144,32 @@ function printPdf(title, items) {
 function mdToParagraphs(md) {
   const ps = []
   const lines = String(md || '').split('\n')
-  // 块级公式 $$...$$ 先抽出来
+  // 块级公式 $...$ 先抽出来
   const formulas = []
   let s = lines.join('\n')
   s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, c) => formulas.length + '\u0000' + (formulas.push({ tex: c, display: true }) - 1) + '\u0001')
   s = s.replace(/\\\[([\s\S]+?)\\\]/g, (m, c) => formulas.length + '\u0000' + (formulas.push({ tex: c, display: true }) - 1) + '\u0001')
-  for (const line of s.split('\n')) {
-    const t = line.trim()
+  const ls = s.split('\n')
+  for (let i = 0; i < ls.length; i++) {
+    const t = ls[i].trim()
     if (!t) continue
+    // Markdown 表格：| 表头 | + |---| 分隔行 + 数据行 → docx 原生表格
+    if (/^\|.*\|\s*$/.test(t) && /^\|[\s:|-]+\|\s*$/.test((ls[i + 1] || '').trim())) {
+      const parseRow = (ln) => ln.trim().replace(/^\||\|\s*$/g, '').split('|').map((c) => stripMd(c.trim()))
+      const rows = [parseRow(t)]
+      i++ // 跳过分隔行
+      while (i < ls.length && /^\|.*\|\s*$/.test(ls[i].trim())) {
+        rows.push(parseRow(ls[i].trim()))
+        i++
+      }
+      ps.push({ table: rows })
+      continue
+    }
     // 行内公式 $...$ 转成公式占位
     const parts = t.split(/(\$[^$\n]+?\$)/g)
     for (const part of parts) {
       if (!part) continue
-      const mi = part.match(/^\$([^$]+)\$$/)
+      const mi = part.match(/^\$([^$]+)\$/)
       if (mi) {
         formulas.push({ tex: mi[1], display: false })
         ps.push({ formula: formulas.length - 1 })
@@ -389,6 +402,19 @@ async function buildDocx({ title, paragraphs, tables, formulas }) {
         } catch (e) {}
       }
       if (p.text) kids.push(new Paragraph({ children: [new TextRun({ text: p.text, size: 22 })] }))
+      if (p.table && p.table.length) {
+        const rows = p.table.map(
+          (r) =>
+            new TableRow({
+              children: r.map(
+                (c) =>
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(c), size: 20 })] })] })
+              )
+            })
+        )
+        kids.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }))
+        kids.push(new Paragraph({ children: [new TextRun('')] }))
+      }
       if (p.imgs)
         for (const src of p.imgs) {
           try {
@@ -553,6 +579,7 @@ export function exportWrongMd() {
   showToast('已导出错题集 Markdown（按板块分组）', 'success')
 }
 export function exportDataAuto(type, format) {
+
   if (format === 'md') {
     exportDataMd(type)
     return
@@ -706,4 +733,248 @@ export function exportAnkiCsv() {
   })
   downloadText(L.join('\n'), '行测错题-Anki.csv', 'text/csv;charset=utf-8')
   showToast('已导出 Anki CSV（Anki→导入→选择此文件）', 'success')
+}
+
+
+// ===== 模拟组卷 / 试卷导出：整卷排版导出 Word / PDF / Markdown / LaTeX =====
+// paper: { name, questions:[{subject,stem,options,answer,explain,analysis}] }
+// marks: 每题的 { ok, pick, timeout }
+// meta:  { score, rate, sec, moduleStats:[{subject,total,ok}] }
+export async function exportPaper(paper, marks, meta, format, polish) {
+  const qs = (paper && paper.questions) || []
+  if (!qs.length) { showToast('暂无题目可导出', 'info'); return }
+  const ms = marks || []
+  const title = '模拟组卷 · ' + (paper.name || '试卷') + '（' + new Date().toLocaleDateString() + '）'
+  const stat = meta || { score: 0, rate: 0, sec: 0, moduleStats: [] }
+
+  // 每题内容块
+  function qLines(qq, i) {
+    const m = ms[i] || {}
+    const L = []
+    const stem = String(qq.stem || '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim()
+    L.push('【' + (i + 1) + '题 · ' + (qq.subject || '未分类') + '】')
+    L.push('题干：' + stem)
+    const opts = (qq.options || []).map((o) => o.k + '. ' + o.t).join('　')
+    if (opts) L.push('选项：' + opts)
+    L.push('我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + '　正确答案：' + (qq.answer || '—') + '　' + (m.ok ? '✅ 正确' : '❌ 错误'))
+    const ana = qq.explain || qq.analysis || ''
+    if (ana) L.push('解析：' + String(ana).replace(/\s+/g, ' ').trim())
+    return L
+  }
+
+  // ===== AI 智能排版：先让 AI 梳理考点/错因/秒杀规律，再按所选格式导出 =====
+  if (polish) {
+    const polished = await aiPolishPaper(paper, marks, meta)
+    if (!polished) return
+    const pTitle = title + '（AI排版）'
+    if (format === 'md') { downloadText(polished, pTitle + '.md', 'text/markdown;charset=utf-8'); showToast('✅ 已导出 AI 排版 Markdown', 'success'); return }
+    if (format === 'tex') { downloadText(mdToTex(polished), pTitle + '.tex', 'application/x-tex;charset=utf-8'); showToast('✅ 已导出 AI 排版 LaTeX', 'success'); return }
+    if (format === 'typ') { downloadText(mdToTyp(polished), pTitle + '.typ', 'text/plain;charset=utf-8'); showToast('✅ 已导出 AI 排版 Typst', 'success'); return }
+    if (format === 'pdf') { printPdf(pTitle, [{ type: 'msg', role: 'ai', text: polished }]); return }
+    await exportMdDocx(pTitle, polished)
+    return
+  }
+  if (format === 'typ') {
+    downloadText(typFromPaper(paper, marks, meta), title + '.typ', 'text/plain;charset=utf-8')
+    showToast('✅ 已导出 Typst 源文件（可用 Typst/typst.app 编译为 PDF）', 'success')
+    return
+  }
+
+  if (format === 'md') {
+    let md = '# ' + title + '\n\n> 导出时间：' + new Date().toLocaleString() + '\n\n'
+    md += '## 📄 成绩概览\n\n| 总题数 | 答对 | 正确率 | 总用时 |\n|---|---|---|---|\n| ' + qs.length + ' | ' + stat.score + ' | ' + stat.rate + '% | ' + Math.round((stat.sec || 0) / 60) + '分' + (stat.sec || 0) % 60 + '秒 |\n\n'
+    if (stat.moduleStats && stat.moduleStats.length) {
+      md += '## 📊 板块统计\n\n| 板块 | 题数 | 答对 | 正确率 |\n|---|---|---|---|\n'
+      stat.moduleStats.forEach((s) => { md += '| ' + s.subject + ' | ' + s.total + ' | ' + s.ok + ' | ' + (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '% |\n' })
+      md += '\n'
+    }
+    qs.forEach((qq, i) => { md += '## ' + qLines(qq, i).join('\n\n') + '\n\n---\n\n' })
+    downloadText(md, title + '.md', 'text/markdown;charset=utf-8')
+    showToast('✅ 已导出整卷 Markdown', 'success')
+    return
+  }
+
+  if (format === 'tex') {
+    const esc = (s) => String(s || '').replace(/([\\{}_$&%#])/g, '\\$1').replace(/~/g, '\\textasciitilde{}').replace(/\^/g, '\\textasciicircum{}')
+    let tx = '\\\\documentclass[12pt,a4paper]{article}\n\\\\usepackage[UTF8]{ctex}\n\\\\usepackage{geometry}\n\\\\geometry{left=2cm,right=2cm,top=2.2cm,bottom=2.2cm}\n\\\\usepackage{enumitem}\n\\\\usepackage{longtable}\n\\\\usepackage{xcolor}\n\\\\usepackage{titlesec}\n\\\\begin{document}\n\n'
+    tx += '\\\\begin{center}\n{\\\\LARGE\\\\bfseries ' + esc(title) + '}\\\\\\\\[4pt]\n{\\\\small 导出时间：' + esc(new Date().toLocaleString()) + '}\n\\\\end{center}\n\n'
+    tx += '\\\\section*{成绩概览}\n总题数：' + qs.length + '　答对：' + stat.score + '　正确率：' + stat.rate + '\\%　总用时：' + Math.round((stat.sec || 0) / 60) + '分' + (stat.sec || 0) % 60 + '秒\n\n'
+    if (stat.moduleStats && stat.moduleStats.length) {
+      tx += '\\\\section*{板块统计}\n\\\\begin{longtable}{|l|c|c|c|}\n\\\\hline\n板块 & 题数 & 答对 & 正确率\\\\\\\\ \\\\hline\n'
+      stat.moduleStats.forEach((s) => { tx += s.subject + ' & ' + s.total + ' & ' + s.ok + ' & ' + (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '\\%\\\\\\\\ \\\\hline\n' })
+      tx += '\\\\end{longtable}\n\n'
+    }
+    qs.forEach((qq, i) => {
+      const L = qLines(qq, i)
+      tx += '\\\\section*{' + esc(L[0]) + '}\n\\\\begin{quote}\n'
+      for (let k = 1; k < L.length; k++) tx += esc(L[k]) + '\\\\\\\\\n'
+      tx += '\\\\end{quote}\n\n'
+    })
+    tx += '\\\\end{document}\n'
+    downloadText(tx, title + '.tex', 'application/x-tex;charset=utf-8')
+    showToast('✅ 已导出整卷 LaTeX（可用 TeX Live / Overleaf 编译）', 'success')
+    return
+  }
+
+  // docx / pdf：复用现有排版管线
+  const items = []
+  items.push({ type: 'h', text: '📄 成绩概览' })
+  items.push({ type: 'table', head: ['总题数', '答对', '正确率', '总用时'], rows: [[String(qs.length), String(stat.score), stat.rate + '%', Math.round((stat.sec || 0) / 60) + '分' + (stat.sec || 0) % 60 + '秒']] })
+  if (stat.moduleStats && stat.moduleStats.length) {
+    items.push({ type: 'h', text: '📊 板块统计' })
+    items.push({ type: 'table', head: ['板块', '题数', '答对', '正确率'], rows: stat.moduleStats.map((s) => [s.subject, String(s.total), String(s.ok), (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '%']) })
+  }
+  qs.forEach((qq, i) => {
+    const m = ms[i] || {}
+    items.push({ type: 'h', text: '第' + (i + 1) + '题 · ' + (qq.subject || '未分类') + (m.ok ? ' ✅' : ' ❌') })
+    items.push({ type: 'msg', role: 'a', text: qLines(qq, i).join('\n') })
+  })
+  if (format === 'pdf') printPdf(title, items)
+  else {
+    try {
+      const blob = await buildDocx({ title, paragraphs: itemsToParagraphs(items), tables: itemsToTables(items) })
+      downloadBlob(blob, title + '.docx')
+      showToast('✅ 已导出整卷 Word', 'success')
+    } catch (e) {
+      downloadText(pdfHtml(title, items), title + '.doc', 'application/msword')
+      showToast('Word 生成失败，已降级导出 .doc', 'info')
+    }
+  }
+}
+// items → docx 段落/表格（供整卷导出复用）
+function itemsToParagraphs(items) {
+  const ps = []
+  for (const it of items) {
+    if (it.type === 'h') ps.push({ heading: it.text })
+    else if (it.type === 'msg') {
+      ps.push({ heading: it.role === 'user' ? '🙋 我' : '🧩 题目' })
+      String(it.text || '').split('\n').forEach((ln) => ps.push({ text: stripMd(ln) }))
+    }
+  }
+  return ps
+}
+function itemsToTables(items) {
+  const ts = []
+  for (const it of items) if (it.type === 'table') ts.push([it.head].concat(it.rows))
+  return ts
+}
+
+
+// ===== AI 智能排版：整卷 → 高质量复习文档 =====
+export async function aiPolishPaper(paper, marks, meta) {
+  const c = activeCfg(false)
+  if (!c || !c.key) { showToast('AI 排版需要文字模型 API Key，请先在设置配置', 'error'); return null }
+  const qs = (paper && paper.questions) || []
+  const ms = marks || []
+  if (!qs.length) { showToast('暂无题目可排版', 'info'); return null }
+  let src = '【成绩】共 ' + qs.length + ' 题 · 答对 ' + (meta && meta.score != null ? meta.score : 0) + ' · 正确率 ' + (meta && meta.rate != null ? meta.rate : 0) + '%\n\n'
+  qs.forEach((qq, i) => {
+    const m = ms[i] || {}
+    src += '第' + (i + 1) + '题 [' + (qq.subject || '未分类') + '] ' + (m.ok ? '做对' : '做错') + '\n'
+    src += '题干：' + String(qq.stem || '').replace(/^#{1,6}\s*/gm, '').trim() + '\n'
+    src += '选项：' + (qq.options || []).map((o) => o.k + '. ' + o.t).join('　') + '\n'
+    src += '我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + '　正确答案：' + (qq.answer || '—') + '\n'
+    const ana = qq.explain || qq.analysis || ''
+    if (ana) src += '解析：' + String(ana).replace(/\s+/g, ' ').trim() + '\n'
+    src += '\n'
+  })
+  const prompt =
+    '你是公考行测学习笔记排版专家。把下面这份"整卷作答记录"重新排版成一份适合复习/打印的高质量文档（Markdown），要求：\n' +
+    '1. 开头给【卷面总结】：总题数/答对/正确率 + 一句话整体评价。\n' +
+    '2. 每题按固定结构输出：**第N题 · 板块（✅/❌）** → **考点**（一句话）→ **题干** → **选项** → **我的答案 / 正确答案** → **错因**（做错题给 1-2 句具体错因；做对题写"保持"）→ **秒杀规律**（一句话）。\n' +
+    '3. 做错的题用 > 引用块突出，方便二刷；语言精炼专业，用标准 Markdown（标题/加粗/列表/引用）。\n' +
+    '4. 不遗漏任何一题，不编造题干与解析，解析以原记录为准。\n\n作答记录：\n' + String(src).slice(0, 12000)
+  try {
+    return await chatOnce(c, [{ role: 'system', content: '你是公考行测学习笔记排版专家，输出规范 Markdown。' }, { role: 'user', content: prompt }], 4000)
+  } catch (e) {
+    showToast('AI 排版失败：' + e.message, 'error')
+    return null
+  }
+}
+
+// Markdown → LaTeX（AI 排版结果转 TeX 源文件）
+function mdToTex(md) {
+  const esc = (s) => String(s || '').replace(/([\\{}_$&%#])/g, '\\$1').replace(/~/g, '\\textasciitilde{}').replace(/\^/g, '\\textasciicircum{}')
+  let tx = '\\documentclass[12pt,a4paper]{article}\n\\usepackage[UTF8]{ctex}\n\\usepackage{geometry}\n\\geometry{left=2cm,right=2cm,top=2.2cm,bottom=2.2cm}\n\\usepackage{xcolor}\n\\usepackage{longtable}\n\\begin{document}\n\n'
+  const ls = String(md || '').split('\n')
+  for (let i = 0; i < ls.length; i++) {
+    const t = ls[i].trim()
+    if (!t) continue
+    // Markdown 表格 → longtable
+    if (/^\|.*\|\s*$/.test(t) && /^\|[\s:|-]+\|\s*$/.test((ls[i + 1] || '').trim())) {
+      const parseRow = (ln) => ln.trim().replace(/^\||\|\s*$/g, '').split('|').map((c) => esc(c.trim()))
+      const rows = [parseRow(t)]
+      i++
+      while (i < ls.length && /^\|.*\|\s*$/.test(ls[i].trim())) { rows.push(parseRow(ls[i].trim())); i++ }
+      const cols = Math.max(1, rows[0].length)
+      tx += '\\begin{longtable}{|' + 'l|'.repeat(cols) + '}\n\\hline\n'
+      rows.forEach((r) => { tx += r.join(' & ') + '\\\\ \\hline\n' })
+      tx += '\\end{longtable}\n\n'
+      continue
+    }
+    if (/^##\s+/.test(t)) tx += '\\section*{' + esc(t.replace(/^##\s+/, '')) + '}\n'
+    else if (/^###\s+/.test(t)) tx += '\\subsection*{' + esc(t.replace(/^###\s+/, '')) + '}\n'
+    else if (/^>\s*/.test(t)) tx += '\\begin{quote}\n' + esc(t.replace(/^>\s*/, '')) + '\n\\end{quote}\n'
+    else if (/^\*\*(.+?)\*\*/.test(t)) tx += '\\textbf{' + esc(t.replace(/^\*\*(.+?)\*\*/, '$1')) + '}\n\n'
+    else if (/^[-*+]\s+/.test(t)) tx += '\\begin{itemize}\\item ' + esc(t.replace(/^[-*+]\s+/, '')) + '\\end{itemize}\n'
+    else tx += esc(t.replace(/\*\*/g, '')) + '\\\\\n'
+  }
+  tx += '\\end{document}\n'
+  return tx
+}
+
+// Markdown → Typst（AI 排版结果转 Typst 源文件）
+function mdToTyp(md) {
+  const esc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/#/g, '\\#').replace(/_/g, '\\_')
+  let t = '#set page("a4", margin: 2cm)\n#set text(font: ("Microsoft YaHei", "Noto Sans CJK SC"), size: 11pt)\n\n'
+  const ls = String(md || '').split('\n')
+  for (let i = 0; i < ls.length; i++) {
+    const s = ls[i].trim()
+    if (!s) { t += '\n'; continue }
+    // Markdown 表格 → Typst #table
+    if (/^\|.*\|\s*$/.test(s) && /^\|[\s:|-]+\|\s*$/.test((ls[i + 1] || '').trim())) {
+      const parseRow = (ln) => ln.trim().replace(/^\||\|\s*$/g, '').split('|').map((c) => '[' + esc(c.trim()) + ']')
+      const rows = [parseRow(s)]
+      i++
+      while (i < ls.length && /^\|.*\|\s*$/.test(ls[i].trim())) { rows.push(parseRow(ls[i].trim())); i++ }
+      const cols = Math.max(1, rows[0].length)
+      t += '#table(columns: ' + cols + ', stroke: 0.5pt, ' + rows.map((r) => r.join(', ')).join(', ') + ')\n\n'
+      continue
+    }
+    if (/^##\s+/.test(s)) t += '== ' + esc(s.replace(/^##\s+/, '')) + '\n'
+    else if (/^###\s+/.test(s)) t += '=== ' + esc(s.replace(/^###\s+/, '')) + '\n'
+    else if (/^>\s*/.test(s)) t += esc(s.replace(/^>\s*/, '')) + '\n'
+    else t += esc(s) + '\n'
+  }
+  return t
+}
+
+// 整卷（未排版）→ Typst 源文件
+function typFromPaper(paper, marks, meta) {
+  const esc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/#/g, '\\#').replace(/_/g, '\\_')
+  const qs = (paper && paper.questions) || []
+  const ms = marks || []
+  const tSec = (meta && meta.sec) || 0
+  let t = '#set page("a4", margin: 2cm)\n#set text(font: ("Microsoft YaHei", "Noto Sans CJK SC"), size: 11pt)\n\n'
+  t += '#align(center)[#text(size: 18pt, weight: "bold")[' + esc(paper && paper.name) + ']]\n\n'
+  t += '导出时间：' + new Date().toLocaleString() + '\n\n'
+  t += '== 成绩概览\n'
+  t += '#table(columns: 4, stroke: 0.5pt, [*总题数*], [*答对*], [*正确率*], [*总用时*], [' + qs.length + '], [' + ((meta && meta.score) || 0) + '], [' + ((meta && meta.rate) || 0) + '%], [' + Math.round(tSec / 60) + '分' + tSec % 60 + '秒])\n\n'
+  if (meta && meta.moduleStats && meta.moduleStats.length) {
+    t += '== 板块统计\n'
+    t += '#table(columns: 4, stroke: 0.5pt, [*板块*], [*题数*], [*答对*], [*正确率*], '
+    meta.moduleStats.forEach((s, idx) => { t += (idx ? ', ' : '') + '[' + esc(s.subject) + '], [' + s.total + '], [' + s.ok + '], [' + (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '%]' })
+    t += ')\n\n'
+  }
+  qs.forEach((qq, i) => {
+    const m = ms[i] || {}
+    t += '== 第' + (i + 1) + '题 · ' + esc(qq.subject || '未分类') + ' ' + (m.ok ? '✅' : '❌') + '\n'
+    t += '*题干*：' + esc(String(qq.stem || '').replace(/^#{1,6}\s*/gm, '').trim()) + '\n\n'
+    const opts = (qq.options || []).map((o) => o.k + '. ' + o.t).join('　')
+    if (opts) t += '*选项*：' + esc(opts) + '\n\n'
+    t += '*我的答案*：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + '　*正确答案*：' + esc(qq.answer || '—') + '\n\n'
+    const ana = qq.explain || qq.analysis || ''
+    if (ana) t += '*解析*：' + esc(String(ana).replace(/\s+/g, ' ').trim()) + '\n\n'
+  })
+  return t
 }

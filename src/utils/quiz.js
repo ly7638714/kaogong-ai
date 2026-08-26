@@ -77,9 +77,16 @@ export function parseQuiz(text) {
 
   // 解析区：从"答案解析/解析"标题到结尾
   const explainIdx = lines.findIndex((l) => /^#{1,6}\s*(✅\s*)?(答案解析|解析|答案详解)/.test(l.trim()))
-  const explain = explainIdx >= 0 ? lines.slice(explainIdx).join('\n').trim() : ''
+  let explain = explainIdx >= 0 ? lines.slice(explainIdx).join('\n').trim() : ''
+  // 分离「命题人设计说明」为独立字段（不随解析直接展示，答完+看完解析后由按钮单独打开）
+  let designer = ''
+  const dm = explain.match(/###?\s*🧠\s*命题人设计说明\s*\n?([\s\S]*)$/)
+  if (dm) {
+    designer = dm[1].trim()
+    explain = explain.slice(0, dm.index).trim()
+  }
 
-  return { stem, options: opts, answer, explain }
+  return { stem, options: opts, answer, explain, designer }
 }
 
 // 出题提示词尾部追加片段：要求输出答案标记，便于解析成可点选项
@@ -99,4 +106,36 @@ export function answerLetter(s) {
   if (m) return m[1].toUpperCase()
   const m2 = t.match(/\b([A-D])\b/)
   return m2 ? m2[1].toUpperCase() : ''
+}
+
+// 资料分析「材料+题组」解析：从 AI 输出中拆出 材料 + N 道题
+// 期望格式：### 📄 材料 ... ### 第1题 ... ### ✅ 解析 ... ### 第2题 ...
+export function parseMaterialQuiz(text, n) {
+  if (!text || typeof text !== 'string') return null
+  const src = String(text)
+  // 1) 材料块：### 📄 材料 到 第一个 ### 第N题 之间
+  let material = ''
+  const matM = src.match(/###\s*📄\s*材料\s*\n([\s\S]*?)(?=\n###\s*第\s*\d+\s*题|$)/)
+  if (matM) material = matM[1].trim()
+  // 2) 按 ### 第N题 切块
+  const parts = src.split(/###\s*第\s*(\d+)\s*题/)
+  const qs = []
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const block = parts[i + 1]
+    const q = parseQuiz(block)
+    if (q) {
+      // 若解析区为空，兜底抓取 "解析：" 尾段
+      if (!q.explain) {
+        const ei = block.search(/解析\s*[:：]/)
+        if (ei >= 0) q.explain = block.slice(ei).trim()
+      }
+      qs.push(q)
+    }
+  }
+  // 3) 兜底：一个题都没切出来时，尝试整段按单题解析
+  if (!qs.length) {
+    const q = parseQuiz(src.replace(/###\s*📄\s*材料[\s\S]*?\n###\s*第1题/, ''))
+    if (q) qs.push(q)
+  }
+  return { material, qs }
 }

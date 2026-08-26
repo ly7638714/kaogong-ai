@@ -29,14 +29,27 @@ export function activeCfg(hasImg) {
   return store.cfg.text && store.cfg.text.key ? store.cfg.text : hasImg ? v : store.cfg.text
 }
 
-export async function chatStream(messages, c, onDelta, signal) {
+export async function chatStream(messages, c, onDelta, signal, timeoutMs = 120000) {
   // 推理/思考模型（deepseek-reasoner、deepseek-v4 系列、kimi 等）不支持 temperature，
   // 且「思考过程 + 图片 + 正文」会大量占用 max_tokens：必须给足输出上限并去掉 temperature，
   // 否则思考没写完 max_tokens 就耗尽，正式回答(content)为空（表现为"只出思考过程"）。
   const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
   const body = { model: c.model, messages, max_tokens: isReasoner ? 20000 : 10000, stream: true }
   if (!isReasoner) body.temperature = 0.7
-  const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal })
+  // 无外部取消信号时：内部超时自动中断
+  let _ctrl = null
+  let _sig = signal
+  const _timer = setTimeout(() => { if (_ctrl && !_sig) _ctrl.abort() }, timeoutMs)
+  if (!_sig) { _ctrl = new AbortController(); _sig = _ctrl.signal }
+  let _resp
+  try {
+    _resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: _sig })
+  } catch (e) {
+    clearTimeout(_timer)
+    throw e.name === 'AbortError' ? new Error('请求超时（' + Math.round(timeoutMs / 1000) + ' 秒），已自动重试') : e
+  }
+  clearTimeout(_timer)
+  const resp = _resp
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}))
     throw new Error(e.error?.message || 'HTTP ' + resp.status)
@@ -88,7 +101,7 @@ export async function chatStream(messages, c, onDelta, signal) {
   return full
 }
 
-export async function chatOnce(c, messages, maxTokens = 2000) {
+export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000) {
   const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
   const body = {
     model: c.model,
@@ -97,14 +110,30 @@ export async function chatOnce(c, messages, maxTokens = 2000) {
     stream: false
   }
   if (!isReasoner) body.temperature = 0.3
-  const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body) })
-  if (!resp.ok) {
-    const e = await resp.json().catch(() => ({}))
-    throw new Error(e.error?.message || 'HTTP ' + resp.status)
+  let lastErr = null
+  // 最多 2 次尝试：网络抖动 / 超时 / 空响应自动重试一次
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: ctrl.signal })
+      clearTimeout(timer)
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}))
+        throw new Error(e.error?.message || 'HTTP ' + resp.status)
+      }
+      const d = await resp.json()
+      const m = d.choices?.[0]?.message || {}
+      const t = (m.content || '').trim()
+      if (t) return t
+      lastErr = new Error('模型返回为空，已自动重试')
+    } catch (e) {
+      clearTimeout(timer)
+      lastErr = e.name === 'AbortError' ? new Error('请求超时（' + Math.round(timeoutMs / 1000) + ' 秒），已自动重试') : e
+      if (!/timeout|timed out|abort|ETIMEDOUT|fetch/i.test(String(e && e.message || ''))) break
+    }
   }
-  const d = await resp.json()
-  const m = d.choices?.[0]?.message || {}
-  return (m.content || '').trim() || null
+  throw lastErr || new Error('请求失败')
 }
 
 export async function aiPolish(text) {

@@ -111,7 +111,7 @@ const weakPanel = computed(() => {
 })
 
 // 允许外部暂停/恢复渲染（active=false 时停掉 RAF，避免 GPU 空转——防止臃肿坍塌）
-const props = defineProps({ active: { type: Boolean, default: true } })
+const props = defineProps({ active: { type: Boolean, default: true }, activeTab: { type: String, default: 'ck' } })
 function renderStep() {
   if (props.active) {
     try {
@@ -210,7 +210,7 @@ watch(
   <div ref="el" class="cosmos-bg"></div>
   <!-- 行星数据 HUD（点击行星弹出） -->
   <Transition name="hud">
-    <div v-if="selectedDetail" class="planet-card hud-corner" :style="{ '--pc': '#' + selectedDetail.color.toString(16) }">
+    <div v-if="activeTab === 'ck' && selectedDetail" class="planet-card hud-corner" :style="{ '--pc': '#' + selectedDetail.color.toString(16) }">
       <div class="pc-head">
         <span class="pc-dot" :style="{ background: '#' + selectedDetail.color.toString(16) }"></span>
         <span class="pc-name">{{ selectedDetail.name }}</span>
@@ -230,8 +230,8 @@ watch(
       </div>
     </div>
   </Transition>
-  <!-- 星图图例 HUD（左下角，点击聚焦该行星） -->
-  <div class="legend">    <div
+  <!-- 星图图例 HUD（左下角，点击聚焦该行星）仅在「看板」页显示，避免遮挡其它页面 -->
+  <div v-if="activeTab === 'ck'" class="legend">    <div
       v-for="p in PLATE_META"
       :key="p.key"
       class="lg-item"
@@ -244,7 +244,7 @@ watch(
   </div>
   <!-- 薄弱板块提醒（点击聚焦，可再次聚焦通配最弱板块） -->
   <Transition name="hud">
-    <div v-if="weakPanel" class="weak-bar" @click="sel = { key: weakPanel.key }; engine && engine.focusTo(weakPanel.key)">
+    <div v-if="activeTab === 'ck' && weakPanel" class="weak-bar" @click="sel = { key: weakPanel.key }; engine && engine.focusTo(weakPanel.key)">
       <span class="wk-ic">🎯</span>
       <span class="wk-txt">优先攻克 <b :style="{ color: '#' + weakPanel.color.toString(16) }">{{ weakPanel.name }}</b></span>
       <span class="wk-wrong">错题 {{ weakPanel.wrong }}</span>
@@ -347,7 +347,7 @@ watch(
 .legend {
   position: fixed;
   left: 16px;
-  bottom: max(16px, env(safe-area-inset-bottom));
+  bottom: max(78px, calc(env(safe-area-inset-bottom) + 78px));
   z-index: 5;
   display: flex;
   gap: 6px;
@@ -387,7 +387,7 @@ watch(
 .weak-bar {
   position: fixed;
   right: 16px;
-  bottom: max(16px, env(safe-area-inset-bottom));
+  bottom: max(78px, calc(env(safe-area-inset-bottom) + 78px));
   z-index: 6;
   display: flex;
   align-items: center;

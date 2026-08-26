@@ -274,7 +274,7 @@ export function createLibrary(container, books, readSet) {
     if (onBookChange) onBookChange(null, null)
   }
 
-  const clock = new THREE.Clock()
+  let lastT = performance.now()
   renderer.domElement.addEventListener('click', onClick)
   // 标记某本书已读,刷新其书脊纹理(金色已读✓)
   function setRead(name) {
@@ -294,7 +294,9 @@ export function createLibrary(container, books, readSet) {
     putBack,
     setRead,
     render() {
-      const dt = Math.min(clock.getDelta(), 0.05)
+      const now = performance.now()
+      const dt = Math.min((now - lastT) / 1000, 0.05)
+      lastT = now
       move(dt)
       if (heldMesh) {
         // 跟手：始终位于相机前方 3 units

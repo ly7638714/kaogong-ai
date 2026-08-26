@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveMyMem, saveNotes } from './store'
-import { speak, SCENES, getAllVoices, onVoicesReady } from './utils/tts'
+import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady } from './utils/tts'
 import { PLATE_MODE } from './api'
+import { FIG_PROVIDERS, fillFigProvPreset, testFigConn } from './api/figEnhance'
 import ChatPage from './components/ChatPage.vue'
 import KbPage from './components/KbPage.vue'
 import StatsPage from './components/StatsPage.vue'
@@ -14,6 +15,7 @@ import CosmosScene from './components/CosmosScene.vue'
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
+import { nav, navBack, syncNavFromHistory } from './utils/nav'
 import { webdavUpload, webdavDownload } from './utils/webdav'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase } from './utils/music'
@@ -191,14 +193,14 @@ const GUIDES = {
   chat: {
     key: 'chat', icon: '💬', title: '对话刷题（核心页）',
     desc: '所有提问、讲题、训练都在这里，是主战场。',
-    features: ['🧠 10 个专项模式（逻辑/言语/图推/资料/数量…）', '🎲 模拟出题 / 📝 整卷模拟 / 📥 真题组卷', '📷 图片题走视觉模型，公式图表都能看'],
+    features: ['🧠 10 个专项模式（逻辑/言语/图推/资料/数量…）', '🎲 模拟出题 / 📝 模拟组卷（国考·省考真实卷面·AI/导入/错题三源）', '📷 图片题走视觉模型，公式图表都能看'],
     tips: ['① 先在设置配好 API Key 和视觉模型', '② 刷题开「考场限时」练速度', '③ 答完点「📌 存错题」，用「🔁 出变式题」检验是否真懂']
   },
   kb: {
     key: 'kb', icon: '📚', title: '知识速查',
     desc: '名师方法论按板块整理成卡片，考前突击靠它。',
-    features: ['📂 2D 速查：按板块分组，点卡片看核心要点', '💬 点「问 AI 讲透」让 AI 展开讲，🎲 出题检验', '🕹️ 可切换 3D 书柜（展示用）'],
-    tips: ['① 考前把每张卡片的「秒杀规律」过一遍', '② 不会的方法点「问 AI 讲透」再配例题', '③ 3D 书柜只是展示，备考用 2D 更快']
+    features: ['📚 按板块速查：点卡片看核心要点', '💬 点「问 AI 讲透」让 AI 展开讲，🎲 出题检验', '📖 每张卡片含 理论/技巧/例题 与秒杀规律'],
+    tips: ['① 考前把每张卡片的「秒杀规律」过一遍', '② 不会的方法点「问 AI 讲透」再配例题', '③ 理论→技巧→例题 按序学，例题先自己做再看解析']
   },
   ths: {
     key: 'ths', icon: '🗂️', title: '常识·时政积累',
@@ -293,6 +295,63 @@ function doRename() {
 }
 
 
+// ===== 背景音乐 / 萌宠浮控件：默认置顶 + 支持拖拽（位置记忆到 localStorage）=====
+const musicPos = ref(null) // {x, y}
+const petPos = ref(null)
+try {
+  const mp = JSON.parse(localStorage.getItem('xc_music_pos') || 'null')
+  const pp = JSON.parse(localStorage.getItem('xc_pet_pos') || 'null')
+  if (mp && typeof mp.x === 'number') musicPos.value = mp
+  if (pp && typeof pp.x === 'number') petPos.value = pp
+} catch (e) {}
+let dragState = null
+let dragMoved = false
+function floatStyle(key) {
+  const p = key === 'music' ? musicPos.value : petPos.value
+  if (!p) return {}
+  return { left: p.x + 'px', top: p.y + 'px', right: 'auto' }
+}
+function startFloatDrag(e, key) {
+  if (e.button != null && e.button !== 0) return
+  const el = e.currentTarget
+  if (!el) return
+  e.preventDefault()
+  const rect = el.getBoundingClientRect()
+  dragState = { key, startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top, el }
+  dragMoved = false
+  el.classList.add('dragging')
+  document.addEventListener('pointermove', onFloatDragMove)
+  document.addEventListener('pointerup', onFloatDragUp)
+}
+function onFloatDragMove(e) {
+  if (!dragState) return
+  const { key, startX, startY, origX, origY, el } = dragState
+  if (!dragMoved && Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 6) dragMoved = true
+  let x = origX + e.clientX - startX
+  let y = origY + e.clientY - startY
+  x = Math.max(4, Math.min(window.innerWidth - el.offsetWidth - 4, x))
+  y = Math.max(4, Math.min(window.innerHeight - el.offsetHeight - 4, y))
+  if (key === 'music') musicPos.value = { x, y }
+  else petPos.value = { x, y }
+}
+function onFloatDragUp() {
+  if (!dragState) return
+  const { key, el } = dragState
+  dragState = null
+  el.classList.remove('dragging')
+  document.removeEventListener('pointermove', onFloatDragMove)
+  document.removeEventListener('pointerup', onFloatDragUp)
+  try {
+    localStorage.setItem('xc_music_pos', JSON.stringify(musicPos.value))
+    localStorage.setItem('xc_pet_pos', JSON.stringify(petPos.value))
+  } catch (e) {}
+}
+function floatClick(key) {
+  if (dragMoved) { dragMoved = false; return }
+  if (key === 'music') toggleMusic()
+  else openPet()
+}
+
 // ===== 背景（纯色 / 图片壁纸）=====
 const BG_SOLIDS = [
   { k: 'deep', n: '深空蓝', c: '#0a1424' },
@@ -346,8 +405,8 @@ const FUNCS = [
   { k: 'tab_wq', t: '📋 错题本', match: ['错题', '复盘', '二刷', '抽认'] },
   { k: 'set', t: '⚙️ 设置', match: ['设置', 'api', '外观', '背景', '同步', '语音', 'webdav', '护眼'] },
   { k: 'export', t: '📤 导出', match: ['导出', 'word', 'pdf', 'markdown', 'obsidian', 'anki'] },
-  { k: 'exam', t: '📝 整卷模拟考试', match: ['整卷', '模拟', '考试', 'exam', '组卷'] },
-  { k: 'paper', t: '📥 真题组卷', match: ['真题', '导入题', 'paper', '试卷'] },
+  { k: 'exam', t: '📝 模拟组卷', match: ['整卷', '模拟', '考试', 'exam', '组卷', '国考', '省考'] },
+  { k: 'paper', t: '📥 导入组卷', match: ['真题', '导入题', 'paper', '试卷', '图片识别'] },
   { k: 'music', t: '🎵 背景音乐', match: ['音乐', 'music', 'bgm', '歌单'] },
   { k: 'pet', t: '🐾 我的萌宠', match: ['萌宠', '宠物', 'pet'] },
   { k: '3d', t: '◉ 3D 背景开关', match: ['3d', '背景', '全景', '2d'] }
@@ -424,6 +483,7 @@ function toggleBgAuto() {
 const SET_GUIDE = [
   { id: 'set-api', t: '💬 文字模型', d: '纯文字题的 AI 大脑：选提供商、填 API Key、地址与模型名。', tips: '推荐 DeepSeek（便宜中文好）；点「🔑 如何获取 API Key」看教程；填完点底部「保存并测试」验证。' },
   { id: 'set-vision', t: '👁️ 视觉模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek 可用同一个 Key；不配则发图题无法识别。' },
+  { id: 'set-fig', t: '🖼 图形理解增强（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
   { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '先「试听」选喜欢的；本机语音列表可覆盖场景音色。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、3D背景、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
@@ -457,9 +517,22 @@ const setNav = [
   { id: 'set-help', t: '帮助' },
   { id: 'set-about', t: '关于' }
 ]
+// ===== 设置分组手风琴：把超长设置面板分成 4 组，点击标题展开/收起 =====
+const SEC_GROUP = {
+  'set-api': 'model', 'set-vision': 'model', 'set-fig': 'model', 'set-voice': 'model',
+  'set-look': 'look', 'set-bg': 'look',
+  'set-data': 'fun',
+  'set-help': 'help', 'set-about': 'help'
+}
+const setGroup = ref('model')
+function toggleSetGroup(k) { setGroup.value = setGroup.value === k ? '' : k }
 function scrollSet(id) {
-  const el = document.getElementById(id)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const g = SEC_GROUP[id]
+  if (g) setGroup.value = g
+  setTimeout(() => {
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 60)
 }
 const sysVoices = ref([])
 function loadSysVoices() {
@@ -569,6 +642,12 @@ function clearChat() {
   saveMsgs()
   showToast('已清空对话', 'success')
 }
+function toggleTtsSetting() {
+  store.cfg.ttsOn = store.cfg.ttsOn === false
+  saveCfg()
+  if (store.cfg.ttsOn === false) stopSpeak()
+  showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
+}
 function ttsTest() {
   speak('你好，我是你的行测智能助教。接下来这道题，我来帮你讲透。', {
     scene: store.cfg.ttsScene,
@@ -642,7 +721,36 @@ function fillProv(kind) {
   store.cfg[kind].url = pre.url
   store.cfg[kind].model = pre.model
 }
+// ===== 图形理解增强（可选·独立模型）=====
+const figTestStat = ref('')
+function fillFig() {
+  const pre = fillFigProvPreset(store.cfg.fig.prov)
+  store.cfg.fig.url = pre.url
+  store.cfg.fig.model = pre.model
+  saveCfg()
+}
+async function figTest() {
+  const c = store.cfg.fig
+  if (!c || !c.url || !c.model) { figTestStat.value = '先填 API 地址与模型名称'; return }
+  figTestStat.value = '检测中…'
+  const r = await testFigConn(c)
+  figTestStat.value = r.ok === true ? '✅ 连通正常' : r.ok === false ? '❌ ' + (r.msg || '连接失败') : '未配置'
+  if (r.ok === true) showToast('✅ 图形增强模型连通正常', 'success')
+  else if (r.ok === false) showToast('❌ 图形增强模型连接失败：' + (r.msg || ''), 'error')
+}
 // ===== 键盘快捷键 =====
+function onPopState() {
+  const ids = syncNavFromHistory()
+  if (ids.length) window.dispatchEvent(new CustomEvent('app:nav-back', { detail: ids }))
+}
+function goTab(k) {
+  // 若有打开的浮层/面板：先关掉栈顶（回到当前层级）再切页
+  if (nav.stack.length) {
+    const e = navBack()
+    if (e) window.dispatchEvent(new CustomEvent('app:nav-back', { detail: [e.id] }))
+  }
+  store.tab = k
+}
 function onKey(e) {
   // Ctrl/Cmd+K 聚焦搜索
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -650,10 +758,10 @@ function onKey(e) {
     searchInput.value && searchInput.value.focus()
     return
   }
-  // Esc 收起搜索
-  if (e.key === 'Escape' && searchDrop.value) {
-    searchDrop.value = false
-    if (document.activeElement === searchInput.value) searchInput.value.blur()
+  // Esc：先关浮层/面板（返回上一层），再收起搜索
+  if (e.key === 'Escape') {
+    if (nav.stack.length) { const e2 = navBack(); if (e2) window.dispatchEvent(new CustomEvent('app:nav-back', { detail: [e2.id] })); return }
+    if (searchDrop.value) { searchDrop.value = false; if (document.activeElement === searchInput.value) searchInput.value.blur() }
   }
   // Ctrl/Cmd+1..5 切换页签
   if ((e.ctrlKey || e.metaKey) && /^[1-6]$/.test(e.key)) {
@@ -669,15 +777,17 @@ onMounted(() => {
   startStudyTrack()
   try { if (!localStorage.getItem('xc_onboarded')) { startOnboard() } } catch (e) {}
   window.addEventListener('xc-export-kb', () => openExp('kb'))
+  window.addEventListener('popstate', onPopState)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('xc-export-kb', () => openExp('kb'))
+  window.removeEventListener('popstate', onPopState)
   stopStudyTrack()
 })
 </script>
 <template>
-  <CosmosScene v-if="store.cfg.view3d && store.tab !== 'kb'" />
+  <CosmosScene v-if="store.cfg.view3d && store.tab !== 'kb'" :active-tab="store.tab" />
   <div v-if="wallStyle" class="bg-layer" :style="wallStyle"></div>
 <div class="app" :class="{ 'is-2d': !store.cfg.view3d, 'has-wall': wallStyle }">
     <header class="topbar">
@@ -706,584 +816,6 @@ onUnmounted(() => {
             <div v-for="p in searchResults.plate" :key="p" class="sd-it" @mousedown.prevent="goPlate(p)">
               🏛️ {{ p }}
             </div>
-              <!-- 首次使用引导向导 -->
-    <div v-if="onboard" class="ov show ob-ov" @click.self="skipOnboard()">
-      <div class="pnl ob-pnl">
-        <template v-if="obStep === 0">
-          <h3>🎓 欢迎使用 行测 AI 智能助教</h3>
-          <div class="ob-flow">
-            <p>这是一个把名师讲义蒸馏成 AI 方法的备考工具，核心闭环：</p>
-            <div class="ob-flow-line">🚀 看板看任务 → 💬 对话刷题 → 📋 错题复盘 → 🗂️ 积累记忆 → 📊 统计看进步 → 📤 导出打印</div>
-            <p>下面用 <b>4 步</b> 完成基础设置（约 2 分钟）。任何一步都可点「跳过」。</p>
-          </div>
-          <div class="pnl-btns">
-            <button class="btn btn-gh" @click="skipOnboard()">跳过引导</button>
-            <button class="btn btn-pri" @click="obStep = 1">开始设置 ▶</button>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 1">
-          <h3>① 配置文字模型（纯文字题）</h3>
-          <div class="ob-body">
-            <p>推荐 <b>DeepSeek</b>（便宜、中文好）。去平台创建 Key 后粘贴到下面：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; fillProv('text')">{{ p[1] }}</button>
-            </div>
-            <a class="ob-link" href="https://platform.deepseek.com/" target="_blank" rel="noopener">🔗 去 DeepSeek 创建 Key（选其它提供商则用对应平台）</a>
-            <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">Key 只存在本机浏览器，不会上传。填好后点「测试」。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 2">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 2">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 2">
-          <h3>② 配置视觉模型（图片/截图题）</h3>
-          <div class="ob-body">
-            <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; fillProv('vision')">{{ p[1] }}</button>
-            </div>
-            <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">不配视觉模型也能用文字提问，只是发图/截图题无法识别。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 3">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 3">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 3">
-          <h3>③ 语音 & 考试日期（可选）</h3>
-          <div class="ob-body">
-            <p>朗读让 AI 讲解"听得见"；考试日期让看板倒计时。</p>
-            <div class="ob-row">
-              <button class="btn btn-gh" @click="ttsTest()">🔊 试听朗读</button>
-              <input v-model="store.cfg.examDate" type="date" class="ob-input" @change="saveCfg()" />
-            </div>
-            <div class="ob-note">笔试日如 2026-11-29（国考），可在设置里随时改。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 4">跳过 ▶</button>
-              <button class="btn btn-pri" @click="obStep = 4">下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else>
-          <h3>🎉 设置完成！</h3>
-          <div class="ob-body">
-            <p>现在可以开始了：</p>
-            <ul>
-              <li>💬 对话页提问一道题试试（可先「🎲 模拟出题」）；</li>
-              <li>📥 可导入你的真题/笔记：设置 → 数据管理 → 导入笔记(.md)；</li>
-              <li>☁️ 想多端同步：设置 → WebDAV 云同步。</li>
-            </ul>
-            <div class="ob-note">以后想再看本引导：设置 → 数据管理 → 🎓 重新引导。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-pri" @click="finishOnboard()">✅ 开始学习</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-      </div>
-    </div>
-
-
-    <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
           <template v-if="searchResults.func.length">
             <div class="sd-sec">⚡ 功能</div>
@@ -1303,584 +835,6 @@ onUnmounted(() => {
             >
               📋 {{ q.subject || '' }} · {{ String(q.question).slice(0, 36) }}
             </div>
-              <!-- 首次使用引导向导 -->
-    <div v-if="onboard" class="ov show ob-ov" @click.self="skipOnboard()">
-      <div class="pnl ob-pnl">
-        <template v-if="obStep === 0">
-          <h3>🎓 欢迎使用 行测 AI 智能助教</h3>
-          <div class="ob-flow">
-            <p>这是一个把名师讲义蒸馏成 AI 方法的备考工具，核心闭环：</p>
-            <div class="ob-flow-line">🚀 看板看任务 → 💬 对话刷题 → 📋 错题复盘 → 🗂️ 积累记忆 → 📊 统计看进步 → 📤 导出打印</div>
-            <p>下面用 <b>4 步</b> 完成基础设置（约 2 分钟）。任何一步都可点「跳过」。</p>
-          </div>
-          <div class="pnl-btns">
-            <button class="btn btn-gh" @click="skipOnboard()">跳过引导</button>
-            <button class="btn btn-pri" @click="obStep = 1">开始设置 ▶</button>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 1">
-          <h3>① 配置文字模型（纯文字题）</h3>
-          <div class="ob-body">
-            <p>推荐 <b>DeepSeek</b>（便宜、中文好）。去平台创建 Key 后粘贴到下面：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; fillProv('text')">{{ p[1] }}</button>
-            </div>
-            <a class="ob-link" href="https://platform.deepseek.com/" target="_blank" rel="noopener">🔗 去 DeepSeek 创建 Key（选其它提供商则用对应平台）</a>
-            <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">Key 只存在本机浏览器，不会上传。填好后点「测试」。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 2">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 2">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 2">
-          <h3>② 配置视觉模型（图片/截图题）</h3>
-          <div class="ob-body">
-            <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; fillProv('vision')">{{ p[1] }}</button>
-            </div>
-            <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">不配视觉模型也能用文字提问，只是发图/截图题无法识别。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 3">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 3">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 3">
-          <h3>③ 语音 & 考试日期（可选）</h3>
-          <div class="ob-body">
-            <p>朗读让 AI 讲解"听得见"；考试日期让看板倒计时。</p>
-            <div class="ob-row">
-              <button class="btn btn-gh" @click="ttsTest()">🔊 试听朗读</button>
-              <input v-model="store.cfg.examDate" type="date" class="ob-input" @change="saveCfg()" />
-            </div>
-            <div class="ob-note">笔试日如 2026-11-29（国考），可在设置里随时改。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 4">跳过 ▶</button>
-              <button class="btn btn-pri" @click="obStep = 4">下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else>
-          <h3>🎉 设置完成！</h3>
-          <div class="ob-body">
-            <p>现在可以开始了：</p>
-            <ul>
-              <li>💬 对话页提问一道题试试（可先「🎲 模拟出题」）；</li>
-              <li>📥 可导入你的真题/笔记：设置 → 数据管理 → 导入笔记(.md)；</li>
-              <li>☁️ 想多端同步：设置 → WebDAV 云同步。</li>
-            </ul>
-            <div class="ob-note">以后想再看本引导：设置 → 数据管理 → 🎓 重新引导。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-pri" @click="finishOnboard()">✅ 开始学习</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-      </div>
-    </div>
-
-
-    <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
           <template v-if="searchResults.msg.length">
             <div class="sd-sec">对话</div>
@@ -1892,584 +846,6 @@ onUnmounted(() => {
             >
               💬 {{ String((m.content && m.content.text) || m.content || '').slice(0, 36) }}
             </div>
-              <!-- 首次使用引导向导 -->
-    <div v-if="onboard" class="ov show ob-ov" @click.self="skipOnboard()">
-      <div class="pnl ob-pnl">
-        <template v-if="obStep === 0">
-          <h3>🎓 欢迎使用 行测 AI 智能助教</h3>
-          <div class="ob-flow">
-            <p>这是一个把名师讲义蒸馏成 AI 方法的备考工具，核心闭环：</p>
-            <div class="ob-flow-line">🚀 看板看任务 → 💬 对话刷题 → 📋 错题复盘 → 🗂️ 积累记忆 → 📊 统计看进步 → 📤 导出打印</div>
-            <p>下面用 <b>4 步</b> 完成基础设置（约 2 分钟）。任何一步都可点「跳过」。</p>
-          </div>
-          <div class="pnl-btns">
-            <button class="btn btn-gh" @click="skipOnboard()">跳过引导</button>
-            <button class="btn btn-pri" @click="obStep = 1">开始设置 ▶</button>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 1">
-          <h3>① 配置文字模型（纯文字题）</h3>
-          <div class="ob-body">
-            <p>推荐 <b>DeepSeek</b>（便宜、中文好）。去平台创建 Key 后粘贴到下面：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; fillProv('text')">{{ p[1] }}</button>
-            </div>
-            <a class="ob-link" href="https://platform.deepseek.com/" target="_blank" rel="noopener">🔗 去 DeepSeek 创建 Key（选其它提供商则用对应平台）</a>
-            <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">Key 只存在本机浏览器，不会上传。填好后点「测试」。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 2">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 2">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 2">
-          <h3>② 配置视觉模型（图片/截图题）</h3>
-          <div class="ob-body">
-            <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>：</p>
-            <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; fillProv('vision')">{{ p[1] }}</button>
-            </div>
-            <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="text" @keydown.enter="testConn()" />
-            <div class="ob-note">不配视觉模型也能用文字提问，只是发图/截图题无法识别。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 3">跳过 ▶</button>
-              <button class="btn btn-gh" :disabled="testBusy" @click="testConn()">🧪 测试连接</button>
-              <button class="btn btn-pri" @click="saveSet(); obStep = 3">保存并下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else-if="obStep === 3">
-          <h3>③ 语音 & 考试日期（可选）</h3>
-          <div class="ob-body">
-            <p>朗读让 AI 讲解"听得见"；考试日期让看板倒计时。</p>
-            <div class="ob-row">
-              <button class="btn btn-gh" @click="ttsTest()">🔊 试听朗读</button>
-              <input v-model="store.cfg.examDate" type="date" class="ob-input" @change="saveCfg()" />
-            </div>
-            <div class="ob-note">笔试日如 2026-11-29（国考），可在设置里随时改。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-gh" @click="obStep = 4">跳过 ▶</button>
-              <button class="btn btn-pri" @click="obStep = 4">下一步 ▶</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-
-        <template v-else>
-          <h3>🎉 设置完成！</h3>
-          <div class="ob-body">
-            <p>现在可以开始了：</p>
-            <ul>
-              <li>💬 对话页提问一道题试试（可先「🎲 模拟出题」）；</li>
-              <li>📥 可导入你的真题/笔记：设置 → 数据管理 → 导入笔记(.md)；</li>
-              <li>☁️ 想多端同步：设置 → WebDAV 云同步。</li>
-            </ul>
-            <div class="ob-note">以后想再看本引导：设置 → 数据管理 → 🎓 重新引导。</div>
-            <div class="pnl-btns">
-              <button class="btn btn-pri" @click="finishOnboard()">✅ 开始学习</button>
-            </div>
-          </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
-</template>
-      </div>
-    </div>
-
-
-    <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
           <div
             v-if="!searchResults.plate.length && !searchResults.wq.length && !searchResults.msg.length"
@@ -2487,6 +863,7 @@ onUnmounted(() => {
         <button class="btn" style="padding: 4px 12px; font-size: 13px" title="切换 3D 全景 / 2D 清爽视图" @click="toggleView()">
           {{ store.cfg.view3d ? '◉ 3D' : '◒ 2D' }}
         </button>
+        <button v-if="nav.stack.length" class="btn" style="padding: 4px 12px; font-size: 13px; color: var(--hud-cyan)" title="返回上一层（也可按键盘 Esc / 浏览器返回）" @click="onPopState(); navBack()">← {{ nav.stack[nav.stack.length - 1].label }}</button>
         <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="openExp('chat')">📤 导出</button>
         <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="openSet()">⚙️ 设置</button>
         <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="doTheme()">
@@ -2496,7 +873,7 @@ onUnmounted(() => {
     </header>
     <ExamBar />
     <nav class="tabs">
-      <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k }" @click="store.tab = t.k">
+      <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k }" @click="goTab(t.k)">
         {{ t.t }}
       </button>
     </nav>
@@ -2511,12 +888,17 @@ onUnmounted(() => {
     <!-- 设置弹窗 -->
     <div class="ov" :class="{ show: setShow }" @click.self="setShow = false">
       <div class="pnl">
-        <h3>⚙️ API 设置（文字/视觉 双模型）</h3>
+        <div class="pnl-top">
+          <button class="pnl-top-b" title="返回上一层（也可按 Esc / 浏览器返回）" @click="setShow = false">← 返回</button>
+          <span class="pnl-top-t">⚙️ 设置（API / 朗读 / 外观 / 数据）</span>
+        </div>
         <div class="set-nav">
           <button v-for="n in setNav" :key="n.id" class="set-nav-b" @click="scrollSet(n.id)">{{ n.t }}</button>
         </div>
         <button class="btn btn-gh set-tour-btn" @click="openTour()">❓ 设置引导（逐项讲解）</button>
-        <div id="set-api" class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
+        <button class="set-group-hd" :class="{ on: setGroup === 'model' }" @click="toggleSetGroup('model')"><span>⚙️ 模型与语音（API / 朗读）</span><span class="sg-arrow">{{ setGroup === 'model' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'model'" class="set-group-bd">
+<div id="set-api" class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
         <div class="fld">
           <label>提供商</label>
           <select v-model="store.cfg.text.prov" @change="fillProv('text')">
@@ -2628,7 +1010,63 @@ onUnmounted(() => {
         </details>
 
 
+        <div id="set-fig" class="sec-t">🖼 图形理解增强（可选 · 独立开源模型 · 不影响上方文字/视觉模型）</div>
+        <div class="vis-tip">
+          📌
+          <b>可选项</b>：发图问 图形推理 / 数量关系几何 / 资料分析图表 时，用这个
+          <b>独立的开源视觉模型</b> 把截图复刻成图贴进回复，帮你"看懂原图"。
+          不配置完全不影响现有功能；主问答仍走上方文字/视觉模型，互不干扰。
+        </div>
+        <div class="fld">
+          <label>
+            <input v-model="store.cfg.fig.on" type="checkbox" @change="saveCfg()" />
+            启用图形理解增强（发图后自动把原图复刻成图附在回复里）
+          </label>
+        </div>
+        <div class="fld">
+          <label>提供商（开源模型）</label>
+          <select v-model="store.cfg.fig.prov" @change="fillFig()">
+            <option v-for="(v, k) in FIG_PROVIDERS" :key="k" :value="k">{{ v.n }}</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>API Key（Ollama 本地可随便填如 ollama；硅基流动/智谱/通义填各自 Key）</label>
+          <input v-model="store.cfg.fig.key" placeholder="sk-...（Ollama 本地填 ollama 即可）" type="text" />
+        </div>
+        <div class="fld">
+          <label>API 地址（Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1 · Jan: http://localhost:1337/v1）</label>
+          <input v-model="store.cfg.fig.url" placeholder="https://…/chat/completions" />
+        </div>
+        <div class="fld">
+          <label>模型名称（开源视觉模型：minicpm-v / llama3.2-vision / qwen2.5-vl…）</label>
+          <input v-model="store.cfg.fig.model" placeholder="例如 minicpm-v 或 Qwen/Qwen2.5-VL-7B-Instruct" />
+        </div>
+        <div class="fld">
+          <button class="btn btn-gh" style="font-size: 12px" @click="figTest()">🧪 测试图形增强模型</button>
+          <span style="font-size: 12px; color: var(--text3); margin-left: 8px">{{ figTestStat }}</span>
+        </div>
+        <details class="guide">
+          <summary>🔑 免费开源方案怎么选（本地 0 成本 / 免费额度 / 主模型）</summary>
+          <div class="guide-body">
+            <p><b>🥇 完全免费 · 本地离线（无需任何 Key，装一次永久用）</b></p>
+            <p>① <b>Ollama</b>（最简单）：安装 <a href="https://ollama.com/" target="_blank" rel="noopener">ollama.com</a> → 终端执行 <code>ollama pull minicpm-v</code>（中文好，约 5GB）或 <code>ollama pull llama3.2-vision</code> → 保持 Ollama 运行 → 本应用提供商选「Ollama 本地」，地址 http://localhost:11434/v1，模型 minicpm-v，Key 可随便填如 ollama。</p>
+            <p>② <b>LM Studio</b>（图形界面，好上手）：安装 <a href="https://lmstudio.ai/" target="_blank" rel="noopener">lmstudio.ai</a> → 搜索下载视觉模型（如 Qwen2.5-VL-7B / minicpm-v）→ 启动本地服务（默认端口 1234）→ 本应用提供商选「LM Studio 本地」即可，不用填 Key。</p>
+            <p>③ <b>Jan</b>（另一款图形界面本地推理）：<a href="https://jan.ai/" target="_blank" rel="noopener">jan.ai</a> → 下载视觉模型 → 启动本地服务（默认端口 1337）→ 本应用提供商选「Jan 本地」。</p>
+            <p>💡 本地模型首次要下载几个 GB，之后完全离线、免费、隐私最安全；电脑 8G 内存可跑 7B 量化版。</p>
+            <p><b>🥈 免费额度 · 注册即送（不花钱，需 Key）</b></p>
+            <p>④ <b>硅基流动 SiliconFlow（推荐）</b>：<a href="https://cloud.siliconflow.cn/" target="_blank" rel="noopener">cloud.siliconflow.cn</a> → 注册 → API 密钥 → 创建 → 粘 Key。默认 Qwen2.5-VL（开源视觉模型），免费额度足够日常用。</p>
+            <p>⑤ <b>智谱 GLM-4V</b>（glm-4v-flash 有免费额度）：<a href="https://open.bigmodel.cn/" target="_blank" rel="noopener">open.bigmodel.cn</a> → API Keys → 创建。</p>
+            <p>⑥ <b>通义千问 Qwen-VL</b>（新用户有免费额度）：<a href="https://dashscope.aliyun.com/" target="_blank" rel="noopener">dashscope.aliyun.com</a> → API-KEY 管理。</p>
+            <p>💡 Key 只保存在你自己的浏览器 localStorage，本应用无后端；此模型仅用于"复刻原图"辅助理解，主问答仍走上方文字/视觉模型。</p>
+          </div>
+        </details>
+
         <div id="set-voice" class="sec-t">🗣️ 语音 · 场景音色</div>
+        <div class="fld" style="display: flex; align-items: center; gap: 10px">
+          <label style="font-size: 13px; font-weight: 700">自动朗读 AI 回复（一键开关）</label>
+          <button class="btn" :class="store.cfg.ttsOn !== false ? 'btn-pri' : 'btn-gh'" @click="toggleTtsSetting()">{{ store.cfg.ttsOn !== false ? '🔊 已开启' : '🔇 已关闭' }}</button>
+          <span style="font-size: 11px; color: var(--text3)">开启后：AI 回复完成自动朗读；对话输入栏也有 🔊/🔇 快捷开关。</span>
+        </div>
         <div class="fld">
           <label>朗读音色</label>
           <select v-model="store.cfg.ttsScene" @change="saveCfg()">
@@ -2694,7 +1132,10 @@ onUnmounted(() => {
             ⏹ 换句试听
           </button>
         </div>
-        <div id="set-look" class="sec-t">🎨 外观</div>
+        </div>
+<button class="set-group-hd" :class="{ on: setGroup === 'look' }" @click="toggleSetGroup('look')"><span>🎨 外观与备考（主题 / 壁纸 / 冲刺）</span><span class="sg-arrow">{{ setGroup === 'look' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'look'" class="set-group-bd">
+<div id="set-look" class="sec-t">🎨 外观</div>
         <div class="fld">
           <label>强调色（更多参考色）</label>
           <div class="sw-row">
@@ -2790,7 +1231,10 @@ onUnmounted(() => {
         </div>
 
 
-        <div class="sec-t">☁️ WebDAV 云同步</div>
+        </div>
+<button class="set-group-hd" :class="{ on: setGroup === 'fun' }" @click="toggleSetGroup('fun')"><span>🎵 趣味·数据·同步（音乐 / 萌宠 / 数据）</span><span class="sg-arrow">{{ setGroup === 'fun' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'fun'" class="set-group-bd">
+<div class="sec-t">☁️ WebDAV 云同步</div>
         <div class="fld">
           <label>WebDAV 地址（上传/下载的备份文件完整 URL）</label>
           <input v-model="store.cfg.webdav.url" placeholder="https://dav.jianguoyun.com/dav/行测AI备份.json" @change="saveCfg()" />
@@ -2888,7 +1332,6 @@ onUnmounted(() => {
             <button class="btn btn-gh" @click="nextWallpaper()">🎲 换一张在线壁纸</button>
           </div>
         </div>
-      </div>
         <div class="sec-t">🧭 新手引导</div>
         <div v-if="store.cfg.bgMode === 'solid'" class="fld">
           <label>预设纯色</label>
@@ -2916,6 +1359,7 @@ onUnmounted(() => {
           <label style="margin-top: 6px">模糊程度：{{ store.cfg.bgBlur }}px</label>
           <input v-model.number="store.cfg.bgBlur" type="range" min="0" max="30" step="1" style="width: 100%" @change="saveCfg()" />
           <div style="font-size: 11px; color: var(--text3); margin-top: 4px">模糊越大越"磨砂"，越大越护眼不刺眼；白天/黑夜均可使用同一壁纸。</div>
+        </div>
         <div class="fld">
           <label>
             <input v-model="guidesOff" type="checkbox" @change="guidesOff ? disableAllGuides() : enableAllGuides()" />
@@ -2936,7 +1380,7 @@ onUnmounted(() => {
           <div class="guide-body">
             <ol>
               <li>🚀 看板 → 看「今日任务」：刷 5 道最弱板块题、复盘/二刷 N 道错题、积累 2 条常识；</li>
-              <li>💬 对话 → 刷题（可开「考场限时」或「📝 整卷模拟」），答完点「📌 存错题」；</li>
+              <li>💬 对话 → 刷题（可开「考场限时」或「📝 模拟组卷」），答完点「📌 存错题」；</li>
               <li>📋 错题 → 晚上「✍️ 二刷/三刷」直接点选项作答，连续答对 2 次自动「已消化」；</li>
               <li>🗂️ 积累 → 常识/时政用「🔁 复习」按艾宾浩斯记忆，答错自动入库；</li>
               <li>📊 统计 → 看趋势折线/雷达图/热力图，了解坚持与短板；</li>
@@ -3016,7 +1460,10 @@ onUnmounted(() => {
             悬浮窗时政只推送该时间范围内的国内/贵州事件。
           </div>
         </div>
-        <div id="set-about" class="sec-t">📜 关于 · 开发者说明</div>
+        </div>
+<button class="set-group-hd" :class="{ on: setGroup === 'help' }" @click="toggleSetGroup('help')"><span>❓ 帮助与关于</span><span class="sg-arrow">{{ setGroup === 'help' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'help'" class="set-group-bd">
+<div id="set-about" class="sec-t">📜 关于 · 开发者说明</div>
         <div class="about-box">
           <p class="ab-warn">⚠️ 本项目仅供个人学习使用，切勿商用，违者必究。</p>
           <p><b>隐私与数据</b>：全部数据（对话/错题/知识库/设置）只保存在你自己的浏览器 localStorage，应用无后端服务器、不上传任何数据；API Key 也只存本机。可用「数据管理 → 导出/导入备份、WebDAV 云同步、保存到本地文件夹」迁移。</p>
@@ -3030,7 +1477,8 @@ onUnmounted(() => {
           deepseek-v4-flash-vision-exp（能看图、识别公式符号），也可在设置里换智谱
           GLM-5V。截图提问需配置并勾选视觉模型。
         </div>
-        <div class="pnl-btns">
+        </div>
+<div class="pnl-btns">
           <button class="btn btn-gh" @click="setShow = false">取消</button>
           <button class="btn btn-pri" :disabled="testBusy" @click="saveSet()">{{ testBusy ? '检测中…' : '保存并测试' }}</button>
         </div>
@@ -3039,7 +1487,10 @@ onUnmounted(() => {
     <!-- 导出弹窗 -->
     <div class="ov" :class="{ show: expShow }" @click.self="expShow = false">
       <div class="pnl">
-        <h3>📤 导出</h3>
+        <div class="pnl-top">
+          <button class="pnl-top-b" title="返回上一层" @click="expShow = false">← 返回</button>
+          <span class="pnl-top-t">📤 导出</span>
+        </div>
         <div class="fld">
           <label>内容：{{ { chat: '💬 对话记录', wrong: '📋 错题集', review: '📖 单题复盘', kb: '📚 知识库积累' }[expType] }}</label>
         </div>
@@ -3073,88 +1524,6 @@ onUnmounted(() => {
             <button class="btn btn-gh" @click="skipOnboard()">跳过引导</button>
             <button class="btn btn-pri" @click="obStep = 1">开始设置 ▶</button>
           </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
 
         <template v-else-if="obStep === 1">
@@ -3173,88 +1542,6 @@ onUnmounted(() => {
               <button class="btn btn-pri" @click="saveSet(); obStep = 2">保存并下一步 ▶</button>
             </div>
           </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
 
         <template v-else-if="obStep === 2">
@@ -3272,88 +1559,6 @@ onUnmounted(() => {
               <button class="btn btn-pri" @click="saveSet(); obStep = 3">保存并下一步 ▶</button>
             </div>
           </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
 
         <template v-else-if="obStep === 3">
@@ -3370,88 +1575,6 @@ onUnmounted(() => {
               <button class="btn btn-pri" @click="obStep = 4">下一步 ▶</button>
             </div>
           </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
 
         <template v-else>
@@ -3468,88 +1591,6 @@ onUnmounted(() => {
               <button class="btn btn-pri" @click="finishOnboard()">✅ 开始学习</button>
             </div>
           </div>
-            <!-- 板块首次使用引导 -->
-    <div v-if="guide" class="ov show tabguide-ov" @click.self="closeGuide()">
-      <div class="pnl tabguide-pnl">
-        <div class="tg-head">
-          <span class="tg-icon">{{ guide.icon }}</span>
-          <span class="tg-title">{{ guide.title }}</span>
-        </div>
-        <div class="tg-desc">{{ guide.desc }}</div>
-        <div class="tg-sec">✨ 这里能做什么</div>
-        <ul class="tg-list">
-          <li v-for="(f, i) in guide.features" :key="'f' + i">{{ f }}</li>
-        </ul>
-        <div class="tg-sec">💡 怎么用效果更好</div>
-        <ul class="tg-list tips">
-          <li v-for="(t, i) in guide.tips" :key="'t' + i">{{ t }}</li>
-        </ul>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="disableAllGuides()">🔕 关闭所有引导</button>
-          <button class="btn btn-gh" @click="closeGuide()">⏭ 跳过</button>
-          <button class="btn btn-pri" @click="closeGuide()">✅ 知道了，开始用</button>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
-      <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
-      <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
-    </div>
-    <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
-      <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
-      <span class="pet-emoji">{{ petStage.emoji }}</span>
-      <span class="pet-mood">{{ petMood.emoji }}</span>
-    </div>
-    <!-- 萌宠面板 -->
-    <div v-if="petShow" class="ov show pet-ov" @click.self="petShow = false">
-      <div class="pnl pet-pnl">
-        <div class="pet-head">
-          <span class="pet-big">{{ petStage.emoji }}</span>
-          <div class="pet-id">
-            <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
-            <div class="pet-moodline">心情：{{ petMood.emoji }} {{ petMood.label }}</div>
-          </div>
-          <button class="pc-close" @click="petShow = false">✕</button>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk">{{ bubble }}</div>
-        <div class="pet-bar-row">
-          <span class="pbl">成长</span>
-          <div class="bar"><div class="bar-fill" :style="{ width: Math.min(100, petLevel * 10) + '%' }"></div></div>
-          <span class="pet-xp">{{ petPoints }} 积分</span>
-        </div>
-        <div v-if="petNextName" class="pet-next">距「{{ petNextName.emoji }} {{ petNextName.name }}」还需 {{ Math.max(0, (Number(petNextXp) || 0) - (Number(petPoints) || 0)) }} 积分
-          <div class="bar"><div class="bar-fill next" :style="{ width: Math.min(100, (petPoints / petNextXp) * 100) + '%' }"></div></div>
-        </div>
-        <div class="pet-bar-row">
-          <span class="pbl">饱食度</span>
-          <div class="bar"><div class="bar-fill food" :style="{ width: petHunger * 10 + '%' }"></div></div>
-          <span>{{ petHunger }}/10</span>
-        </div>
-        <div class="pet-stats">
-          <div class="ps-i">💬 提问 <b>{{ petStats.asks }}</b></div>
-          <div class="ps-i">✍️ 问答 <b>{{ petStats.answers }}</b></div>
-          <div class="ps-i">📋 错题 <b>{{ petStats.wrongs }}</b></div>
-          <div class="ps-i">✅ 复盘 <b>{{ petStats.reviewed }}</b></div>
-          <div class="ps-i">🔥 打卡 <b>{{ petStats.streak }}</b> 天</div>
-        </div>
-        <div class="pet-note">喂食需 5 学习积分：每次 AI 回复 +1，错题二刷/三刷 +2。萌宠随时间会饿，饿久了会闹情绪哦。</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="petShow = false">关闭</button>
-          <button class="btn btn-gh" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-pri" @click="doFeed()">🍖 喂食(-5分)</button>
-        </div>
-        <div class="pet-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">改名</button>
-        </div>
-      </div>
-    </div>
-
-
 </template>
       </div>
     </div>
@@ -3581,12 +1622,12 @@ onUnmounted(() => {
 
 
     <!-- 背景音乐浮动控件 -->
-    <div class="music-float" :class="{ on: musicOn }" title="背景音乐：点击播放/暂停" @click="toggleMusic()">
+    <div class="music-float" :class="{ on: musicOn, hide: store.tab === 'chat' }" :style="floatStyle('music')" title="背景音乐：点击播放/暂停 · 按住可拖动" @click="floatClick('music')" @pointerdown="startFloatDrag($event, 'music')">
       <span class="mf-ic">{{ musicOn ? '🎵' : '🔇' }}</span>
       <span class="mf-name">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
     </div>
     <!-- 萌宠 -->
-    <div class="pet-float" title="我的萌宠：点击互动" @click="openPet()">
+    <div class="pet-float" :class="{ hide: store.tab === 'chat' }" :style="floatStyle('pet')" title="我的萌宠：点击互动 · 按住可拖动" @click="floatClick('pet')" @pointerdown="startFloatDrag($event, 'pet')">
       <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
       <span class="pet-emoji">{{ petStage.emoji }}</span>
       <span class="pet-mood">{{ petMood.emoji }}</span>

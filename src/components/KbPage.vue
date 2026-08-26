@@ -2,12 +2,9 @@
 import { ref, computed } from 'vue'
 import { store } from '../store'
 import { readBooks } from '../kb'
-import ShelfScene from './ShelfScene.vue'
 
 const books = readBooks()
 const activeShelf = ref('all')
-// 视图：默认 2D 速查（快、省资源），3D 书柜为可切换的沉浸式展示
-const showShelf = ref(false)
 
 const shelvesList = [
   { key: 'all', name: '📚 全部' },
@@ -73,11 +70,7 @@ function quizBook(b) {
 <template>
   <div class="page on kb-page">
     <div class="page-inner kb-inner">
-      <div class="sec-t">📚 知识宝典（2D 速查为主 · 点击即问；3D 书柜可选展示）</div>
-      <div class="kb-view-toggle">
-        <button class="kb-vt" :class="{ on: !showShelf }" @click="showShelf = false">📚 2D 速查</button>
-        <button class="kb-vt" :class="{ on: showShelf }" @click="showShelf = true">🕹️ 3D 书柜</button>
-      </div>
+      <div class="sec-t">📚 知识宝典 · 按板块速查，点击卡片看要点 / 点击即问</div>
       <!-- 板块抽屉切换 -->
       <div class="shelf-tabs">
         <button
@@ -89,10 +82,6 @@ function quizBook(b) {
         >
           {{ s.name }}
         </button>
-      </div>
-      <!-- 3D 沉浸式书柜（可选展示） -->
-      <div v-if="showShelf" class="shelf-wrap">
-        <ShelfScene @ask="ask" />
       </div>
       <!-- 2D 方法速查（默认主界面）：按板块分组，点击即问 -->
       <div class="kb-list">
@@ -132,26 +121,6 @@ function quizBook(b) {
 <style scoped>
 .kb-page { padding: 10px 12px; }
 .kb-inner { min-height: 100%; }
-.kb-view-toggle {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.kb-vt {
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  color: var(--text2);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.kb-vt.on {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(59, 130, 246, 0.22));
-  border-color: var(--hud-cyan);
-  color: #fff;
-}
 .shelf-tabs {
   display: flex;
   gap: 6px;

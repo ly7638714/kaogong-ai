@@ -10,6 +10,7 @@ const PLATES = ['判断推理', '言语理解', '资料分析', '数量关系', 
 const plate = ref('判断推理')
 const count = ref(5)
 const perQ = ref(90)
+const difficulty = ref('mid')
 
 const phase = ref('config') // config | doing | result
 const questions = ref([]) // { stem, options, answer, explain, picked, correct, err }
@@ -49,7 +50,7 @@ async function gen(i) {
   }
   busy.value = true
   try {
-    const sys = buildTaskSys('quiz', { plate: plate.value })
+    const sys = buildTaskSys('quiz', { plate: plate.value, difficulty: difficulty.value })
     const reply = await chatOnce(
       c,
       [{ role: 'system', content: sys }, { role: 'user', content: '请为【' + plate.value + '】出一道仿真模拟题。' }],
@@ -123,6 +124,7 @@ function cancel() {
   timer = null
   emit('close')
 }
+function topBack() { if (phase.value === 'doing') replay(); else cancel() }
 function replay() {
   phase.value = 'config'
   questions.value = []
@@ -136,13 +138,17 @@ onUnmounted(() => {
 <template>
   <div class="ov show sim-ov" @click.self="cancel()">
     <div class="pnl sim-pnl">
+      <div class="pnl-top">
+        <button class="pnl-top-b" title="返回上一层（也可按 Esc / 浏览器返回）" @click="topBack()">← 返回</button>
+        <span class="pnl-top-t">{{ phase === 'result' ? '📄 成绩单' : phase === 'doing' ? '📝 作答中 · ' + plate : '📝 整卷模拟' }}</span>
+      </div>
       <!-- 配置 -->
       <div v-if="phase === 'config'" class="sim-config">
-        <h3>📝 整卷模拟考试</h3>
         <div class="fld"><label>板块</label><select v-model="plate"><option v-for="p in PLATES" :key="p" :value="p">{{ p }}</option></select></div>
         <div class="fld"><label>题数</label><select v-model="count"><option :value="5">5 题（约 7.5 分钟）</option><option :value="10">10 题（约 15 分钟）</option></select></div>
         <div class="fld"><label>每题限时</label><select v-model="perQ"><option :value="60">60 秒</option><option :value="90">90 秒</option><option :value="120">120 秒</option></select></div>
-        <div class="sim-tip">AI 逐题生成仿真单选题，整卷倒计时，交卷自动批改并支持错题入库。</div>
+        <div class="fld"><label>难度</label><select v-model="difficulty"><option value="easy">易</option><option value="mid">中</option><option value="hard">难</option><option value="real">真题级</option></select></div>
+        <div class="sim-tip">AI 逐题生成仿真单选题（命题专家模式：考点先行·干扰项错因·难度自检），整卷倒计时，交卷自动批改并支持错题入库。</div>
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="cancel()">取消</button>
           <button class="btn btn-pri" @click="start()">🚀 开始考试</button>
@@ -177,6 +183,7 @@ onUnmounted(() => {
           </div>
           <div v-if="curQ.picked != null && curQ.explain" class="sim-explain" v-html="curQ.explain"></div>
           <div class="pnl-btns">
+            <button class="btn btn-gh" title="返回考试配置" @click="replay()">← 返回配置</button>
             <button class="btn btn-gh" @click="cancel()">退出</button>
             <button v-if="curQ.picked != null || curQ.err" class="btn btn-pri" @click="next()">{{ cur + 1 >= count ? '交卷 📄' : '下一题 ▶' }}</button>
           </div>
@@ -185,7 +192,6 @@ onUnmounted(() => {
 
       <!-- 成绩单 -->
       <div v-else class="sim-result">
-        <h3>📄 成绩单</h3>
         <div class="sr-score">{{ score }} / {{ count }}</div>
         <div class="sr-rate">{{ rate }}%</div>
         <div class="sr-meta">用时 {{ fmt(usedSec) }} · 正确率 {{ rate }}%</div>

@@ -232,7 +232,7 @@ export function createScene(container) {
     })
   })
 
-  const clock = new THREE.Clock()
+  let lastT = performance.now(), elapsedT = 0
 
   // ===== 交互状态 =====
   const raycaster = new THREE.Raycaster()
@@ -326,7 +326,10 @@ export function createScene(container) {
       }
     },
     render(targets) {
-      const dt = clock.getDelta()
+      const now = performance.now()
+      const dt = Math.min((now - lastT) / 1000, 0.05)
+      lastT = now
+      elapsedT += dt
       mainSphere.rotation.y += dt * 0.08
       stars.rotation.y += dt * 0.01
       // 更新行星
@@ -349,7 +352,7 @@ export function createScene(container) {
         p.mesh.rotation.y += dt * 0.5
         if (p.bump) p.bump = Math.max(0, p.bump - dt * 2.2)
         // 活跃/选中行星脉冲发光
-        const pulse = interactive ? 1 + Math.sin(clock.elapsedTime * 4) * 0.3 : 1
+        const pulse = interactive ? 1 + Math.sin(elapsedT * 4) * 0.3 : 1
         p.mesh.material.emissiveIntensity = Math.max(p.glowLevel, interactive ? 0.6 : 0) * pulse
         p.mesh.material.color.setHex(p.baseColor).lerp(new THREE.Color(0xffffff), p.scale / 2)
         p.glow.scale.setScalar(6 + p.glowLevel * 8 + (interactive ? 4 : 0))
