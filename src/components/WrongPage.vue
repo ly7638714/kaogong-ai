@@ -12,6 +12,54 @@ const cur = ref(-1),
   show = ref(false)
 const rep = ref(false)
 const frm = ref({ answer: '', method: '', note: '', sel: [] })
+// ===== 卷库：全部历史卷子 + 出题集（查看/重做/导出/删除） =====
+const vaultOpen = ref(false)
+const qcPapers = ref([])
+const qcQuiz = ref([])
+function loadVault() {
+  try { qcPapers.value = JSON.parse(localStorage.getItem('xc_papers') || '[]') || [] } catch (e) {}
+  try { qcQuiz.value = JSON.parse(localStorage.getItem('xc_quiz_col') || '[]') || [] } catch (e) {}
+}
+loadVault()
+function saveVaultPapers() { try { localStorage.setItem('xc_papers', JSON.stringify(qcPapers.value)) } catch (e) {} }
+function saveVaultQuiz() { try { localStorage.setItem('xc_quiz_col', JSON.stringify(qcQuiz.value)) } catch (e) {} }
+function redoPaper(p) { window.dispatchEvent(new CustomEvent('xc-open-paper-data', { detail: p })) }
+function redoQuizCol(c) {
+  const p = {
+    id: Date.now() + Math.random(), name: '二刷 · ' + c.subject, ts: Date.now(),
+    questions: [{ subject: c.subject, difficulty: c.difficulty, variant: c.variant, stem: c.stem, options: (c.options || []).map((o) => ({ ...o })), answer: c.answer, explain: c.explain || '', designer: c.designer || '', picked: null, correct: null, timeout: false, err: false }]
+  }
+  window.dispatchEvent(new CustomEvent('xc-open-paper-data', { detail: p }))
+}
+function downloadText(t, n) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([t], { type: 'text/markdown;charset=utf-8' }))
+  a.download = n
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
+function qToMd(q, i) {
+  const l = ['## 第' + (i + 1) + '题 · ' + (q.subject || '') + (q.variant ? '（' + q.variant + '）' : ''), '', String(q.stem || ''), '']
+  ;(q.options || []).forEach((o) => l.push(o.k + '. ' + o.t))
+  l.push('', '**正确答案：' + q.answer + '**', '')
+  if (q.explain) l.push('**解析：**' + String(q.explain).replace(/^#{1,6}\s*(✅\s*)?(答案解析|解析|答案详解)[^\n]*/gm, '').trim(), '')
+  if (q.designer) l.push('🧠 **命题人设计说明：**' + q.designer, '')
+  return l.join('\n')
+}
+function exportPaperMd(p) {
+  const l = ['# ' + (p.name || '模拟卷'), '', '总题数：' + (p.questions || []).length + ' · 导出时间：' + new Date().toLocaleString(), '']
+  ;(p.questions || []).forEach((q, i) => l.push(qToMd(q, i)))
+  downloadText(l.join('\n'), (p.name || '模拟卷') + '.md')
+  showToast('已导出 Markdown', 'success')
+}
+function exportQuizMd() {
+  const l = ['# 出题集（' + qcQuiz.value.length + ' 题）', '']
+  qcQuiz.value.forEach((c, i) => l.push(qToMd(c, i)))
+  downloadText(l.join('\n'), '出题集.md')
+  showToast('已导出出题集 Markdown', 'success')
+}
+function delVaultPaper(i) { qcPapers.value.splice(i, 1); saveVaultPapers() }
+function delVaultQuiz(i) { qcQuiz.value.splice(i, 1); saveVaultQuiz() }
 // 通用错因（无对应板块预设时兜底）
 const GENERIC_REASONS = [
   '知识点遗忘',
@@ -587,6 +635,34 @@ function parseByField(txt) {
         <button class="btn btn-gh" @click="exportObsidianMd()">🗃️ Obsidian(.md)</button>
         <button class="btn btn-gh" @click="exportAnkiCsv()">🃏 Anki/CSV</button>
         <button class="btn btn-gh" @click="$emit('txt')">TXT</button>
+      </div>
+
+      <!-- 卷库：全部历史卷子 + 出题集（查看/重做/导出/删除） -->
+      <div class="ep-block vault">
+        <div class="ep-block-hd ep-fold-hd" @click="vaultOpen = !vaultOpen">
+          <span>📚 卷库（历史卷子 {{ qcPapers.length }} · 出题集 {{ qcQuiz.length }}）</span><span class="ep-fold-ic">{{ vaultOpen ? '▾ 收起' : '▸ 展开' }}</span>
+        </div>
+        <div v-if="vaultOpen">
+          <div class="vault-sec">🗂️ 历史卷子（全部保留 · 可查看/重做/导出）</div>
+          <div v-if="!qcPapers.length" class="empty"><div class="empty-i">🗂️</div><div class="empty-t">暂无卷子</div><div class="empty-d">在「模拟组卷」出的卷子会自动存入这里</div></div>
+          <div v-else class="ep-list-scroll">
+            <div v-for="(p, i) in qcPapers" :key="p.id" class="ep-paper">
+              <button class="ep-paper-btn" @click="redoPaper(p)" :title="p.name + ' · ' + (p.questions||[]).length + ' 题'">{{ p.name }} · {{ (p.questions||[]).length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
+              <button class="btn btn-gh" style="padding: 2px 8px; font-size: 11px" @click="exportPaperMd(p)">⬇ 导出</button>
+              <button class="ep-x" @click="delVaultPaper(i)">×</button>
+            </div>
+          </div>
+          <div class="vault-sec">📚 出题集（全部保留 · 可二刷/导出）</div>
+          <div v-if="!qcQuiz.length" class="empty"><div class="empty-i">📚</div><div class="empty-t">暂无出题</div><div class="empty-d">「单题快练」出的题会自动收纳到这里</div></div>
+          <div v-else class="ep-list-scroll">
+            <div v-for="(c, i) in qcQuiz" :key="c.id" class="ep-paper">
+              <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
+              <button class="ep-paper-btn" @click="redoQuizCol(c)" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + c.stem.slice(0, 80)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ c.stem.slice(0, 24) }}…（错{{ c.wrongCount }}）</button>
+              <button class="ep-x" @click="delVaultQuiz(i)">×</button>
+            </div>
+          </div>
+          <button class="btn btn-gh" style="margin-top: 8px" @click="exportQuizMd()">⬇ 导出全部出题集（Markdown）</button>
+        </div>
       </div>
 
       <!-- 统计条 -->

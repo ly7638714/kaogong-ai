@@ -273,6 +273,7 @@ function startPaper(paper) {
     if (totalLeft.value <= 0) finish()
   }, 1000)
   timers.q = setInterval(() => {
+    if (marks.value[cur.value] != null) return
     qElapsed.value++
     qLeft.value--
     if (qLeft.value <= 0) timeoutQ()
@@ -286,7 +287,7 @@ function clearTimers() {
 function timeoutQ() {
   const i = cur.value
   if (marks.value[i] != null) return
-  marks.value[i] = { ok: false, pick: '', timeout: true }
+  marks.value[i] = { ok: false, pick: '', timeout: true, usedSec: perQ.value }
   showToast('⏰ 本题超时（' + perQ.value + ' 秒），已按答错计', 'error')
   nextQ()
 }
@@ -294,12 +295,12 @@ function pick(k) {
   const i = cur.value
   const qq = questions.value[i]
   if (!qq || marks.value[i] != null) return
-  marks.value[i] = { ok: k === qq.answer, pick: k }
+  marks.value[i] = { ok: k === qq.answer, pick: k, usedSec: qElapsed.value }
 }
 function selfMark(ok) {
   const i = cur.value
   if (marks.value[i] != null) return
-  marks.value[i] = { ok, pick: '', self: true }
+  marks.value[i] = { ok, pick: '', self: true, usedSec: qElapsed.value }
 }
 function nextQ() {
   if (cur.value < questions.value.length - 1) {
@@ -465,7 +466,7 @@ onUnmounted(clearTimers)
         <div class="pp-timer-bar">
           <span class="sim-plate">📐 {{ q.subject }}</span>
           <span class="sim-prog">第 {{ cur + 1 }} / {{ questions.length }} 题</span>
-          <span class="pp-tq" :class="{ warn: qLeft <= 10 }">本题 ⏳ {{ fmt(qLeft) }} · ⏱ {{ fmt(qElapsed) }}</span>
+          <span class="pp-tq" :class="{ warn: qLeft <= 10 }">本题 ⏳ {{ fmt(qLeft) }} · ⏱ {{ fmt(qElapsed) }}<template v-if="marks[cur] && marks[cur].usedSec != null"> · ✅ 已用 {{ marks[cur].usedSec }}s</template></span>
         </div>
         <div class="pp-timer-bar total">
           <span class="pp-total">整卷 ⏳ {{ fmt(totalLeft) }} · 总用时 ⏱ {{ fmt(totalElapsed) }}</span>

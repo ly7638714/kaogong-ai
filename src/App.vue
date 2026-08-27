@@ -9,6 +9,7 @@ import KbPage from './components/KbPage.vue'
 import StatsPage from './components/StatsPage.vue'
 import WrongPage from './components/WrongPage.vue'
 import CockpitPage from './components/CockpitPage.vue'
+import DraftPad from './components/DraftPad.vue'
 import FloatPanel from './components/FloatPanel.vue'
 import ExamBar from './components/ExamBar.vue'
 import CosmosScene from './components/CosmosScene.vue'
@@ -29,17 +30,88 @@ const tabs = [
   { k: 'wq', t: '📋 错题' }
 ]
 const initialTab = store.tab && tabs.some((t) => t.k === store.tab) ? store.tab : 'ck'
+// 全局随手记（任何界面可写，悬浮球可拖动）
+const globalDraft = ref(false)
+const draftFabOn = ref(localStorage.getItem('xc_draft_fab_on') !== '0')
+function saveDraftFabOn() { try { localStorage.setItem('xc_draft_fab_on', draftFabOn.value ? '1' : '0') } catch (e) {} }
+const gFab = ref(null)
+// 悬浮球位置钳制：保证任何窗口/设备（桌面/手机/APK）内都可见，永不超出当前显示窗口
+function clampFab(p) {
+  const vw = window.innerWidth || document.documentElement.clientWidth || 360
+  const vh = window.innerHeight || document.documentElement.clientHeight || 640
+  p.x = Math.max(4, Math.min(vw - 56, p.x))
+  p.y = Math.max(4, Math.min(vh - 60, p.y))
+}
+try { const p = JSON.parse(localStorage.getItem('xc_global_fab') || 'null'); if (p && p.x != null) { clampFab(p); gFab.value = p } } catch (e) {}
+// 首次打开默认位置：右下角（贴近拇指、避开底部导航/输入栏；inset 定位天然不超窗，任何设备都可见）
+const gFabStyle = computed(() => gFab.value ? { left: gFab.value.x + 'px', top: gFab.value.y + 'px' } : { right: '16px', bottom: '88px' })
+function reClampFab() {
+  if (!gFab.value) return
+  clampFab(gFab.value)
+  try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (e) {}
+}
+const onOrient = () => setTimeout(reClampFab, 250)
+onMounted(() => {
+  window.addEventListener('resize', reClampFab)
+  window.addEventListener('orientationchange', onOrient)
+  setTimeout(reClampFab, 600) // 移动端浏览器顶栏收起/首帧布局后，再钳一次保证可见
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', reClampFab)
+  window.removeEventListener('orientationchange', onOrient)
+})
+function onGFabDown(e) {
+  e.preventDefault()
+  const startX = e.clientX, startY = e.clientY
+  const r = e.currentTarget.getBoundingClientRect()
+  const ox = startX - r.left, oy = startY - r.top
+  let moved = false
+  const onMove = (ev) => {
+    const x = ev.clientX - ox, y = ev.clientY - oy
+    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 6) moved = true
+    gFab.value = { x: Math.max(4, Math.min(window.innerWidth - 56, x)), y: Math.max(4, Math.min(window.innerHeight - 60, y)) }
+    try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (err) {}
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove, true)
+    window.removeEventListener('pointerup', onUp, true)
+    if (!moved) globalDraft.value = true
+  }
+  window.addEventListener('pointermove', onMove, true)
+  window.addEventListener('pointerup', onUp, true)
+}
 store.tab = initialTab
 const theme = ref(localStorage.getItem('xc_theme') === 'light' ? 'light' : 'dark')
 document.body.setAttribute('data-theme', theme.value)
+// ===== 主题预设系统（iPad 笔记风 · 一键切换） =====
+const THEME_PRESETS = {
+  dark:       { name: '深空黑', theme: 'dark', vars: { bg: '#050b16', card: '#0b1626', surface: '#12202f', text: '#eaf7ff', text2: '#a9c9de', text3: '#83a3bc', accent: '#22d3ee', accent2: 'rgba(34,211,238,.15)', red: '#fb7185', green: '#34d399', amber: '#fbbf24' } },
+  'dark-blue':{ name: '深蓝夜', theme: 'dark', vars: { bg: '#060b1a', card: '#0a1428', surface: '#101d38', text: '#e8f1ff', text2: '#a8c4e8', text3: '#7f9cc4', accent: '#60a5fa', accent2: 'rgba(96,165,250,.16)', red: '#fb7185', green: '#34d399', amber: '#fbbf24' } },
+  'dark-red': { name: '暗红夜', theme: 'dark', vars: { bg: '#180a10', card: '#261219', surface: '#351a22', text: '#ffe9ee', text2: '#e0a9b6', text3: '#c0808f', accent: '#f87171', accent2: 'rgba(248,113,113,.16)', red: '#f87171', green: '#4ade80', amber: '#fbbf24' } },
+  light:      { name: '米白纸', theme: 'light', vars: { bg: '#eef4fa', card: '#ffffff', surface: '#dbe6f0', text: '#000000', text2: '#1f2937', text3: '#374151', accent: '#0b5a8a', accent2: 'rgba(3,105,161,.1)', red: '#b91c1c', green: '#15803d', amber: '#b45309' } },
+  'light-green': { name: '护眼绿白', theme: 'light', vars: { bg: '#e9f3ea', card: '#ffffff', surface: '#d3e8d6', text: '#122014', text2: '#2b4030', text3: '#47604d', accent: '#0e7a3d', accent2: 'rgba(14,122,61,.12)', red: '#b3261e', green: '#0e7a3d', amber: '#92600a' } },
+  'light-red':{ name: '红白公务', theme: 'light', vars: { bg: '#f7eef0', card: '#ffffff', surface: '#eed8dc', text: '#1a0b0d', text2: '#3d2328', text3: '#5c3a40', accent: '#b02a2a', accent2: 'rgba(176,42,42,.1)', red: '#b02a2a', green: '#15803d', amber: '#b45309' } },
+  cream:      { name: '暖黄纸', theme: 'light', vars: { bg: '#f6f1e3', card: '#fffdf6', surface: '#ece2c8', text: '#201a0c', text2: '#453a20', text3: '#655a3a', accent: '#9a6b1f', accent2: 'rgba(154,107,31,.12)', red: '#b3261e', green: '#2f7d32', amber: '#b45309' } },
+  eye:        { name: '护眼柔绿', theme: 'dark', vars: { bg: '#0d1f16', card: '#12291d', surface: '#183326', text: '#e2f5e8', text2: '#a8cbb4', text3: '#83a892', accent: '#4ade80', accent2: 'rgba(74,222,128,.16)', red: '#fb7185', green: '#4ade80', amber: '#fbbf24' } }
+}
+const themePreset = ref(localStorage.getItem('xc_theme_preset') || 'dark')
+function applyThemePreset(k) {
+  const p = THEME_PRESETS[k] || THEME_PRESETS.dark
+  themePreset.value = k
+  try { localStorage.setItem('xc_theme_preset', k) } catch (e) {}
+  theme.value = p.theme
+  document.body.setAttribute('data-theme', p.theme)
+  const el = document.body
+  for (const v in p.vars) { try { el.style.setProperty('--' + v, p.vars[v]) } catch (e) {} }
+}
+applyThemePreset(themePreset.value)
 // 视图模式：3D 全景 / 2D 清爽（存设置，可随时开关）
 function toggleView() {
   store.cfg.view3d = !store.cfg.view3d
   saveCfg()
 }function doTheme() {
-  theme.value = theme.value === 'light' ? 'dark' : 'light'
-  document.body.setAttribute('data-theme', theme.value)
-  localStorage.setItem('xc_theme', theme.value)
+  const isDark = themePreset.value && THEME_PRESETS[themePreset.value] ? THEME_PRESETS[themePreset.value].theme === 'dark' : true
+  applyThemePreset(isDark ? 'light' : 'dark')
 }
 // 多强调色主题
 const accent = ref(localStorage.getItem('xc_accent') || 'sea')
@@ -566,6 +638,43 @@ function setFs() {
   store.cfg.fontSize = fs.value
   saveCfg()
   applyFs()
+}
+// ===== 全部用户数据一键导出 / 导入（跨设备/防丢失） =====
+function exportAllData() {
+  const all = {}
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k && k.startsWith('xc_')) { try { all[k] = localStorage.getItem(k) } catch (e) {} }
+  }
+  const blob = new Blob([JSON.stringify({ app: 'xingce', v: 2, t: Date.now(), data: all }, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  const d = new Date()
+  a.download = '行测助手-全部数据备份-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+  showToast('✅ 已导出全部数据（含设置/错题/对话/出题集/草稿/宠物等）', 'success')
+}
+function importAllData(ev) {
+  const f = ev.target.files && ev.target.files[0]
+  if (!f) return
+  const rd = new FileReader()
+  rd.onload = () => {
+    try {
+      const d = JSON.parse(rd.result)
+      let items = null
+      if (d && d.data && (d.v === 2 || d.app === 'xingce')) items = d.data
+      else if (d && typeof d === 'object') items = d // 兼容旧格式（key->value）
+      let n = 0
+      for (const k in items) {
+        if (k.startsWith('xc_')) { try { localStorage.setItem(k, items[k]); n++ } catch (e) {} }
+      }
+      showToast('✅ 已导入 ' + n + ' 项数据，即将刷新', 'success')
+      setTimeout(() => location.reload(), 900)
+    } catch (e) { showToast('❌ 备份文件无效', 'error') }
+  }
+  rd.readAsText(f)
+  ev.target.value = ''
 }
 function backupData() {
   const data = { cfg: store.cfg, msgs: store.msgs, wqs: store.wqs, mode: store.mode }
@@ -1133,9 +1242,19 @@ onUnmounted(() => {
           </button>
         </div>
         </div>
-<button class="set-group-hd" :class="{ on: setGroup === 'look' }" @click="toggleSetGroup('look')"><span>🎨 外观与备考（主题 / 壁纸 / 冲刺）</span><span class="sg-arrow">{{ setGroup === 'look' ? '▾' : '▸' }}</span></button>
+<button class="set-group-hd" :class="{ on: setGroup === 'look' }" @click="toggleSetGroup('look')"><span>🎨 主题与外观（统一管理：主题 / 强调色 / 护眼 / 壁纸 / 随手记）</span><span class="sg-arrow">{{ setGroup === 'look' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'look'" class="set-group-bd">
-<div id="set-look" class="sec-t">🎨 外观</div>
+<div id="set-look" class="sec-t">🎨 主题与外观</div>
+        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">主题/文字配色/强调色/护眼/壁纸/随手记/字号 统一在此管理；顶栏 ☀️/🌙 可在「米白纸 / 深空黑」间快速切换白天黑夜。</div>
+        <div class="sec-t">🎨 主题预设（iPad 笔记风 · 一键切换）</div>
+        <div class="theme-grid">
+          <button v-for="(p, k) in THEME_PRESETS" :key="k" class="theme-card" :class="{ on: themePreset === k }" @click="applyThemePreset(k)">
+            <span class="th-swatch" :style="{ background: p.vars.bg }"></span>
+            <span class="th-name">{{ p.name }}</span>
+          </button>
+        </div>
+        <div style="font-size: 11px; color: var(--text3); margin-top: 4px">红白蓝三款高对比夜间 + 米白/绿白/红白/暖黄/柔绿等白天护眼主题，点选即时生效并记忆；文字对比均按高可读性校准。</div>
+
         <div class="fld">
           <label>强调色（更多参考色）</label>
           <div class="sw-row">
@@ -1180,6 +1299,26 @@ onUnmounted(() => {
               3D 全景背景（开启后对话/看板等显示 3D 星空，可点顶栏 ◉ 快速切换）
             </label>
           </div>
+        <div class="sec-t">📝 随手记 / 草稿纸</div>
+        <div class="fld">
+          <label>
+            <input v-model="draftFabOn" type="checkbox" @change="saveDraftFabOn()" />
+            显示「✏️ 随手记」悬浮球（任何界面可写笔记，可拖动）
+          </label>
+        </div>
+        <details class="guide" open>
+          <summary>📌 如何使用随手记 / 草稿纸？</summary>
+          <div class="guide-body">
+            <ul>
+              <li><b>打开</b>：点任意界面的「✏️」悬浮球，弹出全透明手写板（能看清底层文字），✕ / Esc 关闭后自动保存。</li>
+              <li><b>拖动</b>：按住悬浮球可拖到屏幕任意位置，位置自动记忆；点一下（未拖动）即打开。</li>
+              <li><b>画笔</b>：🖊钢笔 / 🖌毛笔 / ✏️铅笔 / 🖍马克笔 / 🧯荧光笔，6 色，笔头 0.35~2.0mm（点「✒️笔头」循环切换）。</li>
+              <li><b>擦除/撤销</b>：🧽橡皮（再点切换小/中/大）；↩撤销最近 20 步（Ctrl/Cmd+Z）；🗑清空。</li>
+              <li><b>保存/历史</b>：💾存版 保留新版本；📁记录 可查看全部版本（含时间）、📂载入、🗑删除。</li>
+              <li><b>数据安全</b>：草稿存在本机；「数据管理 → 📦导出全部数据」可备份到任意设备，崩溃/换设备后用「📦导入全部数据」恢复。</li>
+            </ul>
+          </div>
+        </details>
 
 
         </div>
@@ -1207,10 +1346,7 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <div class="fld">
-          <label>主题（顶栏 ☀️/🌙 也可切换）</label>
-          <button class="btn btn-gh" @click="doTheme()">{{ theme === 'light' ? '🌙 切到深色' : '☀️ 切到浅色' }}</button>
-        </div>
+
         <div class="sec-t">📅 备考冲刺</div>
         <div class="fld">
           <label>笔试目标日期（驾驶舱显示倒计时）</label>
@@ -1427,10 +1563,10 @@ onUnmounted(() => {
         </div>
         <div class="sec-t">💾 数据管理</div>
         <div class="exp-choices">
-          <button class="btn btn-gh" @click="backupData()">⬇️ 导出备份(JSON)</button>
+          <button class="btn btn-pri" @click="exportAllData()">📦 导出全部数据</button>
           <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
-            ⬆️ 导入备份
-            <input type="file" accept=".json" style="display: none" @change="importData" />
+            📦 导入全部数据
+            <input type="file" accept=".json,application/json" style="display: none" @change="importAllData" />
           </label>
           <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
             📥 导入笔记(.md)
@@ -1509,6 +1645,11 @@ onUnmounted(() => {
       </div>
     </div>
     <div id="toast" ref="toastEl" class="toast"></div>
+    <!-- 全局随手记：任何界面可写的悬浮手写板（做题界面自动隐藏，由做题草稿球接管） -->
+    <Teleport to="body">
+      <button v-if="draftFabOn" class="draft-fab gfab" :style="gFabStyle" @pointerdown="onGFabDown" :title="'📝 随手记：任何界面可写笔记（可拖动，设置里可关闭）'">✏️</button>
+      <DraftPad v-if="globalDraft" draft-key="global" title="📝 全局随手记" @close="globalDraft = false" />
+    </Teleport>
   </div>
     <!-- 首次使用引导向导 -->
     <div v-if="onboard" class="ov show ob-ov" @click.self="skipOnboard()">

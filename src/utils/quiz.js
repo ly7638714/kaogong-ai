@@ -11,19 +11,35 @@ function extractOptions(text) {
     if (opts.some((o) => o.k === k)) continue
     let t = m[2].trim()
     // 跨行合并选项内容（直到下一个选项/标题/答案标记）
+    // 代码块(```svg)原样保留（图推选项内嵌 SVG 不能压平），普通文字才折叠空白
     let j = i + 1
+    let inFence = false
+    let fence = ''
+    const texts = []
     while (
       j < lines.length &&
       !lineRe.test(lines[j]) &&
       !/^#{1,6}\s/.test(lines[j]) &&
       !/【正确答案】/.test(lines[j])
     ) {
-      const s = lines[j].trim()
-      if (!s) break
-      t += ' ' + s
+      const s = lines[j]
+      const st = s.trim()
+      if (!s && !inFence) break
+      if (/^```/.test(st)) {
+        inFence = !inFence
+        fence += s + '\n'
+      } else if (inFence) {
+        fence += s + '\n'
+      } else if (st) {
+        texts.push(st)
+      }
       j++
     }
-    opts.push({ k, t: t.replace(/\s+/g, ' ').trim() })
+    if (!inFence && fence) fence = fence.replace(/\n$/, '')
+    // 修复：不能直接用 texts 覆盖首行文字；首行 t 保留，续行 texts 追加其后
+    if (texts.length) t = t ? t + ' ' + texts.join(' ') : texts.join(' ')
+    if (fence) t = t ? t + '\n' + fence : fence
+    opts.push({ k, t: t.trim() })
     i = j - 1
     // 同行内联选项：A. 2 B. 3 C. 4 D. 5
     const rest = m[2]
@@ -39,12 +55,23 @@ function extractOptions(text) {
       opts.push({ k: ik, t: im[2].replace(/\s+/g, ' ').trim() })
     }
   }
+  // 兜底：题干与选项同行（"题干… A. 2 B. 3 C. 4 D. 5"）时按内联选项提取
+  if (opts.length < 2) {
+    const inline = String(text).match(/([A-D])[.、．:：]\s*([^A-D\n]+)/g)
+    if (inline && inline.length >= 2) {
+      opts.splice(0, opts.length)
+      inline.forEach((sg) => opts.push({ k: sg[0], t: sg.slice(1).replace(/^[.、．:：]\s*/, '').trim() }))
+    }
+  }
   return opts.sort((a, b) => a.k.localeCompare(b.k))
 }
 
 export function parseQuiz(text) {
   if (!text || typeof text !== 'string') return null
-  const opts = extractOptions(text)
+  let opts = extractOptions(text)
+  // 选项去重：文本重复的选项剔除（多选/重复项视为出题失误），不足2个返回 null
+  const seen = new Set()
+  opts = opts.filter((o) => { const k = String(o.t || '').trim(); if (!k || seen.has(k)) return false; seen.add(k); return true })
   if (opts.length < 2) return null
 
   // 正确答案：优先【正确答案】X 标记，其次"答案：X/正确答案：X"
@@ -67,12 +94,14 @@ export function parseQuiz(text) {
       break
     }
   }
-  if (firstOptLine < 0) return null
-  const stem = lines
-    .slice(0, firstOptLine)
-    .join('\n')
-    .replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '')
-    .trim()
+  let stem = ''
+  if (firstOptLine >= 0) {
+    stem = lines.slice(0, firstOptLine).join('\n').replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim()
+  } else {
+    // 内联选项兜底：题干与选项同行（"题干… A. 2 B. 3 C. 4 D. 5"）
+    const m = String(text).match(/([A-D])[.、．:：]/)
+    stem = m ? String(text).slice(0, m.index).replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim() : ''
+  }
   if (!stem) return null
 
   // 解析区：从"答案解析/解析"标题到结尾

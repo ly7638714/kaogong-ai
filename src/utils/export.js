@@ -93,7 +93,7 @@ function downloadBlob(blob, n) {
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 5000)
 }
-function downloadText(text, n, mime) {
+export function downloadText(text, n, mime) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain;charset=utf-8' }))
   a.download = n
@@ -736,14 +736,93 @@ export function exportAnkiCsv() {
 }
 
 
+// ===== 图推/几何 SVG → PNG 嵌入导出（md/pdf/doc 都能看到图）=====
+function splitSvg(text) {
+  const parts = []
+  const re = /(```svg[\s\S]*?```)/g
+  let last = 0, m
+  const s = String(text || '')
+  while ((m = re.exec(s))) {
+    if (m.index > last) parts.push({ type: 'text', v: s.slice(last, m.index) })
+    parts.push({ type: 'svg', v: m[1] })
+    last = m.index + m[0].length
+  }
+  if (last < s.length) parts.push({ type: 'text', v: s.slice(last) })
+  return parts.length ? parts : [{ type: 'text', v: s }]
+}
+async function svgToPngDataUrl(svgMarkup) {
+  const body = String(svgMarkup || '').replace(/^```svg\s*/i, '').replace(/```\s*$/, '').trim()
+  if (!/<svg[\s\S]*<\/svg>/i.test(body)) return ''
+  // 原始 SVG data-URI 兜底（canvas 不可用时也能看图）
+  let rawSvgUri = ''
+  try {
+    const bytes = new TextEncoder().encode(body)
+    let bin = ''
+    bytes.forEach((b) => { bin += String.fromCharCode(b) })
+    rawSvgUri = 'data:image/svg+xml;base64,' + btoa(bin)
+  } catch (e) {}
+  try {
+    const wm = body.match(/width="?(\d+(?:\.\d+)?)"?/), hm = body.match(/height="?(\d+(?:\.\d+)?)"?/)
+    const w = wm ? Math.max(1, Math.round(parseFloat(wm[1]))) : 300
+    const h = hm ? Math.max(1, Math.round(parseFloat(hm[1]))) : 200
+    const img = new Image()
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg')) ; img.src = rawSvgUri })
+    const cv = document.createElement('canvas')
+    cv.width = w; cv.height = h
+    const ctx = cv.getContext('2d')
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(img, 0, 0, w, h)
+    return cv.toDataURL('image/png') || rawSvgUri
+  } catch (e) { return rawSvgUri }
+}
+async function textWithImg(text) {
+  // 题干/选项文本：普通文字折叠空白，```svg 块转 PNG 并返回 imgs
+  const imgs = []
+  let out = ''
+  for (const p of splitSvg(text)) {
+    if (p.type === 'text') { out += ' ' + p.v.replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim() }
+    else {
+      const png = await svgToPngDataUrl(p.v)
+      if (png) { out += ' ![图形](' + png + ') '; imgs.push(png) }
+      else out += ' [图形] '
+    }
+  }
+  return { out: out.trim(), imgs }
+}
+// 每题导出内容（SVG→PNG 图片版，用于 md/pdf/doc）
+async function qLinesImg(qq, i, ms) {
+  const m = ms[i] || {}
+  const L = []
+  const imgs = []
+  const st = await textWithImg(qq.stem)
+  L.push('【' + (i + 1) + '题 · ' + (qq.subject || '未分类') + '】')
+  L.push('题干：' + st.out)
+  imgs.push(...st.imgs)
+  const opts = []
+  for (const o of (qq.options || [])) {
+    const r = await textWithImg(o.t)
+    opts.push(o.k + '. ' + r.out)
+    imgs.push(...r.imgs)
+  }
+  if (opts.length) L.push('选项：' + opts.join('　'))
+  const un = m.blank || (m.timeout && !m.pick)
+  L.push('我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + (un ? '' : '　正确答案：' + (qq.answer || '—') + '　' + (m.ok ? '✅ 正确' : '❌ 错误')))
+  const ana = qq.explain || qq.analysis || ''
+  if (ana && !un) L.push('解析：' + String(ana).replace(/\s+/g, ' ').trim())
+  return { lines: L, imgs }
+}
+
 // ===== 模拟组卷 / 试卷导出：整卷排版导出 Word / PDF / Markdown / LaTeX =====
 // paper: { name, questions:[{subject,stem,options,answer,explain,analysis}] }
 // marks: 每题的 { ok, pick, timeout }
 // meta:  { score, rate, sec, moduleStats:[{subject,total,ok}] }
 export async function exportPaper(paper, marks, meta, format, polish) {
-  const qs = (paper && paper.questions) || []
-  if (!qs.length) { showToast('暂无题目可导出', 'info'); return }
   const ms = marks || []
+  const isBlank = (i) => { const m = ms[i] || {}; return !!(m.blank || (m.timeout && !m.pick)) }
+  // 未答题导出为空白卷：去掉答案与解析（保留题干/选项，供二刷），所有格式统一生效
+  const qs = ((paper && paper.questions) || []).map((qq, i) => (isBlank(i) ? { ...qq, answer: '', explain: '', analysis: '' } : qq))
+  if (!qs.length) { showToast('暂无题目可导出', 'info'); return }
+  const hasSvg = qs.some((qq) => /`svg/.test(String(qq.stem || '')) || (qq.options || []).some((o) => /`svg/.test(String(o.t || ''))))
   const title = '模拟组卷 · ' + (paper.name || '试卷') + '（' + new Date().toLocaleDateString() + '）'
   const stat = meta || { score: 0, rate: 0, sec: 0, moduleStats: [] }
 
@@ -756,7 +835,8 @@ export async function exportPaper(paper, marks, meta, format, polish) {
     L.push('题干：' + stem)
     const opts = (qq.options || []).map((o) => o.k + '. ' + o.t).join('　')
     if (opts) L.push('选项：' + opts)
-    L.push('我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + '　正确答案：' + (qq.answer || '—') + '　' + (m.ok ? '✅ 正确' : '❌ 错误'))
+    const un = m.blank || (m.timeout && !m.pick)
+    L.push('我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + (un ? '' : '　正确答案：' + (qq.answer || '—') + '　' + (m.ok ? '✅ 正确' : '❌ 错误')))
     const ana = qq.explain || qq.analysis || ''
     if (ana) L.push('解析：' + String(ana).replace(/\s+/g, ' ').trim())
     return L
@@ -764,7 +844,7 @@ export async function exportPaper(paper, marks, meta, format, polish) {
 
   // ===== AI 智能排版：先让 AI 梳理考点/错因/秒杀规律，再按所选格式导出 =====
   if (polish) {
-    const polished = await aiPolishPaper(paper, marks, meta)
+    const polished = await aiPolishPaper({ ...paper, questions: qs }, marks, meta)
     if (!polished) return
     const pTitle = title + '（AI排版）'
     if (format === 'md') { downloadText(polished, pTitle + '.md', 'text/markdown;charset=utf-8'); showToast('✅ 已导出 AI 排版 Markdown', 'success'); return }
@@ -775,7 +855,7 @@ export async function exportPaper(paper, marks, meta, format, polish) {
     return
   }
   if (format === 'typ') {
-    downloadText(typFromPaper(paper, marks, meta), title + '.typ', 'text/plain;charset=utf-8')
+    downloadText(typFromPaper({ ...paper, questions: qs }, marks, meta), title + '.typ', 'text/plain;charset=utf-8')
     showToast('✅ 已导出 Typst 源文件（可用 Typst/typst.app 编译为 PDF）', 'success')
     return
   }
@@ -788,7 +868,7 @@ export async function exportPaper(paper, marks, meta, format, polish) {
       stat.moduleStats.forEach((s) => { md += '| ' + s.subject + ' | ' + s.total + ' | ' + s.ok + ' | ' + (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '% |\n' })
       md += '\n'
     }
-    qs.forEach((qq, i) => { md += '## ' + qLines(qq, i).join('\n\n') + '\n\n---\n\n' })
+    for (const [qi, qq] of qs.entries()) { const ql = await qLinesImg(qq, qi, ms); md += '## ' + ql.lines.join('\n\n') + '\n\n---\n\n' }
     downloadText(md, title + '.md', 'text/markdown;charset=utf-8')
     showToast('✅ 已导出整卷 Markdown', 'success')
     return
@@ -824,13 +904,18 @@ export async function exportPaper(paper, marks, meta, format, polish) {
     items.push({ type: 'h', text: '📊 板块统计' })
     items.push({ type: 'table', head: ['板块', '题数', '答对', '正确率'], rows: stat.moduleStats.map((s) => [s.subject, String(s.total), String(s.ok), (s.total ? Math.round((s.ok / s.total) * 100) : 0) + '%']) })
   }
-  qs.forEach((qq, i) => {
-    const m = ms[i] || {}
-    items.push({ type: 'h', text: '第' + (i + 1) + '题 · ' + (qq.subject || '未分类') + (m.ok ? ' ✅' : ' ❌') })
-    items.push({ type: 'msg', role: 'a', text: qLines(qq, i).join('\n') })
-  })
+  for (const [qi, qq] of qs.entries()) {
+    const m = ms[qi] || {}
+    const ql = await qLinesImg(qq, qi, ms)
+    items.push({ type: 'h', text: '第' + (qi + 1) + '题 · ' + (qq.subject || '未分类') + (m.ok ? ' ✅' : ' ❌') })
+    items.push({ type: 'msg', role: 'a', text: ql.lines.join('\n') })
+  }
   if (format === 'pdf') printPdf(title, items)
-  else {
+  else if (hasSvg) {
+    // docx 无法内嵌图片：含 SVG 图形题的卷子降级导出 .doc（pdfHtml 会把 markdown 图片渲染成 <img>）
+    downloadText(pdfHtml(title, items), title + '.doc', 'application/msword')
+    showToast('含图形题，已导出兼容 Word 的 .doc（含图片）', 'info')
+  } else {
     try {
       const blob = await buildDocx({ title, paragraphs: itemsToParagraphs(items), tables: itemsToTables(items) })
       downloadBlob(blob, title + '.docx')
@@ -870,12 +955,13 @@ export async function aiPolishPaper(paper, marks, meta) {
   let src = '【成绩】共 ' + qs.length + ' 题 · 答对 ' + (meta && meta.score != null ? meta.score : 0) + ' · 正确率 ' + (meta && meta.rate != null ? meta.rate : 0) + '%\n\n'
   qs.forEach((qq, i) => {
     const m = ms[i] || {}
-    src += '第' + (i + 1) + '题 [' + (qq.subject || '未分类') + '] ' + (m.ok ? '做对' : '做错') + '\n'
+    src += '第' + (i + 1) + '题 [' + (qq.subject || '未分类') + '] ' + ((m.blank || (m.timeout && !m.pick)) ? '未作答' : (m.ok ? '做对' : '做错')) + '\n'
     src += '题干：' + String(qq.stem || '').replace(/^#{1,6}\s*/gm, '').trim() + '\n'
     src += '选项：' + (qq.options || []).map((o) => o.k + '. ' + o.t).join('　') + '\n'
-    src += '我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + '　正确答案：' + (qq.answer || '—') + '\n'
+    const un = m.blank || (m.timeout && !m.pick)
+    src += '我的答案：' + (m.pick ? m.pick : m.timeout ? '超时未答' : '未作答') + (un ? '（未作答）' : '　正确答案：' + (qq.answer || '—')) + '\n'
     const ana = qq.explain || qq.analysis || ''
-    if (ana) src += '解析：' + String(ana).replace(/\s+/g, ' ').trim() + '\n'
+    if (ana && !un) src += '解析：' + String(ana).replace(/\s+/g, ' ').trim() + '\n'
     src += '\n'
   })
   const prompt =

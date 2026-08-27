@@ -51,8 +51,10 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   clearTimeout(_timer)
   const resp = _resp
   if (!resp.ok) {
-    const e = await resp.json().catch(() => ({}))
-    throw new Error(e.error?.message || 'HTTP ' + resp.status)
+    const bodyTxt = await resp.text().catch(() => '')
+    let em = ''
+    try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (err) {}
+    throw new Error('HTTP ' + resp.status + ' @' + c.url + (em ? ' · ' + String(em).slice(0, 160) : (bodyTxt ? ' · ' + bodyTxt.slice(0, 160) : '')))
   }
   const reader = resp.body.getReader()
   const dec = new TextDecoder('utf-8')
@@ -119,8 +121,10 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
       const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: ctrl.signal })
       clearTimeout(timer)
       if (!resp.ok) {
-        const e = await resp.json().catch(() => ({}))
-        throw new Error(e.error?.message || 'HTTP ' + resp.status)
+        const bodyTxt = await resp.text().catch(() => '')
+        let em = ''
+        try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (err) {}
+        throw new Error('HTTP ' + resp.status + ' @' + c.url + (em ? ' · ' + String(em).slice(0, 160) : (bodyTxt ? ' · ' + bodyTxt.slice(0, 160) : '')))
       }
       const d = await resp.json()
       const m = d.choices?.[0]?.message || {}

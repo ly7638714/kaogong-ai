@@ -25,6 +25,9 @@ export function totalSeconds() {
   const s = getStudy()
   return Object.values(s).reduce((a, b) => a + (Number(b) || 0), 0)
 }
+export function studyMap() {
+  return getStudy()
+}
 export function startStudyTrack() {
   if (timer) return
   bump()

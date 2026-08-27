@@ -29,6 +29,8 @@ const D = () => ({
   bgAuto: false,
   view3d: false,
   themeMode: 'default',
+  goalScore: 70, // 行测目标分数（100 制，用于综合评估）
+  strictGen: true, // 出题严格质检：生成后二次验证唯一解/恰一正确（更稳，略慢）
   // 图形理解增强（可选 · 独立开源视觉模型，不影响文字/视觉主模型）
   fig: {
     on: false,

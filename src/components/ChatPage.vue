@@ -461,6 +461,7 @@ function textOf(m) {
 const bkShow = ref(false)
 const examShow = ref(false) // 统一：模拟组卷
 const examPanelSrc = ref('ai') // ai=AI出题 / import=导入 / wrong=错题
+const examPaperData = ref(null) // 外部传入待重做/查看的卷子
 function openExam(src) {
   examPanelSrc.value = src || 'ai'
   examShow.value = true
@@ -468,7 +469,14 @@ function openExam(src) {
 }
 function closeExam() {
   examShow.value = false
+  examPaperData.value = null
   navBack()
+}
+function openPaperData(paper) {
+  examPaperData.value = paper || null
+  examPanelSrc.value = 'ai'
+  examShow.value = true
+  navOpen({ id: 'exam', label: (paper && paper.name) ? paper.name : '模拟组卷' })
 }
 function openSolid() {
   solidShow.value = true
@@ -569,13 +577,6 @@ function getLastQuizText() {
   return ''
 }
 const trainPlate = ref('判断推理')
-const quizDiff = ref('mid') // 出题难度：易/中/难/真题级（出题考我·攻克薄弱）
-const QUIZ_DIFF_NAME = { easy: '易', mid: '中', hard: '难', real: '真题级' }
-const quizDiffName = () => QUIZ_DIFF_NAME[quizDiff.value] || '中'
-function cycleQuizDiff() {
-  const order = ['easy', 'mid', 'hard', 'real']
-  quizDiff.value = order[(order.indexOf(quizDiff.value) + 1) % order.length]
-}
 const plates = Object.keys(PLATE_MODE)
 const modeHint = {
   all: '输入题目或问题，或直接提问某个知识点',
@@ -788,7 +789,7 @@ const quickCards = [
   { ic: '🏛️', t: '政治理论', s: '小黑口诀', bg: 'p', mode: 'zhengzhi', q: '新思想五大新发展理念和口诀' },
   { ic: '🔢', t: '数量关系', s: '四层金字塔', bg: 'r', mode: 'shuliang', q: '工程问题设最小公倍数的秒杀法' },
   { ic: '🧊', t: '立体图推', s: '空间重构训练', bg: 'c', mode: 'luoji', q: '空间重构/立体图形的三视图怎么快速判断？请讲方法' },
-  { ic: '✍️', t: '出题考我', s: '命题专家出题', bg: 'g', act: 'quiz' },
+  { ic: '✍️', t: '出题考我', s: '打开单题快练', bg: 'g', act: 'single' },
   { ic: '🎯', t: '考点总结', s: '高频考点', bg: 'y', mode: 'all', q: '行测判断推理模块有哪些高频考点？请按考频排序总结' },
   { ic: '⚡', t: '秒杀技巧', s: '快解套路', bg: 'b', mode: 'all', q: '资料分析有哪些秒杀速算技巧？举例说明' },
   { ic: '📝', t: '错题诊断', s: '错因分析', bg: 'p', mode: 'all', q: '请分析我最近的错题，指出共性错因和改进方法' }
@@ -857,8 +858,9 @@ const expanded = ref({})
 function toggleExpand(i) { expanded.value[i] = !expanded.value[i] }
 function isLong(t) { return String(t || '').length > 700 }
 function askQuick(c) {
-  if (c.act === 'quiz') {
-    train('quiz', { plate: trainPlate.value || '判断推理', difficulty: c.difficulty || quizDiff.value || 'mid' })
+  if (c.act === 'single') {
+    // 出题考我：统一进「单题快练」面板，板块/子题型/难度/组量都在那里选（与组卷设置一致，不重复）
+    openExam('single')
     return
   }
   store.mode = c.mode
@@ -986,9 +988,11 @@ async function copyFullMsg() {
 
 onMounted(() => { restoreDraft(); window.addEventListener('xc-ask', onAsk) })
 onMounted(() => window.addEventListener('xc-open-exam', () => openExam('ai')))
+onMounted(() => window.addEventListener('xc-open-paper-data', (e) => openPaperData(e.detail)))
 onMounted(() => document.addEventListener('click', (e) => { if (modeOpen.value && !(e.target && e.target.closest && e.target.closest('.mode-pick'))) modeOpen.value = false }))
 onMounted(() => window.addEventListener('xc-open-paper', () => openExam('import')))
 onUnmounted(() => window.removeEventListener('xc-ask', onAsk))
+onUnmounted(() => window.removeEventListener('xc-open-paper-data', (e) => openPaperData(e.detail)))
 onMounted(() => window.addEventListener('app:nav-back', onNavBack))
 onUnmounted(() => window.removeEventListener('app:nav-back', onNavBack))
 onMounted(() => document.addEventListener('mouseup', onDocMouseUp))
@@ -1031,11 +1035,11 @@ async function copyCode(btn) {
   flashBtn(btn)
 }
 async function copyMsg(ev) {
-  const msg = ev.currentTarget.closest('.msg')
-  if (!msg) return
+  const btn = ev.currentTarget
+  const msg = btn && btn.closest('.msg')
   const text = msg.innerText || ''
   await copyRaw(text)
-  flashBtn(ev.currentTarget)
+  flashBtn(btn)
 }
 function onDocClick(ev) {
   const btn = ev.target.closest && ev.target.closest('.code-copy')
@@ -1078,8 +1082,6 @@ defineEmits(['export-review'])
         <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
           <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
         </select>
-        <button class="btn btn-gh tb-btn" title="出题难度：点击循环切换（易→中→难→真题级），出题考我/攻克薄弱使用"
-          style="padding: 3px 8px; font-size: 12px" @click="cycleQuizDiff()">🎚 {{ quizDiffName() }}</button>
         <button class="btn btn-gh tb-btn" title="单题快练（原模拟出题）：选板块随机出1题，即时批改·可再来一题·错题入库" @click="openExam('single')">⚡ 单题快练</button>
         <button class="btn btn-gh tb-btn" title="统一考场：国考/省考卷面模板·AI智能出题·导入材料识别·错题组卷·限时作答批改" @click="openExam('ai')">📝 模拟组卷</button>
         
@@ -1351,7 +1353,7 @@ defineEmits(['export-review'])
       </div>
     </div>
   </div>
-  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" @close="closeExam" />
+  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" @close="closeExam" />
   
   <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
 </template>
