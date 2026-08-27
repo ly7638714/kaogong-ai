@@ -43,7 +43,7 @@ function extractOptions(text) {
     i = j - 1
     // 同行内联选项：A. 2 B. 3 C. 4 D. 5
     const rest = m[2]
-    const inline = [...rest.matchAll(/([B-D])[.、．:：]\s*([^A-D\n]*)/g)]
+    const inline = [...rest.matchAll(/([B-D])[.、．:：]\s*([^\n]*?)(?=[B-D][.、．:：]|$)/g)]
     if (inline.length) {
       const ai = opts.findIndex((o) => o.k === k)
       if (ai >= 0) opts[ai].t = rest.slice(0, inline[0].index).replace(/\s+/g, ' ').trim()
@@ -57,10 +57,10 @@ function extractOptions(text) {
   }
   // 兜底：题干与选项同行（"题干… A. 2 B. 3 C. 4 D. 5"）时按内联选项提取
   if (opts.length < 2) {
-    const inline = String(text).match(/([A-D])[.、．:：]\s*([^A-D\n]+)/g)
+    const inline = [...String(text).matchAll(/([A-D])[.、．:：]\s*([^\n]*?)(?=[A-D][.、．:：]|$)/g)]
     if (inline && inline.length >= 2) {
       opts.splice(0, opts.length)
-      inline.forEach((sg) => opts.push({ k: sg[0], t: sg.slice(1).replace(/^[.、．:：]\s*/, '').trim() }))
+      inline.forEach((m) => opts.push({ k: m[1], t: m[2].trim() }))
     }
   }
   return opts.sort((a, b) => a.k.localeCompare(b.k))
@@ -131,10 +131,18 @@ export function extractChoices(text) {
 // 从答案文本中提取正确选项字母（如 "B" / "正确答案 B（我选了A）" / "答案：D"）
 export function answerLetter(s) {
   const t = String(s || '')
-  const m = t.match(/(?:正确答案|答案|正确选项)\s*[:：]?\s*([A-D])\b/i)
+  // 明确答案语义：正确答案/标准答案/答案/正确选项/应选/当选/本题选/此题选 X 等（"本题选/此题选"是主流出题收尾格式）
+  const m = t.match(/(?:正确答案|标准答案|答案|正确选项|应选|当选|本题选|此题选)\s*[:：为是]?\s*([A-D])\b/i)
   if (m) return m[1].toUpperCase()
-  const m2 = t.match(/\b([A-D])\b/)
-  return m2 ? m2[1].toUpperCase() : ''
+  const mSel = t.match(/(^|[。；;，,、：:\s(（])\s*选\s*([A-D])\b/i)
+  if (mSel) return mSel[2].toUpperCase()
+  // 行首独立字母（整行即答案），如单独的 "B"
+  const m2 = t.match(/^\s*[（(]?\s*([A-D])\s*[)）．.、:：]?\s*$/m)
+  if (m2) return m2[1].toUpperCase()
+  // "正确…X项/为X/是X" 强语境
+  const m3 = t.match(/正确[^。；;]{0,12}?\s*([A-D])\s*(?:项|为|是)/i)
+  if (m3) return m3[1].toUpperCase()
+  return ''
 }
 
 // 资料分析「材料+题组」解析：从 AI 输出中拆出 材料 + N 道题
@@ -142,9 +150,9 @@ export function answerLetter(s) {
 export function parseMaterialQuiz(text, n) {
   if (!text || typeof text !== 'string') return null
   const src = String(text)
-  // 1) 材料块：### 📄 材料 到 第一个 ### 第N题 之间
+  // 1) 材料块：### 📄 材料 到 第一个 ### 第N题 之间（标题后可跟换行或同行内容，避免模型同行输出时漏抓材料）
   let material = ''
-  const matM = src.match(/###\s*📄\s*材料\s*\n([\s\S]*?)(?=\n###\s*第\s*\d+\s*题|$)/)
+  const matM = src.match(/###\s*📄\s*材料\s*[:\s\n]([\s\S]*?)(?=\n###\s*第\s*\d+\s*题|$)/)
   if (matM) material = matM[1].trim()
   // 2) 按 ### 第N题 切块
   const parts = src.split(/###\s*第\s*(\d+)\s*题/)

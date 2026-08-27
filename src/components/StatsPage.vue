@@ -157,8 +157,10 @@ const mastery = computed(() =>
     let v = null
     if (attempts > 0) {
       const rate = done ? Math.round((ok / done) * 100) : 0
-      const revBonus = wq.length ? Math.round((rev / wq.length) * 30) : 0
-      const wqPen = Math.max(0, 100 - wq.length * 6)
+      // 无错题且做过题 = 该板块掌握无短板，视为复盘满分、错题零负担，避免"越完美反而封顶 70"的失真
+      const perfect = wq.length === 0 && done > 0
+      const revBonus = perfect ? 30 : wq.length ? Math.round((rev / wq.length) * 30) : 0
+      const wqPen = perfect ? 100 : Math.max(0, 100 - wq.length * 6)
       v = Math.max(0, Math.min(100, Math.round(rate * 0.55 + revBonus + wqPen * 0.15)))
     }
     const vm = {}

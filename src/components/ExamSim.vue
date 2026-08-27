@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
 import { store, saveWqs } from '../store'
-import { activeCfg, chatOnce, buildTaskSys } from '../api'
+import { activeCfg, chatOnce, buildQuizSys } from '../api'
 import { parseQuiz } from '../utils/quiz'
 import { showToast } from '../utils/toast'
 
@@ -50,7 +50,7 @@ async function gen(i) {
   }
   busy.value = true
   try {
-    const sys = buildTaskSys('quiz', { plate: plate.value, difficulty: difficulty.value })
+    const sys = buildQuizSys({ plate: plate.value, difficulty: difficulty.value })
     const reply = await chatOnce(
       c,
       [{ role: 'system', content: sys }, { role: 'user', content: '请为【' + plate.value + '】出一道仿真模拟题。' }],

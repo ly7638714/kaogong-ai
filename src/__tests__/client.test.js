@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { supportsVision, activeCfg } from '../api/client'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { supportsVision, activeCfg, chatOnce } from '../api/client'
 import { store } from '../store'
 
 describe('supportsVision 识别可识图模型', () => {
@@ -45,5 +45,31 @@ describe('activeCfg 双模型路由', () => {
   it('无任何 Key 返回 text 配置', () => {
     store.cfg.text.key = ''
     expect(activeCfg(false)).toMatchObject({ key: '' })
+  })
+})
+
+describe('chatOnce 外部取消信号', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+  it('外部 signal 取消立即中断且不重试', async () => {
+    let fetches = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (url, init) =>
+          new Promise((res, rej) => {
+            fetches++
+            init.signal.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')))
+          })
+      )
+    )
+    const c = { prov: 'ds', key: 'k', url: 'https://api.test/chat', model: 'deepseek-v4-flash' }
+    const ac = new AbortController()
+    const p = chatOnce(c, [{ role: 'user', content: 'q' }], 2000, 60000, ac.signal)
+    await new Promise((r) => setTimeout(r, 10)) // 等 fetch 发起
+    ac.abort()
+    await expect(p).rejects.toThrow()
+    expect(fetches).toBe(1) // 外部取消不应自动重试
   })
 })

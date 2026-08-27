@@ -1,3 +1,4 @@
+/* global btoa */
 import {
   Document,
   Packer,
@@ -45,17 +46,19 @@ async function imgRun(src) {
   const d = await getImgDim(src)
   const maxW = 600
   const scale = Math.min(1, maxW / d.w)
+  // 仅支持 dataURL；http(s) 图片等非 data 前缀抛错，交由调用方 try/catch 跳过该图，避免产出无效 ImageRun
+  const parts = String(src || '').split(',')
+  if (!/^data:/.test(String(src)) || !parts[1]) throw new Error('imgRun: 非 dataURL 图片')
   return new ImageRun({
-    data: src.split(',')[1],
+    data: parts[1],
     transformation: { width: Math.round(d.w * scale), height: Math.round(d.h * scale) }
   })
 }
 // 把 LaTeX 公式渲染成 PNG dataURL（用 KaTeX→SVG→canvas→PNG，供 Word 嵌图，不用源码）
-let _svgImage = null
 function texToPng(tex, display) {
   return new Promise((resolve) => {
     try {
-      if (!_svgImage) _svgImage = new Image()
+      const im = new Image() // 每次新建，避免并发导出互相覆盖 onload/src
       const svg = katex.renderToString(tex, {
         throwOnError: false,
         displayMode: !!display,
@@ -63,24 +66,24 @@ function texToPng(tex, display) {
         strict: false
       })
       const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
-      _svgImage.onload = () => {
-        const w = _svgImage.naturalWidth || 300
-        const h = _svgImage.naturalHeight || 40
+      im.onload = () => {
+        const w = im.naturalWidth || 300
+        const h = im.naturalHeight || 40
         const c = document.createElement('canvas')
         c.width = w
         c.height = h
         const g = c.getContext('2d')
         g.fillStyle = '#ffffff'
         g.fillRect(0, 0, w, h)
-        g.drawImage(_svgImage, 0, 0, w, h)
+        g.drawImage(im, 0, 0, w, h)
         try {
           resolve('data:image/png;base64,' + c.toDataURL('image/png').split(',')[1])
         } catch (e) {
           resolve(null)
         }
       }
-      _svgImage.onerror = () => resolve(null)
-      _svgImage.src = svgUrl
+      im.onerror = () => resolve(null)
+      im.src = svgUrl
     } catch (e) {
       resolve(null)
     }
@@ -98,6 +101,7 @@ export function downloadText(text, n, mime) {
   a.href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain;charset=utf-8' }))
   a.download = n
   a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
 }
 
 function pdfHtml(title, items) {

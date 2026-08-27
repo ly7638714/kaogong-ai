@@ -457,8 +457,9 @@ function remember(ok) {
   const k = srsKey(t)
   const s = srs.value[k] || { lvl: 0, due: todayKey() }
   if (ok) {
-    s.lvl = Math.min(5, (s.lvl || 0) + 1)
-    s.due = addDays(todayKey(), SRS_INT[Math.min(s.lvl, SRS_INT.length - 1)])
+    s.lvl = Math.min(SRS_INT.length, (s.lvl || 0) + 1)
+    // 第 lvl 次记住 → SRS_INT[lvl-1] 天后再复习（lvl=1 首次 = 1 天），与"1/2/4/7/15/30"对齐
+    s.due = addDays(todayKey(), SRS_INT[Math.min(Math.max(0, s.lvl - 1), SRS_INT.length - 1)])
   } else {
     s.lvl = 0
     s.due = addDays(todayKey(), 1)

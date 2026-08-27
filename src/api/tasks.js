@@ -49,6 +49,8 @@ export function buildMaterialPrompt(opts = {}) {
 // 材料型题组统一生成（资料分析「材料+5题」 / 逻辑判断「一拖五」）
 export function buildGroupPrompt(subject, variant, difficulty, n, matType) {
   if (subject === '资料分析') return buildMaterialPrompt({ difficulty, matType, n })
+  // 逻辑判断·一拖 N：小题数量 clamp 到 2-5，避免非法值(0/负数/超大)进入提示词
+  n = Math.max(2, Math.min(5, Math.round(Number(n) || 3)))
   // 逻辑判断·一拖五
   const base = buildProfessorPrompt('逻辑判断', difficulty, '一拖五')
   return (
@@ -58,6 +60,25 @@ export function buildGroupPrompt(subject, variant, difficulty, n, matType) {
     '1. 材料：1 个完整题干（3-6 条条件 + 若干对象，如 6 人对应 6 个岗位、5 天值班表、3 队比赛排名），条件自洽、无歧义、信息量足够支撑 ' + n + ' 题。\n' +
     '2. 小题递进：第1题简单定位 → 第2-3题排序/匹配 → 第4题较难 → 第5题最难（可确定/可能/综合分析）；共用同一组总条件；【新增条件规则】第2题起，小题题干可在不违背总题干逻辑的前提下新增附加条件（如“若甲排第2位，则…”），新增条件只在该小题内成立、不得改变总题干，且与其他条件自洽不矛盾。\n' +
     '3. 输出格式（严格）：\n### 📄 材料\n（共用题干与条件）\n### 第1题\n（小题题干）\nA. … B. … C. … D. …\n【正确答案】X\n### ✅ 解析\n（正确项分析+每个干扰项错因点名；本次为提速，解析可省略不输出，稍后按需单独生成）\n…（依此类推到第' + n + '题）'
+  )
+}
+
+// 出题阶段专用 system：保留完整命题规范（prof + COMMON + SELF_CHECK），
+// 但输出格式收敛为"只出题干 + 选项 + 答案"，与出题 ask、提速策略一致，消除"要完整解析又只要题干"的矛盾。
+export function buildQuizSys(opts = {}) {
+  const plate = opts.plate || ''
+  const difficulty = opts.difficulty || 'mid'
+  const variant = opts.variant || ''
+  const prof = buildProfessorPrompt(plate, difficulty, variant)
+  return (
+    QUIZ_SYS +
+    '\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n【本次任务·模拟出题（命题专家模式）】\n' +
+    prof +
+    '\n\n【本次出题输出要求（严格，只出题勿多写）】\n' +
+    '只输出题目本体：题干（含【问法】单独一行，真题提问方式）+ 4 个选项（A. … B. … C. … D. …）+ 单独一行【正确答案】X。\n' +
+    '绝不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。\n' +
+    '图推/几何/立体/统计图题必须在题干【图形】区输出标准 SVG 代码块（```svg …```）承载真实图形，紧接一行【问法】。\n' +
+    '若本题为逻辑判断·真假话：在末尾单独追加【验证数据】一行 JSON（{"exprs":[...],"trueCount":n,"opts":[...],"ans":"X"}），供程序真值表硬校验，必须与题目完全一致。'
   )
 }
 

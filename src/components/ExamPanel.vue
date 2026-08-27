@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { store, saveWqs, saveCfg } from '../store'
-import { activeCfg, chatOnce, chatStream, buildTaskSys, buildMaterialPrompt, buildGroupPrompt, supportsVision } from '../api'
+import { activeCfg, chatOnce, chatStream, buildTaskSys, buildQuizSys, buildMaterialPrompt, buildGroupPrompt, supportsVision } from '../api'
 import { parseQuiz, extractChoices, answerLetter, parseMaterialQuiz } from '../utils/quiz'
 import { showToast } from '../utils/toast'
 import { exportPaper } from '../utils/export'
@@ -292,6 +292,7 @@ const genSec = ref(0)
 const genStatus = ref('') // 当前出题阶段（生成中/质检中/第N次重出），让用户知道在等什么
 let genTimer = null
 let genAbort = false
+let genCtrl = null // AbortController：取消出卷时立即中断进行中的请求
 // 板块参考倒计时（仅倒计时，不设正计时）
 const modName = ref('')
 const modDone = ref(0)
@@ -766,6 +767,8 @@ function readyBack() {
 }
 async function genAll(paper) {
   genAbort = false
+  if (genCtrl) { genCtrl.abort(); genCtrl = null }
+  genCtrl = new AbortController()
   questions.value = paper.questions
   phase.value = 'gen'
   genTotal.value = questions.value.length
@@ -797,7 +800,8 @@ async function genAll(paper) {
       genEta.value = Math.max(0, Math.round(((questions.value.length - genDone.value) * avg) / 1000))
     }
   }
-  await Promise.all([worker(), worker()])
+  // 按并发度设置启动对应数量的 worker（之前写死 2 路，UI 的并发选项形同虚设）
+  await Promise.all(Array.from({ length: CONC }, () => worker()))
   if (genTimer) { clearInterval(genTimer); genTimer = null }
   if (genAbort) { phase.value = 'config'; showToast('已取消出卷', 'info'); return }
   if (!questions.value.some((q) => !q.err && q.stem)) {
@@ -866,6 +870,7 @@ function updateQuizColResult(q, ok) {
 }
 function cancelGen() {
   genAbort = true
+  if (genCtrl) { genCtrl.abort(); genCtrl = null } // 立即中断进行中的生成请求，避免取消后仍在消耗额度
   if (genTimer) { clearInterval(genTimer); genTimer = null }
   phase.value = 'config'
   questions.value = []
@@ -922,11 +927,12 @@ function startPaper(paper) {
     }, 1000)
   }
   timers.q = setInterval(() => {
+    // 板块参考总时限照常递减（不受本题作答停顿影响，保持真实考场节奏感）
+    if (modLeft.value > 0) modLeft.value--
     // 答完当前题：冻结本题计时（不再递减），本题用时已记录
     if (marks.value[cur.value] != null) return
     qElapsed.value++
     qLeft.value--
-    if (modLeft.value > 0) modLeft.value--
     if (qLeft.value <= 0) timeoutQ()
   }, 1000)
   // AI 模式：确保当前题已生成（未生成则异步生成）
@@ -969,10 +975,12 @@ async function genOne(i) {
         ? '请为【资料分析】出一篇完整材料 + ' + gn + ' 道题（材料形式：' + matTypeName + '，第' + gn + '题为综合分析题，前 ' + (gn - 1) + ' 题考点递进）。'
         : '请为【逻辑判断】出一套「一拖' + gn + '」题组（1 个共用材料 + ' + gn + ' 道小题，小题可在不违背总题干逻辑的前提下新增附加条件）。') +
         '【本次输出要求（提速，必须遵守）】只输出 材料 + ' + gn + ' 道小题的题干/选项/答案：### 📄 材料 → ### 第1题（题干 + A./B./C./D. 四选项 + 单独一行【正确答案】X）→ ### 第2题…；不要输出解析/考点/秒杀/命题人设计说明（这些稍后按需单独生成）。材料与各题数据必须自洽、可互相验算。'
-      const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 8000)
+      const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 8000, 120000, genCtrl && genCtrl.signal)
       const parsed = parseMaterialQuiz(reply, gn)
       const okN = parsed && parsed.qs.length ? Math.min(gn, parsed.qs.length) : 0
       if (okN >= Math.min(2, gn)) {
+        // 材料/共用题干缺失时视为整组失败（缺材料题无法作答），触发重出而非静默拼成无材料题
+        if (!parsed.material) { failAll('（材料缺失，可点「重出」重试整组）'); return }
         for (let k = 0; k < gn; k++) {
           const slot = questions.value[i + k]
           const q = parsed.qs[k]
@@ -981,7 +989,7 @@ async function genOne(i) {
             slot.options = q.options
             slot.answer = q.answer
             slot.explain = q.explain || ''
-            slot.variant = slot.variant || (isZL ? (k === gn - 1 ? '综合分析' : ['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 6]) : '分析推理')
+            slot.variant = slot.variant || (isZL ? (k === gn - 1 ? '综合分析' : ['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 10]) : '分析推理')
           } else if (slot) {
             slot.err = true
             slot.stem = '（本组第 ' + (k + 1) + ' 题解析失败，可点「重出」重试整组）'
@@ -989,13 +997,14 @@ async function genOne(i) {
         }
       } else failAll('（材料题组生成格式异常，可点「重出」重试整组）')
     } catch (e) {
+      if (genAbort) return // 取消出卷：静默返回，不记为出题失败
       failAll('（出题失败：' + e.message + '）')
     }
     return
   }
   const variant = item.variant || ''
   try {
-    const sys = buildTaskSys('quiz', { plate: item.subject, difficulty: item.difficulty || 'mid', variant })
+    const sys = buildQuizSys({ plate: item.subject, difficulty: item.difficulty || 'mid', variant })
     const dir = item.dir || resolveDir('auto')
     const dh = dirHint(item.subject, dir, item.dirText)
     const fmtHint = (item.subject === '图形推理' && singleMode.value && tutuFormat.value && tutuFormat.value !== 'auto') ? '本题出题形式固定为【' + tutuFormat.value + '】，请严格按【图形推理】子命题人的「SVG 布局铁律」中该形式的画布尺寸与格子布局出图。' : ''
@@ -1008,10 +1017,10 @@ async function genOne(i) {
     if (singleMode.value && questions.value.length === 1) {
       // 单题：流式生成，题干边出边显示
       genLive.value = ''
-      reply = await chatStream(msgs, c, (d) => { if (d && d.text) genLive.value = liveVisible(d.text) }, null, 150000)
+      reply = await chatStream(msgs, c, (d) => { if (d && d.text) genLive.value = liveVisible(d.text) }, genCtrl && genCtrl.signal, 150000)
       genLive.value = liveVisible(reply || '')
     } else {
-      reply = await chatOnce(c, msgs, 6000)
+      reply = await chatOnce(c, msgs, 6000, 120000, genCtrl && genCtrl.signal)
     }
     const extractVerifyData = (text) => {
       const m = String(text || '').match(/【验证数据】\s*(\{[\s\S]*?\})/)
@@ -1030,7 +1039,7 @@ async function genOne(i) {
       let cur = attempt === 0 ? parseQuiz(raw) : null
       if (!cur || !cur.options || cur.options.length < 4) {
         // 网络/Key 错误直接抛出（外层显示真实原因），不盲目重试；质检不过则带原因定向重出
-        try { raw = await chatOnce(c, fixHint ? [{ role: 'system', content: sys }, { role: 'user', content: ask + fixHint }] : msgs, 6000, 90000) } catch (e) { throw e }
+        try { raw = await chatOnce(c, fixHint ? [{ role: 'system', content: sys }, { role: 'user', content: ask + fixHint }] : msgs, 6000, 90000, genCtrl && genCtrl.signal) } catch (e) { throw e }
         cur = parseQuiz(raw)
       }
       if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
@@ -1062,6 +1071,7 @@ async function genOne(i) {
       item.err = true
     }
   } catch (e) {
+    if (genAbort) { item.err = true; return } // 取消出卷：仅标记待重出，不覆盖为“出题失败”
     item.stem = '（出题失败：' + e.message + '）'
     item.err = true
   }
@@ -1090,9 +1100,9 @@ async function prefetchSingle() {
   const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
   const item = { subject: plate, difficulty: diff, variant, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false }
   try {
-    const sys = buildTaskSys('quiz', { plate, difficulty: diff, variant })
+    const sys = buildQuizSys({ plate, difficulty: diff, variant })
     const ask = (variant ? '请为【' + plate + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + plate + '】出一道仿真模拟题。') + dirHint(plate, dir, dirText)
-    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 6000)
+    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 6000, 120000, genCtrl && genCtrl.signal)
     const qz = parseQuiz(reply)
     if (qz && qz.options && qz.options.length >= 4) prefetchQ.value = { item: { ...item, stem: qz.stem, options: qz.options, answer: qz.answer, explain: qz.explain || '', designer: qz.designer || '' }, plate, difficulty: diff, variant }
   } catch (e) { /* 预生成失败静默，下次点再来一题再实时生成 */ }
@@ -1214,14 +1224,16 @@ function achieveText() {
 // 出题严格质检：二次验证 题干自洽/唯一解/恰一正确（开启 strictGen 时对每道生成题执行）
 async function verifyQuestion(q) {
   const c = pickGenC()
-  if (!c || !c.key) return
+  if (!c || !c.key) return true
   try {
     const sys = '你是公考行测出题质检员。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②是否恰好一个正确选项（禁止多选、无正确选项、两选项同真、选项全对）；③选项与题干相关、无逻辑谬误。只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"..."}'
     const user = '题干：' + String(q.stem || '') + '\n选项：' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n答案：' + String(q.answer || '')
     const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 400)
     const m = String(r || '').match(/"ok"\s*:\s*(true|false)/)
-    return m ? m[1] === 'true' : true
-  } catch (e) { return true }
+    // fail-closed：质检结果无法解析（缺 ok 字段/JSON 异常）一律视同不合格，触发重出，避免"白付钱却放行劣质题"
+    if (!m) return false
+    return m[1] === 'true'
+  } catch (e) { return false }
 }
 // ===== AI 深度解析：导入/错题的解析太简单时，走「名师讲解」路径补全（同对话回复逻辑） =====
 async function enhanceExplain(q) {

@@ -87,7 +87,7 @@ describe('chatStream 流式解析', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValue({ ok: false, status: 401, body: null, json: async () => ({ error: { message: '未授权' } }) })
+        .mockResolvedValue({ ok: false, status: 401, body: null, text: async () => '{"error":{"message":"未授权"}}', json: async () => ({ error: { message: '未授权' } }) })
     )
     await expect(chatStream([{ role: 'user', content: 'q' }], cfg, () => {})).rejects.toThrow(/未授权/)
   })

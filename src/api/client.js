@@ -1,3 +1,4 @@
+/* global AbortSignal */
 // 底层 API 调用：双模型路由、鉴权头、流式/单次对话、AI 整理
 import { store } from '../store'
 
@@ -36,19 +37,38 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
   const body = { model: c.model, messages, max_tokens: isReasoner ? 20000 : 10000, stream: true }
   if (!isReasoner) body.temperature = 0.7
-  // 无外部取消信号时：内部超时自动中断
-  let _ctrl = null
-  let _sig = signal
-  const _timer = setTimeout(() => { if (_ctrl && !_sig) _ctrl.abort() }, timeoutMs)
-  if (!_sig) { _ctrl = new AbortController(); _sig = _ctrl.signal }
+  // 超时兜底：无论是否传入外部 signal，内部超时始终生效；用 AbortSignal.any 合并两者
+  const _ctrl = new AbortController()
+  const _timer = setTimeout(() => _ctrl.abort(), timeoutMs)
+  let _sig = _ctrl.signal
+  let _onAbort = null
+  if (signal) {
+    try {
+      if (signal.aborted) _ctrl.abort()
+      else if (typeof AbortSignal !== 'undefined' && AbortSignal.any) _sig = AbortSignal.any([signal, _ctrl.signal])
+      else { _onAbort = () => _ctrl.abort(); signal.addEventListener('abort', _onAbort, { once: true }) }
+    } catch (e) {
+      // AbortSignal.any 不可用回退监听
+      _onAbort = () => _ctrl.abort()
+      signal.addEventListener('abort', _onAbort, { once: true })
+    }
+  }
   let _resp
   try {
     _resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: _sig })
   } catch (e) {
     clearTimeout(_timer)
-    throw e.name === 'AbortError' ? new Error('请求超时（' + Math.round(timeoutMs / 1000) + ' 秒），已自动重试') : e
+    if (_onAbort) signal.removeEventListener('abort', _onAbort)
+    // 外部取消（用户"停止生成"）：保持 AbortError 原样上抛，供上层识别"已停止"，避免误报超时
+    if (signal && signal.aborted) {
+      if (e.name === 'AbortError') throw e
+      const er = new Error('已停止生成'); er.name = 'AbortError'; throw er
+    }
+    // 内部超时：包装为超时提示（唤醒重试语义，但 chatStream 本身不重试）
+    throw e.name === 'AbortError' ? new Error('请求超时（' + Math.round(timeoutMs / 1000) + ' 秒）') : e
   }
   clearTimeout(_timer)
+  if (_onAbort) signal.removeEventListener('abort', _onAbort)
   const resp = _resp
   if (!resp.ok) {
     const bodyTxt = await resp.text().catch(() => '')
@@ -103,7 +123,7 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   return full
 }
 
-export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000) {
+export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000, signal) {
   const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
   const body = {
     model: c.model,
@@ -117,9 +137,19 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    // 合并外部取消信号与内部超时：外部取消立即生效且不重试
+    let sig = ctrl.signal
+    let onAbort = null
+    if (signal) {
+      // 外部已取消则不发起请求
+      if (signal.aborted) { clearTimeout(timer); const er = new Error('请求已取消'); er.name = 'AbortError'; throw er }
+      if (typeof AbortSignal !== 'undefined' && AbortSignal.any) sig = AbortSignal.any([signal, ctrl.signal])
+      else { onAbort = () => ctrl.abort(); signal.addEventListener('abort', onAbort, { once: true }) }
+    }
     try {
-      const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: ctrl.signal })
+      const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: sig })
       clearTimeout(timer)
+      if (onAbort) signal.removeEventListener('abort', onAbort)
       if (!resp.ok) {
         const bodyTxt = await resp.text().catch(() => '')
         let em = ''
@@ -133,8 +163,15 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
       lastErr = new Error('模型返回为空，已自动重试')
     } catch (e) {
       clearTimeout(timer)
+      if (onAbort) signal.removeEventListener('abort', onAbort)
+      // 外部取消：原样抛出（不重试），供上层识别"已取消"
+      if (signal && signal.aborted) {
+        if (e.name === 'AbortError') throw e
+        const er = new Error('请求已取消'); er.name = 'AbortError'; throw er
+      }
       lastErr = e.name === 'AbortError' ? new Error('请求超时（' + Math.round(timeoutMs / 1000) + ' 秒），已自动重试') : e
-      if (!/timeout|timed out|abort|ETIMEDOUT|fetch/i.test(String(e && e.message || ''))) break
+      // AbortError（本函数超时触发）视为可重试；网络/服务端异常里含 timeout/abort/fetch 字样也重试一次
+      if (!(e.name === 'AbortError' || /timeout|timed out|abort|ETIMEDOUT|fetch/i.test(String(e && e.message || '')))) break
     }
   }
   throw lastErr || new Error('请求失败')
