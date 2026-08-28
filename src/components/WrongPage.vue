@@ -6,7 +6,7 @@ import { exportObsidianMd, copyObsidianWrong, exportAnkiCsv } from '../utils/exp
 import { activeCfg, chatOnce, supportsVision } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
 import { ankiAddNote } from '../utils/ankiConnect'
-import { addPoints as petAddPoints } from '../utils/pet'
+import { addPoints as petAddPoints, buildWrongAnalysis } from '../utils/pet'
 
 const cur = ref(-1),
   show = ref(false)
@@ -393,6 +393,13 @@ function openRaw(idx) {
   rep.value = false
   const q = store.wqs[idx] || {}
   frm.value = { answer: q.answer || '', method: q.method || '', note: q.note || '', sel: (q.reasons || []).slice() }
+  store.curWrongIdx = idx
+  store.curQ = { plate: q.plate || q.subject, subject: q.subject || q.plate, kind: q.kind || q.variant || '', stem: q.q || q.stem || q.text, options: q.options || [], answer: q.answer || q.ans || q.correct || '', explain: q.explain || q.analysis || '', your: q.your || q.answerUser || '', ok: false }
+  store.readCtx = { type: 'wrong', title: '错题复盘·' + (q.plate || q.subject || '行测'), text: buildWrongReadable(q) }
+}
+function buildWrongReadable(q) {
+  const opts = (q.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || '').replace(/<[^>]+>/g, ' ')).join('。')
+  return ((q.q || q.stem || q.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() + '。' + opts + '。' + buildWrongAnalysis(q)).slice(0, 1400)
 }
 function toggleReason(r) {
   const i = frm.value.sel.indexOf(r)
@@ -647,7 +654,7 @@ function parseByField(txt) {
           <div v-if="!qcPapers.length" class="empty"><div class="empty-i">🗂️</div><div class="empty-t">暂无卷子</div><div class="empty-d">在「模拟组卷」出的卷子会自动存入这里</div></div>
           <div v-else class="ep-list-scroll">
             <div v-for="(p, i) in qcPapers" :key="p.id" class="ep-paper">
-              <button class="ep-paper-btn" @click="redoPaper(p)" :title="p.name + ' · ' + (p.questions||[]).length + ' 题'">{{ p.name }} · {{ (p.questions||[]).length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
+              <button class="ep-paper-btn" :title="p.name + ' · ' + (p.questions||[]).length + ' 题'" @click="redoPaper(p)">{{ p.name }} · {{ (p.questions||[]).length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
               <button class="btn btn-gh" style="padding: 2px 8px; font-size: 11px" @click="exportPaperMd(p)">⬇ 导出</button>
               <button class="ep-x" @click="delVaultPaper(i)">×</button>
             </div>
@@ -657,7 +664,7 @@ function parseByField(txt) {
           <div v-else class="ep-list-scroll">
             <div v-for="(c, i) in qcQuiz" :key="c.id" class="ep-paper">
               <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
-              <button class="ep-paper-btn" @click="redoQuizCol(c)" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + c.stem.slice(0, 80)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ c.stem.slice(0, 24) }}…（错{{ c.wrongCount }}）</button>
+              <button class="ep-paper-btn" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + c.stem.slice(0, 80)" @click="redoQuizCol(c)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ c.stem.slice(0, 24) }}…（错{{ c.wrongCount }}）</button>
               <button class="ep-x" @click="delVaultQuiz(i)">×</button>
             </div>
           </div>

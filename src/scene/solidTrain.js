@@ -832,11 +832,9 @@ export function applyClipping(group, plane) {
 }
 
 // 从当前立体生成切面干扰项池（同体其他方位/位置 + 基础图形切面）
-export function sliceSvgPool(group, normal, dist) {
+export function sliceSvgPool(group, normal, _dist) {
   const pool = []
   const push = svg => { if (svg && !pool.includes(svg)) pool.push(svg) }
-  const bb = new THREE.Box3().setFromObject(group)
-  const centerPt = bb.getCenter(new THREE.Vector3())
   const dirs = [normal, ...DIR_PRESETS.map(d => new THREE.Vector3(...d.normal))]
   for (let di = 0; di < dirs.length; di++) {
     const n = dirs[di].clone().normalize()
@@ -892,7 +890,6 @@ export function robustSlice(group, normal, dist, range) {
 // ---------- 体素解析切片（逻辑实体无间隙，精确截面） ----------
 export function cellProjBounds(cells, normal) {
   const n = normal.clone().normalize()
-  const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]), zs = cells.map(c => c[2])
   const pts = []
   for (const [x, y, z] of cells) {
     for (let i = 0; i < 8; i++) {
@@ -1118,7 +1115,6 @@ function edgeKey(a, b) { const k1 = ptKey(a), k2 = ptKey(b); return k1 < k2 ? k1
 export function computeMeshStats(group) {
   let faces = 0, area = 0
   const vset = new Set(), eset = new Set()
-  const tmp = []
   group.updateMatrixWorld(true)
   group.traverse(o => {
     if (!o.isMesh || !o.geometry) return
@@ -1175,7 +1171,6 @@ export function faceInfoFromHit(mesh, triIndex) {
   // BFS 合并共面相邻三角形（共享边 + 法向一致）
   const visited = new Set([triIndex])
   const queue = [triIndex]
-  const adj = {}
   const edgeOwner = new Map()
   for (let t = 0; t < nTri; t++) {
     const [a, b, c] = triPts(t)

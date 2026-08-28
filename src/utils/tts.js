@@ -1,12 +1,31 @@
 import { store } from '../store'
+import { showToast } from './toast'
+import {
+  TTS_ENGINES,
+  GLM_PRESET_VOICES,
+  EDGE_PRESET_VOICES,
+  OPENAI_PRESET_VOICES,
+  speakPro,
+  stopSpeakPro,
+  speakingPro,
+  listGmVoices,
+  listEdgeVoices,
+  gmCfg,
+  openaiCfg,
+  glmSynthesize,
+  openaiSynthesize,
+  edgeSynthesize,
+  cloneCosyVoice,
+  cloneZhipuVoice,
+  prepareCloneAudio,
+  detectAudioFormat,
+  resampleAudio,
+  speechStartOffset,
+  audioBufferToWavBytes,
+  ttsStatus
+} from './ttsEngine'
 
-function strip(t) {
-  return String(t || '')
-    .replace(/[#*`>|_]/g, '')
-    .replace(/\s+/g, ' ')
-}
-
-// ===== 场景音色清单（映射到系统神经语音，可通过音调进一步变声）=====
+// ===== 场景音色清单（仅系统语音兜底时使用；真人引擎在「音色市场」里选）=====
 export const SCENES = [
   { id: 'natural', name: '🎙️ 默认·自然', kw: 'xiaoxiao|natural|google|tingting' },
   { id: 'kid', name: '🎀 萝莉·童声', kw: 'xiaoshuang|child|baby|kid', pitch: 1.25 },
@@ -44,12 +63,11 @@ export function onVoicesReady(cb) {
   } catch (e) {}
 }
 
-// 按场景关键词在系统所有语音里匹配最优；匹配不到返回系统默认 zh 语音或 null
+// 按场景关键词在系统所有语音里匹配最优（仅系统引擎使用）
 export function pickSceneVoice(scene) {
   try {
     const vs = window.speechSynthesis.getVoices() || []
     if (!vs.length) return null
-    // 自定义本机语音优先（设置里选择的系统语音）
     const custom = store.cfg && store.cfg.ttsVoice
     if (custom) {
       const hit = vs.find((v) => v.name === custom || v.voiceURI === custom)
@@ -81,34 +99,89 @@ function scenePitch(scene) {
   return (s && s.pitch) || 0.98
 }
 
-// 朗读：opts={ scene:'lady', rate:1, pitch:null, onEnd: fn }
+let _lastErrToast = 0
+function errToast(msg) {
+  const now = Date.now()
+  if (now - _lastErrToast < 8000) return
+  _lastErrToast = now
+  showToast('🔊 朗读失败：' + String(msg || '').slice(0, 80), 'error')
+}
+
+// 朗读：opts={ scene:'lady', rate:1, pitch:null, onEnd: fn, onError: fn }
+// 按 store.cfg.ttsMode 分发：glm(默认·智谱超拟人) / openai / edge / sys
 export function speak(text, opts) {
-  if (!('speechSynthesis' in window)) return
   opts = opts || {}
-  try {
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(strip(text))
-    u.lang = 'zh-CN'
-    const v = pickSceneVoice(opts.scene)
-    if (v) u.voice = v
-    u.rate = opts.rate != null ? opts.rate : 0.98
-    u.pitch = opts.pitch != null ? opts.pitch : scenePitch(opts.scene)
-    if (opts.onEnd) u.onend = opts.onEnd
-    if (opts.onError) u.onerror = opts.onError
-    window.speechSynthesis.speak(u)
-  } catch (e) {}
+  speakPro(text, {
+    voice: opts.voice,
+    rate: opts.rate != null ? opts.rate : 0.98,
+    pitch: opts.pitch != null ? opts.pitch : scenePitch(opts.scene),
+    speed: opts.rate != null ? opts.rate : 1,
+    onEnd: opts.onEnd,
+    onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
+  })
 }
 export function stopSpeak() {
-  try {
-    window.speechSynthesis.cancel()
-  } catch (e) {}
+  stopSpeakPro()
 }
 export function speaking() {
+  return speakingPro()
+}
+
+// ===== 真人引擎辅助（设置页「音色市场」用）=====
+export { TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, gmCfg, openaiCfg, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, detectAudioFormat, resampleAudio, speechStartOffset, audioBufferToWavBytes }
+
+// 试听某个音色（固定短句，立即播放；engine: glm/openai/edge）
+export async function previewVoice(engine, voice, opts = {}) {
+  const text = opts.text || '你好，我是你的行测智能助教，这套真人音色听起来自然吗？'
   try {
-    return window.speechSynthesis.speaking || window.speechSynthesis.pending
+    if (engine === 'glm') {
+      const r = await glmSynthesize(text, { voice, speed: 1 })
+      if (!r.ok) { ttsStatus.state = 'error'; ttsStatus.msg = '❌ 试听失败：' + r.msg; showToast('🔊 试听失败：' + r.msg, 'error'); return { ok: false } }
+      ttsStatus.state = 'speaking'; ttsStatus.msg = '正在播放真人音色试听…'
+      const played = await playBuf(r.bytes, r.mime)
+      ttsStatus.state = played ? 'done' : 'error'; ttsStatus.msg = played ? '✅ 真人音色试听完成' : '❌ 播放失败'
+      return { ok: played }
+    }
+    if (engine === 'openai') {
+      const r = await openaiSynthesize(text, { voice, speed: 1 })
+      if (!r.ok) { ttsStatus.state = 'error'; ttsStatus.msg = '❌ 试听失败：' + r.msg; showToast('🔊 试听失败：' + r.msg, 'error'); return { ok: false } }
+      ttsStatus.state = 'speaking'; ttsStatus.msg = '正在播放真人音色试听…'
+      const played = await playBuf(r.bytes, r.mime)
+      ttsStatus.state = played ? 'done' : 'error'; ttsStatus.msg = played ? '✅ 真人音色试听完成' : '❌ 播放失败'
+      return { ok: played }
+    }
+    if (engine === 'edge') {
+      const r = await edgeSynthesize(text, { voice, rate: 1, pitch: 0 })
+      if (!r.ok) { ttsStatus.state = 'error'; ttsStatus.msg = '❌ 试听失败：' + r.msg; showToast('🔊 试听失败：' + r.msg, 'error'); return { ok: false } }
+      ttsStatus.state = 'speaking'; ttsStatus.msg = '正在播放真人音色试听…'
+      const played = await playBuf(r.bytes, r.mime)
+      ttsStatus.state = played ? 'done' : 'error'; ttsStatus.msg = played ? '✅ 真人音色试听完成' : '❌ 播放失败'
+      return { ok: played }
+    }
   } catch (e) {
-    return false
+    showToast('🔊 试听失败：' + e.message, 'error')
+    return { ok: false }
   }
+}
+// 播放二进制（复用 ttsEngine 内部播放器，通过动态引入避免重复实现）
+async function playBuf(bytes, mime) {
+  const { playBytes } = await import('./ttsEngine')
+  return playBytes(bytes, mime)
+}
+// 把「图形增强」里的 Key 复制到对应真人引擎（智谱/OpenAI 兼容）
+export function copyFigKeyToTts() {
+  const fig = store.cfg.fig || {}
+  const k = String(fig.key || '').trim()
+  if (!k) { showToast('图形增强里还没有填 Key', 'info'); return false }
+  const url = String(fig.url || '')
+  if (/bigmodel|zhipu|glm/i.test(url)) {
+    store.cfg.ttsGm.key = k
+    showToast('✅ 已把智谱 Key 复制到真人朗读', 'success')
+  } else {
+    store.cfg.ttsOpenAI.key = k
+    showToast('✅ 已把图形增强 Key 复制到 OpenAI 兼容朗读', 'success')
+  }
+  return true
 }
 
 let recog = null,

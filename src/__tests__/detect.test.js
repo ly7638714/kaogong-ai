@@ -41,3 +41,15 @@ describe('detectBanKuai 板块识别', () => {
     expect(detectBanKuai(undefined)).toBe('')
   })
 })
+
+
+describe('图形推理识别（不被“推理”误判为逻辑判断）', () => {
+  it('图形推理题 → 图形推理', () => {
+    expect(detectBanKuai('一道图形推理题：一个3×3宫格，黑色圆点每次向右移动一格，请问黑点在哪？')).toBe('图形推理')
+    expect(detectBanKuai('这道图推题，九宫格黑白叠加，黑+黑=白，问号处是什么？')).toBe('图形推理')
+    expect(detectBanKuai('展开图折叠成立方体，哪项正确？')).toBe('图形推理')
+  })
+  it('逻辑削弱题仍判判断推理', () => {
+    expect(detectBanKuai('以下哪项最能削弱上述结论？')).toBe('判断推理')
+  })
+})

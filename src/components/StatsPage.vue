@@ -4,6 +4,7 @@ import { store, saveCfg } from '../store'
 import { detectBanKuai, activeCfg, chatOnce } from '../api'
 import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
 import { downloadText } from '../utils/export'
+import { showToast } from '../utils/toast'
 const stats = computed(() => ({
   tot: store.msgs.filter((m) => m.role === 'user').length,
   q: store.msgs.filter(
@@ -390,7 +391,7 @@ async function exportReport(days = 7, fmt = 'md') {
       </div>
 
       <div style="text-align:right; margin: 2px 0 10px; display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap">
-        <label class="rep-ai"><input type="checkbox" v-model="repAi" /> 🤖 AI 总结</label>
+        <label class="rep-ai"><input v-model="repAi" type="checkbox" /> 🤖 AI 总结</label>
         <button class="btn btn-gh" :disabled="repBusy" @click="exportReport(7,'md')">{{ repBusy ? '🤖 生成中…' : '📤 周报 MD' }}</button>
         <button class="btn btn-gh" :disabled="repBusy" @click="exportReport(30,'md')">📤 月报 MD</button>
         <button class="btn btn-gh" :disabled="repBusy" @click="exportReport(7,'doc')">📄 周报 Word</button>
@@ -409,7 +410,7 @@ async function exportReport(days = 7, fmt = 'md') {
         <div class="ass-quote">{{ encourage }}</div>
         <div class="fld" style="margin-top: 6px">
           <label>🎯 行测目标分数（100 制，动态评估你的得分情况）</label>
-          <input type="number" min="0" max="100" v-model.number="store.cfg.goalScore" @change="saveCfg()" style="width: 96px" />
+          <input v-model.number="store.cfg.goalScore" type="number" min="0" max="100" style="width: 96px" @change="saveCfg()" />
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-top: 4px">当前预估分 = 六大板块按题量权重加权（判断/言语各30、资料20、数量8、常识7、政治5）；掌握度来自做题正确率 + 错题复盘 + 错题量。</div>
       </div>

@@ -51,13 +51,13 @@ export function verifyTruthTable(data) {
       const vals = {}
       atoms.forEach((a, k) => { vals[a] = !!(mask & (1 << k)) })
       let t = 0
-      for (const e of data.exprs) { try { if (evalE(parseExpr(e), vals)) t++ } catch (e2) { return { ok: false, reason: '条件表达式无效' } } }
+      for (const expr of data.exprs) { try { if (evalE(parseExpr(expr), vals)) t++ } catch (e) { return { ok: false, reason: '条件表达式无效' } } }
       if (t === trueCount) sols.push(vals)
     }
     if (sols.length !== 1) return { ok: false, reason: '唯一解数量=' + sols.length + '（需恰好1）' }
     const sol = sols[0]
     let trueOpts = []
-    for (let i = 0; i < data.opts.length; i++) { try { if (evalE(parseExpr(data.opts[i]), sol)) trueOpts.push(i) } catch (e2) { return { ok: false, reason: '选项表达式无效' } } }
+    for (let i = 0; i < data.opts.length; i++) { try { if (evalE(parseExpr(data.opts[i]), sol)) trueOpts.push(i) } catch (e) { return { ok: false, reason: '选项表达式无效' } } }
     if (trueOpts.length !== 1) return { ok: false, reason: '正确选项数量=' + trueOpts.length + '（需恰好1）' }
     const want = String(data.ans || '').toUpperCase()
     const wantIdx = /^[A-Z]$/.test(want) ? want.charCodeAt(0) - 65 : Number(data.ans)

@@ -2,6 +2,7 @@
 import { ref, nextTick, computed, onMounted, onUnmounted, watch } from 'vue'
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
+import { USAGE_GUIDE } from '../utils/usageGuide'
 import { parseQuiz } from '../utils/quiz'
 function md(t) {
   return renderMd(t)
@@ -11,8 +12,8 @@ function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 import { store, saveMsgs, saveWqs, saveCfg, saveNotes } from '../store'
-import { activeCfg, supportsVision, buildSys, chatStream, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
-import { analyzeFigImage, figCfg } from '../api/figEnhance'
+import { activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
+import { analyzeFigImage, readQuestionFromImage, figCfg } from '../api/figEnhance'
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
 import { MODE_NAMES } from '../kb'
 import { collectChat } from '../utils/chat'
@@ -26,11 +27,28 @@ import SolidTrain from './SolidTrain.vue'
 const toolsCollapsed = ref(false)
 try { toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
 function toggleTools() { toolsCollapsed.value = !toolsCollapsed.value; try { localStorage.setItem('xc_chat_tools', toolsCollapsed.value ? '1' : '0') } catch (e) {} }
+// 对话使用说明书弹窗
+const guideShow = ref(false)
+const guideOpen = ref({})
+const guideQaOpen = ref({})
+function toggleGuideSec(si) { guideOpen.value[si] = !guideOpen.value[si] }
+function toggleGuideQa(si, ii) { const k = si + '-' + ii; guideQaOpen.value[k] = !guideQaOpen.value[k] }
 const text = ref(''),
   imgs = ref([]),
   linkShow = ref(false),
   linkUrl = ref(''),
   recogOn = ref(false)
+const quickMode = ref(localStorage.getItem('xc_quick_mode') === '1') // 🧠深度(思考模型,准) / ⚡快答(快模型,快)
+function toggleQuickMode() {
+  quickMode.value = !quickMode.value
+  try { localStorage.setItem('xc_quick_mode', quickMode.value ? '1' : '0') } catch (e) {}
+  showToast(
+    quickMode.value
+      ? '⚡ 快答已开启：用「对话快模型」秒回（适合简单/熟练题；难题建议切回深度）'
+      : '🧠 深度解析已开启：用思考模型更准（适合难题/文字截图题；较慢）',
+    'info'
+  )
+}
 const live = ref(null) // 当前流式消息 {role:'ai', text, think, thinkOpen}
 const msgsBox = ref(null)
 const atBottom = ref(true) // 是否在最新处（用于"回到最新"按钮显隐）
@@ -42,6 +60,40 @@ function sumMsgsScroll() {
 }
 function backToLatest() {
   scroll()
+}
+// 「回到最新」可拖拽定位（记忆位置，避免遮挡其他按钮）
+const blPos = ref(null)
+try {
+  const _p = JSON.parse(localStorage.getItem('xc_bl_pos') || 'null')
+  // 防御：保存位置若落在底部输入区附近（可能遮挡按钮），忽略回默认
+  if (_p && (_p.left != null || _p.right != null) && !(_p.top != null && _p.top > window.innerHeight - 130)) blPos.value = _p
+} catch (e) {}
+const blStyle = computed(() => {
+  if (!blPos.value) return {}
+  return blPos.value.left != null
+    ? { left: blPos.value.left + 'px', top: blPos.value.top + 'px' }
+    : { right: blPos.value.right + 'px', bottom: blPos.value.bottom + 'px' }
+})
+function onBlDown(e) {
+  e.preventDefault()
+  const r = e.currentTarget.getBoundingClientRect()
+  const sx = e.clientX, sy = e.clientY
+  const ox = sx - r.left, oy = sy - r.top
+  let moved = false
+  const onMove = (ev) => {
+    const x = ev.clientX - ox, y = ev.clientY - oy
+    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true
+    const w = r.width || 90, h = r.height || 34
+    blPos.value = { left: Math.max(4, Math.min(window.innerWidth - w - 4, x)), top: Math.max(4, Math.min(window.innerHeight - h - 4, y)) }
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove, true)
+    window.removeEventListener('pointerup', onUp, true)
+    if (blPos.value) { try { localStorage.setItem('xc_bl_pos', JSON.stringify(blPos.value)) } catch (_) {} }
+    if (!moved) backToLatest()
+  }
+  window.addEventListener('pointermove', onMove, true)
+  window.addEventListener('pointerup', onUp, true)
 }
 
 function addMsg(m) {
@@ -198,44 +250,99 @@ async function send() {
     return
   }
   const hasImg = imgs.value.length > 0
+  const imgData = hasImg ? imgs.value[0] : ''
   const c = activeCfg(hasImg)
   if (!c || !c.key) {
     store.busy = false
-    showToast('请先在设置配置 ' + (hasImg ? '视觉' : '文字') + ' 模型 API Key', 'error')
+    showToast('请先在设置配置模型 API Key（文字模型用于作答；发图时会智能识别：纯文字图走文字模型，含图形图走视觉模型或图形增强读图）', 'error')
     return
   }
+  // 智能识图路由：图片永远接收，不拒收
+  // ① 主视觉模型可识图（智谱/通义/OpenAI）→ 直接发图给它看；
+  // ② 主视觉不能识图（如 DeepSeek 纯文本）→ 用「图形增强」视觉模型读图（区分纯文字/含图形）→ 文字模型作答；
+  // ③ 两者都没有 → 仍接收图片，注入系统提示让模型礼貌引导，而非假装看到或拒收。
+  let figRead = null
   if (hasImg && !supportsVision(c)) {
-    store.busy = false
-    showToast(
-      '当前「' +
-        store.cfg.vision.model +
-        '」不是可识图模型/未配置视觉Key。请到 ⚙️设置→视觉模型 选用可识图模型并填 Key；或删掉图片改用文字描述。',
-      'error'
-    )
-    return
+    const fc = figCfg()
+    if (fc) {
+      try {
+        showToast('🖼 正在用图形增强模型读取图片…', 'info')
+        figRead = await readQuestionFromImage(imgData, txt)
+      } catch (e) {
+        figRead = null
+      }
+      if (figRead && figRead.ok) {
+        showToast(figRead.type === 'graph' ? '📐 图片含图形，已读取文字部分（图形题建议配视觉模型更准）' : '📄 图片为纯文字，已读取', 'success')
+      }
+    }
   }
   const userMsg = { role: 'user', content: hasImg ? { text: txt, imgs: imgs.value.slice() } : txt }
-  const sentImgs = hasImg ? userMsg.content.imgs.slice() : []
+  if (figRead && figRead.ok) {
+    userMsg._curImgRead = (figRead.text || txt) + (figRead.fig ? '\n【图形特征】' + figRead.fig : '')
+    userMsg._imgType = figRead.type || 'text'
+  }
   pushRecent(txt)
   addMsg(userMsg) // 经 addMsg 统一处理（含考场倒计时启动/保存/滚动）
   text.value = ''
   imgs.value = []
   scroll()
-  // 综合模式(mode=all)默认只发通用 SYS(约7k字)，不带专项方法论，专业题回复易泛化。
-  // 此处按题目板块用 detectBanKuai 命中对应专项 KB 追加注入，让模型拿到该板块名师方法论，提升针对性。
+  await runChat()
+}
+// ===== 发起对话（含智能识图路由与失败降级重试） =====
+async function runChat() {
+  const lastMsg = store.msgs[store.msgs.length - 1]
+  const curIsImg = !!(lastMsg && lastMsg.role === 'user' && lastMsg.content && lastMsg.content.imgs && lastMsg.content.imgs.length)
+  const curFigRead = lastMsg && lastMsg._curImgRead
+  const curTxt = lastMsg ? (typeof lastMsg.content === 'string' ? lastMsg.content : (lastMsg.content && lastMsg.content.text) || '') : ''
+  const sentImgs = curIsImg ? lastMsg.content.imgs.slice() : []
+  // 🚀 对话快模型（非思考模型秒回）：留空=跟随文字模型（思考模型慢）
+  let replyC = activeCfg(curIsImg)
+  let chatFast = ''
+  let needImgRead = false
+  try {
+    chatFast = String(localStorage.getItem('xc_chat_fast_model') || localStorage.getItem('xc_fast_gen_model') || '').trim()
+    if (chatFast && quickMode.value) {
+      const fastC = { ...replyC, model: chatFast }
+      const fv = supportsVision(fastC)
+      if (!curIsImg || !fv) {
+        replyC = fastC
+        if (curIsImg && !fv && figCfg()) needImgRead = true
+      }
+    }
+  } catch (e) {}
+  // 图片 + 快模型不能识图 → 用图形增强模型预读图片内容（快模型据此作答）
+  if (needImgRead && lastMsg && !lastMsg._curImgRead) {
+    try {
+      showToast('🚀 快模型不识别图片，正在用图形增强读图…', 'info')
+      const fr = await readQuestionFromImage(lastMsg.content.imgs[0], curTxt)
+      if (fr && fr.ok) {
+        lastMsg._curImgRead = (fr.text || curTxt) + (fr.fig ? '\n【图形特征】' + fr.fig : '')
+        lastMsg._imgType = fr.type || 'graph'
+      }
+      else replyC = activeCfg(curIsImg) // 读图失败回退主模型（慢但能看图）
+    } catch (e) { replyC = activeCfg(curIsImg) }
+  }
   let sys = buildSys()
+  if (curFigRead) {
+    sys += '\n【重要】用户刚发了一张图片，图片内容已由辅助视觉模型提取为文字（见用户消息中【图片内容】标记），请直接基于该内容作答；若提取不完整可请用户补充，不要假装没收到图。'
+  } else if (curIsImg && !supportsVision(replyC)) {
+    sys += '\n【重要】用户发了一张图片，但当前模型看不到图片内容。请礼貌地请用户用文字描述题目/图形关键信息，或提示到设置配置视觉模型；不要假装看到了图片。'
+  }
+  // 行测快答节奏：仅快答模式（深度解析模式保持完整推理与质量）
+  if (quickMode.value) {
+    sys += '\n【行测快答节奏】这是行测考试题：先直接给出答案，再用简明 2-5 句讲清关键思路（图推先点规律再分步）；控制篇幅、勿长篇大论、勿反复自我怀疑。'
+  }
   if (store.mode === 'all' && store.cfg.kb !== false) {
-    const bm = detectBanKuai(txt)
+    const bm = detectBanKuai(curTxt)
     if (bm) {
       sys = buildSys(PLATE_MODE[bm] || '')
     }
   }
   // 质量优先：历史尽量完整保留（不激进省 token），保障「解决具体提问」不缺上文。
-  // 仅做兜底防爆：跳过空/失败消息、图片按视觉能力保留；回答过长才截断、历史总量过大才丢更早。
-  const visOk = supportsVision(c)
-  const _AICAP = 4000 // 单条 assistant 回答最多发送字符（回复要点集中在开头，安全裁剪超长尾部）
+  const visOk = supportsVision(replyC)
+  const _AICAP = 4000 // 单条 assistant 回答最多发送字符
   const _HIS = 20 // 最多 20 条
-  const _BUDGET = 35000 // 历史总字符预算，超出才丢更早（默认对话量远达不到）
+  const _BUDGET = 35000 // 历史总字符预算，超出才丢更早
   const history = []
   let cum = 0
   for (let i = store.msgs.length - 1; i >= 0 && history.length < _HIS; i--) {
@@ -250,13 +357,19 @@ async function send() {
         if (typeof m.content === 'string') {
           if (!(m.content || '').trim()) continue
           item = { role: m.role, content: m.content }
-        } else if (m.content && (m.content.text || '').trim()) {
-          const parts = [{ type: 'text', text: m.content.text }]
-          if (visOk && Array.isArray(m.content.imgs)) {
-            for (const u of m.content.imgs) {
-              // 只发合法图片：data:image 或 http(s)，跳过被截断/占位符等无效 URL（避免 API 报 Unsupported image_url format）
-              if (u && /^(data:image|https?:\/\/)/i.test(String(u))) parts.push({ type: 'image_url', image_url: { url: u } })
+        } else if (m.content && ((m.content.text || '').trim() || (m.content.imgs && m.content.imgs.length))) {
+          const parts = []
+          if (m._curImgRead) {
+            parts.push({ type: 'text', text: '【图片内容】' + m._curImgRead })
+          } else if ((m.content.text || '').trim()) {
+            parts.push({ type: 'text', text: m.content.text })
+            if (visOk && Array.isArray(m.content.imgs)) {
+              for (const u of m.content.imgs) {
+                if (u && /^(data:image|https?:\/\/)/i.test(String(u))) parts.push({ type: 'image_url', image_url: { url: u } })
+              }
             }
+          } else {
+            parts.push({ type: 'text', text: '[用户发送了一张图片]' })
           }
           item = { role: m.role, content: parts }
         }
@@ -271,7 +384,7 @@ async function send() {
   live.value = { text: '', think: '', thinkOpen: false }
   scroll()
   try {
-    const full = await chatStream([{ role: 'system', content: sys }, ...history], c, (d) => {
+    const full = await chatStream([{ role: 'system', content: sys }, ...history], replyC, (d) => {
       if (d.type === 'think') {
         live.value.think = d.think
       } else {
@@ -281,19 +394,36 @@ async function send() {
     }, abortCtrl.signal)
     live.value = null
     // 高效复盘指引：模型已按 SYS 输出则以模型为准；缺失时按板块本地复盘库兜底
-    const review = buildReview(full, detectBanKuai(txt), txt)
+    const review = buildReview(full, detectBanKuai(curTxt), curTxt)
     const finalContent = review ? full + '\n\n' + review : full
     addMsg({ role: 'assistant', content: finalContent })
-    // 图形理解增强（可选·独立模型）：把用户截图复刻成图贴进回复，后台执行不阻塞主回复
-    if (sentImgs.length) {
+    // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
+    if (sentImgs.length && shouldFigEnhance(curTxt, lastMsg && lastMsg._imgType)) {
       const lastAi = store.msgs[store.msgs.length - 1]
-      maybeFigEnhance(lastAi, sentImgs, txt)
+      maybeFigEnhance(lastAi, sentImgs, curTxt)
+    }
+    // 图推解析保障：若回复没画出标注 SVG，单独请求「只画一张标注图」补上
+    const lastAi2 = store.msgs[store.msgs.length - 1]
+    const hasRealSvg = lastAi2 && typeof lastAi2.content === 'string' && /```svg[\s\S]*?```|<svg[\s\S]*?<\/svg>/.test(lastAi2.content)
+    if (!hasRealSvg && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
+      drawTutuAnno(lastAi2, curTxt)
     }
     if (store.cfg.ttsOn) autoSpeak(finalContent)
   } catch (e) {
     live.value = null
     if (e.name === 'AbortError') {
       addMsg({ role: 'assistant', content: live.value && live.value.text ? live.value.text : '⏹ 已停止生成。', stopped: true })
+    } else if (curIsImg && !curFigRead && figCfg()) {
+      // 视觉请求失败（如接口拒收图片）→ 自动用图形增强模型读图后重试一次
+      try {
+        showToast('视觉模型请求失败，正在用图形增强模型读图重试…', 'info')
+        const fr = await readQuestionFromImage(lastMsg.content.imgs[0], curTxt)
+        if (fr && fr.ok) {
+          lastMsg._curImgRead = (fr.text || curTxt) + (fr.fig ? '\n【图形特征】' + fr.fig : '')
+          return runChat()
+        }
+      } catch (_) {}
+      addMsg({ role: 'assistant', content: '❌ 图片请求失败：' + e.message + '（可到设置→图形增强配免费视觉模型自动读图，或视觉模型换智谱 GLM-5V / 通义 Qwen-VL）', err: true, retryKey: Date.now() })
     } else {
       addMsg({ role: 'assistant', content: '❌ 请求失败：' + e.message, err: true, retryKey: Date.now() })
     }
@@ -301,6 +431,43 @@ async function send() {
   abortCtrl = null
   store.busy = false
 }
+// 图形增强是否应自动复刻：仅当图片含图形/表格（或提问文字带图相关词）才触发，避免对文字截图/纯文字题浪费 token
+function shouldFigEnhance(q, imgType) {
+  if (imgType === 'graph') return true
+  if (imgType === 'text') return false
+  if (!q) return false
+  return /图形|图推|几何|表格|图表|柱状|折线|饼图|对称|展开图|立体|坐标|示意图|方格|宫格|一笔画/.test(q)
+}
+// 图推解析「补画标注图」：主回复没带 SVG 时，单独请求模型只输出一张带标注的原图
+async function drawTutuAnno(msg, q) {
+  let c = activeCfg(false)
+  if (!c || !c.key || !msg) return
+  // 优先用「出题快模型」（非思考模型，画图不容易被思考过程截断）
+  try {
+    const fgm = String(localStorage.getItem('xc_fast_gen_model') || localStorage.getItem('xc_chat_fast_model') || '').trim()
+    if (fgm) c = { ...c, model: fgm }
+  } catch (e) {}
+  showToast('📐 正在补画标注图…', 'info')
+  try {
+    const sys = '你是公考图形推理绘图助手。只负责画图，不解释。'
+    const ask =
+      '请针对下面这道图形推理题，只输出【一个】```svg 代码块：重绘题干原图，并在原图上直接标注规律（辅助线/箭头/高亮框/虚线对称轴/圈出变化元素，用不同颜色区分），让规律一眼可见。' +
+      'SVG 必须带 viewBox、元素坐标在界内、图形与题目一致；除这个 SVG 代码块外，不要输出任何文字、标题、解释、前后缀。题目：' +
+      String(q).slice(0, 300)
+    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 3000, 90000)
+    const m = String(reply || '').match(/```svg\s*\n?([\s\S]*?)```|<svg[\s\S]*?<\/svg>/)
+    const svg = m ? (m[1] || m[0]).trim() : ''
+    if (svg && svg.includes('<svg')) {
+      addMsg({ role: 'assistant', content: '📐 原图标注（重绘+标注，辅助看懂规律）：\n\n```svg\n' + svg + '\n```' })
+      showToast('✅ 已补画标注图', 'success')
+    } else {
+      showToast('⚠️ 标注图生成失败（模型未输出有效 SVG；可在出卷参数填「出题快模型」如 deepseek-chat 提速画图）', 'error')
+    }
+  } catch (e) {
+    showToast('⚠️ 标注图生成失败：' + e.message, 'error')
+  }
+}
+
 // ===== 图形理解增强（可选）：独立开源视觉模型复刻原图 =====
 const figView = ref(null)
 function figZoom(f) {
@@ -318,7 +485,7 @@ async function maybeFigEnhance(msg, imgs, q) {
     const small = await compressImage(raw, 900, 0.75)
     const res = await analyzeFigImage(small, q)
     if (res && res.ok) {
-      msg.fig = { ok: true, type: res.type, summary: res.summary, tips: res.tips, svg: res.svg }
+      msg.fig = { ok: true, type: res.type, summary: res.summary, rule: res.rule || '', tips: res.tips, svg: res.svg }
     } else {
       msg.fig = { ok: false, err: (res && res.err) || '模型未返回可复刻的图形（可能该截图无需画图）' }
     }
@@ -354,7 +521,7 @@ async function retryFigEnhance(m) {
   try {
     const small = await compressImage(img, 900, 0.75)
     const res = await analyzeFigImage(small, textOf(m))
-    m.fig = res && res.ok ? { ok: true, type: res.type, summary: res.summary, tips: res.tips, svg: res.svg } : { ok: false, err: (res && res.err) || '模型未返回可复刻的图形' }
+    m.fig = res && res.ok ? { ok: true, type: res.type, summary: res.summary, rule: res.rule || '', tips: res.tips, svg: res.svg } : { ok: false, err: (res && res.err) || '模型未返回可复刻的图形' }
   } catch (e) {
     m.fig = { ok: false, err: (e && e.message) || '未知错误' }
   }
@@ -465,10 +632,12 @@ const examPaperData = ref(null) // 外部传入待重做/查看的卷子
 function openExam(src) {
   examPanelSrc.value = src || 'ai'
   examShow.value = true
+  store.examOpen = true
   navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : (src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : '模拟组卷') })
 }
 function closeExam() {
   examShow.value = false
+  store.examOpen = false
   examPaperData.value = null
   navBack()
 }
@@ -476,6 +645,7 @@ function openPaperData(paper) {
   examPaperData.value = paper || null
   examPanelSrc.value = 'ai'
   examShow.value = true
+  store.examOpen = true
   navOpen({ id: 'exam', label: (paper && paper.name) ? paper.name : '模拟组卷' })
 }
 function openSolid() {
@@ -488,7 +658,7 @@ function closeSolid() {
 }
 function onNavBack(e) {
   const ids = (e && e.detail) || []
-  if (ids.includes('exam')) examShow.value = false
+  if (ids.includes('exam')) { examShow.value = false; store.examOpen = false }
   if (ids.includes('solid')) solidShow.value = false
 }
 const solidShow = ref(false) // 立体图推训练
@@ -760,7 +930,6 @@ function toggleMic() {
   }
   recogOn.value = recogActive()
 }
-const modes = Object.keys(MODE_NAMES)
 const modeOpen = ref(false)
 // 模式分组（用于顶部紧凑选择器）
 const MODE_GROUPS = [
@@ -1094,6 +1263,7 @@ defineEmits(['export-review'])
             >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
             <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
             <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
+            <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
           </div>
         </div>
       </div>
@@ -1194,8 +1364,9 @@ defineEmits(['export-review'])
                     <span>🖼 AI 图形复刻 · {{ m.fig.type }}</span>
                     <button class="btn btn-gh" @click="figZoom(m.fig)">⛶ 放大</button>
                   </div>
-                  <div class="fig-svg" v-html="m.fig.svg" @click="figZoom(m.fig)"></div>
+                  <div class="fig-svg" @click="figZoom(m.fig)" v-html="m.fig.svg"></div>
                   <div v-if="m.fig.summary" class="fig-summary">📝 {{ m.fig.summary }}</div>
+                  <div v-if="m.fig.rule" class="fig-rule">📐 规律：{{ m.fig.rule }}</div>
                   <div v-if="m.fig.tips" class="fig-tips">💡 {{ m.fig.tips }}</div>
                 </div>
                 <div v-if="m.fig && m.fig.ok === false" class="fig-fail">
@@ -1205,14 +1376,14 @@ defineEmits(['export-review'])
               </div>
               <div class="msg-actions">
                 <button v-if="m.err" class="retry-btn" @click="retryLast()">↻ 重试</button>
-                <button v-if="!m.err && prevHasImg(m) && figCfg()" :disabled="m.figBusy" @click="retryFigEnhance(m)" :title="'用独立模型把题目截图复刻成图'">🖼 {{ m.fig && m.fig.ok ? '重绘' : '图形增强' }}</button>
+                <button v-if="!m.err && prevHasImg(m) && figCfg()" :disabled="m.figBusy" :title="'用独立模型把题目截图复刻成图'" @click="retryFigEnhance(m)">🖼 {{ m.fig && m.fig.ok ? '重绘' : '图形增强' }}</button>
                 <button v-if="!m.err" @click="saveWrong()">📌 存错题</button>
                 <button v-if="!m.err" @click="train('variant', { prev: getLastQuizText() })">🔁 变式题</button>
                 <button v-if="!m.err" @click="$emit('export-review')">📄 复盘</button>
-                <button @click="followUp(m)" title="基于这条回复继续追问">💬 追问</button>
-                <button @click="collectMsg(m)" title="收藏到我的笔记">📌 收藏</button>
-                <button :class="{ 'fb-on': m.fb === 1 }" @click="toggleFb(m, 1)" title="这条回复对你有用">👍</button>
-                <button :class="{ 'fb-on': m.fb === -1 }" @click="toggleFb(m, -1)" title="这条回复需改进">👎</button>
+                <button title="基于这条回复继续追问" @click="followUp(m)">💬 追问</button>
+                <button title="收藏到我的笔记" @click="collectMsg(m)">📌 收藏</button>
+                <button :class="{ 'fb-on': m.fb === 1 }" title="这条回复对你有用" @click="toggleFb(m, 1)">👍</button>
+                <button :class="{ 'fb-on': m.fb === -1 }" title="这条回复需改进" @click="toggleFb(m, -1)">👎</button>
                 <button @click="copyMsg($event)">📋 复制</button>
                 <button @click="toggleSpeak($event)">🔊 朗读</button>
               </div>
@@ -1237,10 +1408,8 @@ defineEmits(['export-review'])
             <span class="skel" style="width: 55%; height: 14px"></span>
           </div>
         </div>
-        <!-- 回到最新：向上滚动后显示 -->
-        <button v-show="!atBottom" class="back-latest" @click="backToLatest()">
-          ▼ 回到最新
-        </button>
+        <!-- 回到最新：向上滚动后显示，可拖拽到不挡按钮的位置 -->
+        <button v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
       </div>
       <div v-if="imgs.length" class="img-strip">
         <div v-for="(im, i) in imgs" :key="i" class="img-thumb">
@@ -1284,13 +1453,21 @@ defineEmits(['export-review'])
             :placeholder="inputPh"
             @keydown.enter.exact.prevent="send()"
           ></textarea>
+          <div class="dock-btns">
           <button class="ib-btn" :class="{ on: store.cfg.ttsOn !== false }" :title="(store.cfg.ttsOn !== false ? '自动朗读已开启，点击关闭' : '自动朗读已关闭，点击开启')" @click="toggleTts()">{{ store.cfg.ttsOn !== false ? '🔊' : '🔇' }}</button>
           <button class="ib-btn" :style="{ color: recogOn ? 'var(--red)' : '' }" @click="toggleMic()">🎤</button>
           <button class="ib-btn" @click="linkShow = !linkShow">🔗</button>
+          <button
+            class="ib-btn qm"
+            :class="{ on: quickMode }"
+            :title="quickMode ? '⚡快答：用快模型秒回（简单/熟练题）；点击切回🧠深度' : '🧠深度：用思考模型更准（难题/文字截图题）；点击切到⚡快答'"
+            @click="toggleQuickMode()"
+          >{{ quickMode ? '⚡ 快答' : '🧠 深度' }}</button>
           <label class="ib-btn" style="display: flex; align-items: center; justify-content: center; cursor: pointer">
             📷
             <input type="file" accept="image/*" style="display: none" @change="pickImage" />
           </label>
+          </div>
           <button
             v-if="store.busy"
             class="ib-send stop"
@@ -1302,6 +1479,28 @@ defineEmits(['export-review'])
       </div>
     </div>
   </div>
+  <!-- 对话使用说明书弹窗 -->
+  <div v-if="guideShow" class="ov show guide-ov" @click.self="guideShow = false">
+    <div class="pnl guide-pnl">
+      <div class="pnl-top">
+        <button class="pnl-top-b" @click="guideShow = false">← 返回</button>
+        <span class="pnl-top-t">📖 对话使用说明书</span>
+      </div>
+      <div class="guide-body">
+        <p class="guide-intro">想让人工智能回复「更准更快」，关键在于<strong>给全信息 + 说清诉求</strong>。下面按板块/场景给你提问示范，点开即看。</p>
+        <div v-for="(sec, si) in USAGE_GUIDE" :key="si" class="guide-sec">
+          <div class="guide-sec-hd" @click="toggleGuideSec(si)">{{ sec.t }} <span class="guide-arr">{{ guideOpen[si] ? '▾' : '▸' }}</span></div>
+          <div v-show="guideOpen[si]" class="guide-sec-bd">
+            <div v-for="(it, ii) in sec.items" :key="ii" class="guide-qa">
+              <div class="guide-q" @click="toggleGuideQa(si, ii)">❓ {{ it.q }} <span class="guide-arr">{{ guideQaOpen[si + '-' + ii] ? '▴' : '▾' }}</span></div>
+              <div v-show="guideQaOpen[si + '-' + ii]" class="guide-a">💡 {{ it.a }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 消息文字选区工具栏 -->
   <div v-if="selBar.show" class="sel-bar" :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }" @mousedown.prevent>
     <button @click="copySelected()">📋 复制选中</button>

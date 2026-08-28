@@ -1,11 +1,13 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { store, saveWqs, saveCfg } from '../store'
-import { activeCfg, chatOnce, chatStream, buildTaskSys, buildQuizSys, buildMaterialPrompt, buildGroupPrompt, supportsVision } from '../api'
+import { activeCfg, chatOnce, chatStream, buildQuizSys, buildGroupPrompt, supportsVision } from '../api'
 import { parseQuiz, extractChoices, answerLetter, parseMaterialQuiz } from '../utils/quiz'
 import { showToast } from '../utils/toast'
 import { exportPaper } from '../utils/export'
 import { renderMd } from '../utils/renderMd'
+import { genTutuQuestion } from '../utils/tutuGen'
+import { petAnalyzeCurrent } from '../utils/pet'
 import { verifyTruthTable } from '../utils/logicVerify'
 import { mountCharts } from '../utils/chartMount'
 import { diffCurve } from '../api/professor'
@@ -197,6 +199,7 @@ const singleVariant = ref('不限') // 单题快练子题型（不限=自动轮�
 const singleBatch = ref(1) // 单题快练组量：1/5/10/15/20
 const autoNext = ref(false) // 单题快练：答对自动进入下一题
 const singleDir = ref('auto') // 问法方向：auto=随机 / is=选是 / not=选非 / custom=自定义
+const singleLocal = ref(false) // 图推单题：🎲 本地真题生成（零额度、确定性质检）
 const tutuFormat = ref('auto') // 图推出题形式：auto=自动轮换 / 一组图 / 两组图 / 九宫格 / 分组分类
 // 六大板块 → 细分板块 层级
 const SIX_GROUPS = [
@@ -251,7 +254,6 @@ const wrongLimit = ref(0) // 错题组卷题量：0=全部
 const wrongPlates = computed(() => { const s = new Set(); store.wqs.forEach((q) => { if (q.subject) s.add(q.subject) }); return [...s] })
 const aiLayout = ref(false) // 导出前先 AI 智能排版（梳理考点/错因/秒杀规律）
 // 导入识别后由「预览校对」界面统一决定去向（开始作答 / 存入错题本）
-const srcTab = ref('template')  // 配置面板子页：template=卷面构成 / import=导入材料 / wrong=错题集
 const imgs = ref([])
 const textFiles = ref([])
 const papers = ref([])
@@ -309,6 +311,38 @@ const fmt = (s) => {
   return String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0')
 }
 const q = computed(() => (cur.value >= 0 && questions.value[cur.value] ? questions.value[cur.value] : null))
+// 萌宠智能语音：让萌宠「看见」当前题目（读题/答错实时错因分析/对话追问都靠它）
+function syncPetCurQ(i) {
+  const qq = questions.value[i]
+  if (!qq || !qq.stem) return
+  const m = marks.value[i]
+  store.curQ = {
+    plate: qq.subject, subject: qq.subject, kind: qq.kind || qq.variant || '',
+    stem: qq.stem, options: qq.options || [], answer: qq.answer || '',
+    explain: qq.explain || qq.analysis || '',
+    your: m ? m.pick : '', ok: m ? !!m.ok : null
+  }
+  const opts = (qq.options || []).map((o, k) => String(k === 0 ? 'A' : String.fromCharCode(64 + k + 1)) + '、' + String(o.t || '').replace(/<[^>]+>/g, ' ')).join('。')
+  const marked = m != null
+  store.readCtx = {
+    type: 'quiz',
+    title: (qq.subject || '行测') + (qq.kind ? '·' + qq.kind : ''),
+    text: ((qq.stem || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() + '。' + opts + (marked && (qq.explain || qq.analysis) ? '。解析：' + String(qq.explain || qq.analysis).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '')).slice(0, 1200)
+  }
+}
+// 注意：q 是对象引用，题目内容异步填充时引用不变，需监听内容快照
+watch(
+  () => {
+    const qq = q.value
+    return qq ? String(qq.stem || '') + '||' + (qq.options || []).map((o) => String(o.t || '')).join('|') : ''
+  },
+  (snap) => {
+    if (!q.value || !snap) return
+    syncPetCurQ(cur.value)
+  },
+  { immediate: true }
+)
+
 const qHtml = computed(() => (q.value ? renderMd(q.value.stem || '') : ''))
 const optHtmls = computed(() => (q.value && q.value.options ? q.value.options.map((o) => renderMd(String(o.t || ''))) : []))
 const hasSvgOpts = computed(() => optHtmls.value.some((h) => /<svg/i.test(h)))
@@ -471,7 +505,6 @@ function applyConfig(qs) {
   let list = qs.slice()
   const subs = modules.value.filter((m) => ['图形推理', '定义判断', '类比推理', '逻辑判断'].includes(m.subject))
   const hasJudgeSub = subs.length > 0
-  const judgeAlias = { 图形推理: '图形推理', 定义判断: '定义判断', 类比推理: '类比推理', 逻辑判断: '逻辑判断', 判断推理: ['图形推理', '定义判断', '类比推理', '逻辑判断'] }
   // 过滤：导入/错题的 subject 需命中卷面构成板块（判断推理子板块视为整体）
   list = list.filter((x) => {
     const s = x.subject || ''
@@ -537,67 +570,6 @@ function buildWrongQuestions() {
 }
 
 // 导入本地错题：AI 识别 → 并入应用内错题本（去重）→ 按卷面组卷
-async function doExtractWrong() {
-  if (!imgs.value.length && !textFiles.value.length) { showToast('请先导入本地错题材料', 'info'); return }
-  extracting.value = true
-  phase.value = 'extract'
-  const all = []
-  const c = activeCfg(true)
-  try {
-    if (imgs.value.length) {
-      if (!c || !c.key) showToast('请先配置模型 API Key', 'error')
-      else if (!supportsVision(c)) showToast('请配置可识图的视觉模型', 'error')
-      else {
-        for (const im of imgs.value) {
-          const reply = await chatOnce(
-            c,
-            [
-              { role: 'system', content: VISION_SYS },
-              { role: 'user', content: [{ type: 'text', text: '请提取这张图片中的行测错题（题干/选项/正确答案/解析），严格按格式输出 JSON 数组：' + VISION_PROMPT }, { type: 'image_url', image_url: { url: im } }] }
-            ],
-            2500
-          )
-          const m = String(reply || '').match(/\[[\s\S]*\]/)
-          if (m) { try { all.push(...norm(JSON.parse(m[0]))) } catch (e) {} }
-        }
-      }
-    }
-    for (const tf of textFiles.value) {
-      const qs = await textToQuestions(tf.text)
-      all.push(...qs)
-    }
-  } catch (e) {
-    showToast('识别失败：' + e.message, 'error')
-  }
-  extracting.value = false
-  if (!all.length) { showToast('未识别出错题，请重试或换更清晰的材料', 'error'); phase.value = 'config'; return }
-  const qs = applyConfig(all.map((x) => ({ ...x, fromWrong: true })))
-  if (!qs.length) { showToast('识别出的题目与卷面板块/题量不匹配，请调整卷面构成后重试', 'info'); phase.value = 'config'; return }
-  // 并入应用内错题本（按题干前缀去重）
-  const before = store.wqs.length
-  qs.forEach((x) => {
-    const stemKey = String(x.stem || '').slice(0, 40)
-    if (store.wqs.some((w) => String(w.question || '').slice(0, 40) === stemKey)) return
-    store.wqs.unshift({
-      id: Date.now() + Math.random(),
-      subject: x.subject || '未分类',
-      question: x.stem + '\n\n' + (x.options || []).map((o) => o.k + '. ' + o.t).join('\n'),
-      answer: '正确答案 ' + x.answer + (x.analysis ? '\n解析：' + x.analysis : ''),
-      reasons: ['本地导入错题'],
-      time: new Date().toLocaleString(),
-      at: Date.now(),
-      wrongCount: 1,
-      correctStreak: 0,
-      mastery: 0,
-      digested: false
-    })
-  })
-  saveWqs()
-  const paper = makePaper('本地错题组卷 ' + new Date().toLocaleDateString(), qs)
-  papers.value.unshift(paper); savePapers()
-  startPaper(paper)
-  showToast('✅ 已导入 ' + qs.length + ' 道本地错题并组卷' + (store.wqs.length > before ? '（新增 ' + (store.wqs.length - before) + ' 题入错题本）' : ''), 'success')
-}
 async function doExtract() {
   if (!imgs.value.length && !textFiles.value.length) {
     showToast('请先导入题目材料（图片/PDF/Word/txt/tex）', 'info')
@@ -947,7 +919,9 @@ function timeoutQ() {
   const i = cur.value
   if (marks.value[i] != null) return
   marks.value[i] = { ok: false, pick: '', timeout: true, usedSec: perQ.value }
-  showToast('⏰ 本题超时（' + perQ.value + ' 秒），已按答错计', 'error')
+  syncPetCurQ(i)
+  showToast('⏰ 本题超时（' + perQ.value + ' 秒），已按答错计，萌宠正在分析…', 'error')
+  petAnalyzeCurrent()
   if (singleMode.value) { qLeft.value = perQ.value; qElapsed.value = 0 } else nextQ()
 }
 // 核心出题：生成第 i 题（含题型轮换），供预生成/单题/重出共用
@@ -956,8 +930,20 @@ async function genOne(i) {
   if (!item || item.stem) return
   if (item.fromWrong) return
   if (item.group && !item.groupLeader) return // 占位：由组首生成后统一填充
+  // 🎲 本地真题图推生成（单题快练·图形推理 且 选择了本地）→ 零额度、确定性质检、永不裁切
+  if (singleMode.value && item.subject === '图形推理' && singleLocal.value) {
+    const lq = genTutuQuestion()
+    if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; return }
+  }
   const c = pickGenC()
-  if (!c || !c.key) { item.err = true; item.stem = '（未配置模型，无法出题）'; return }
+  if (!c || !c.key) {
+    // 未配 Key 时图推单题也能本地出题
+    if (singleMode.value && item.subject === '图形推理' && !String(item.variant || '').match(/空间重构|截面图|三视图|立体拼合/)) {
+      const lq = genTutuQuestion()
+      if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; return }
+    }
+    item.err = true; item.stem = '（未配置模型，无法出题）'; return
+  }
   // 资料分析「材料+题组」：一次生成整组
   if (item.group) {
     const gn = item.groupN || 5
@@ -1039,7 +1025,7 @@ async function genOne(i) {
       let cur = attempt === 0 ? parseQuiz(raw) : null
       if (!cur || !cur.options || cur.options.length < 4) {
         // 网络/Key 错误直接抛出（外层显示真实原因），不盲目重试；质检不过则带原因定向重出
-        try { raw = await chatOnce(c, fixHint ? [{ role: 'system', content: sys }, { role: 'user', content: ask + fixHint }] : msgs, 6000, 90000, genCtrl && genCtrl.signal) } catch (e) { throw e }
+        raw = await chatOnce(c, fixHint ? [{ role: 'system', content: sys }, { role: 'user', content: ask + fixHint }] : msgs, 6000, 90000, genCtrl && genCtrl.signal)
         cur = parseQuiz(raw)
       }
       if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
@@ -1067,6 +1053,11 @@ async function genOne(i) {
       item.designer = qz.designer || ''
       item.variant = variant
     } else {
+      // AI 多次未过质检 → 图推自动回退本地真题生成（保证一定出得了题、且无裁切）
+      if (item.subject === '图形推理' && !String(item.variant || '').match(/空间重构|截面图|三视图|立体拼合/)) {
+        const lq = genTutuQuestion()
+        if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; item.err = false; return }
+      }
       item.stem = '（本题目 AI 生成多次未通过质检，可点「重出」重试）'
       item.err = true
     }
@@ -1094,6 +1085,11 @@ async function prefetchSingle() {
   const plate = singlePlate.value
   const diff = difficulty.value === 'curve' ? 'mid' : difficulty.value
   const variant = singleVariant.value === '不限' ? '' : singleVariant.value
+  if (plate === '图形推理' && singleLocal.value) {
+    const lq = genTutuQuestion()
+    if (lq) prefetchQ.value = { item: { ...item, stem: lq.stem, options: lq.options, answer: lq.answer, explain: lq.explain || '', variant: '本地真题', local: true }, plate, difficulty: diff, variant: variant === '' ? '不限' : variant }
+    return
+  }
   const c = pickGenC()
   if (!c || !c.key) return
   const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
@@ -1159,14 +1155,20 @@ function pick(k) {
   const qq = questions.value[i]
   if (!qq || marks.value[i] != null || qq.err) return
   marks.value[i] = { ok: k === qq.answer, pick: k, usedSec: qElapsed.value }
+  syncPetCurQ(i)
   maybeEnhance(i)
-  if (qq.answer && k === qq.answer) { if (autoNext.value && i < questions.value.length - 1) { setTimeout(() => nextQ(), 500); return } } else if (qq.answer) showToast('❌ 选错了，正确答案是 ' + qq.answer, 'error')
+  if (qq.answer && k === qq.answer) { if (autoNext.value && i < questions.value.length - 1) { setTimeout(() => nextQ(), 500); return } } else if (qq.answer) {
+    showToast('❌ 选错了，正确答案是 ' + qq.answer + '，萌宠正在分析你的错因…', 'error')
+    petAnalyzeCurrent()
+  }
 }
 function selfMark(ok) {
   const i = cur.value
   if (marks.value[i] != null) return
   marks.value[i] = { ok, pick: '', self: true, usedSec: qElapsed.value }
+  syncPetCurQ(i)
   maybeEnhance(i)
+  if (!ok) petAnalyzeCurrent()
 }
 function initModule(i) {
   const s = questions.value[i] ? questions.value[i].subject : ''
@@ -1186,6 +1188,7 @@ function go(i) {
   qLeft.value = perQ.value
   qElapsed.value = 0
   ensureGen(i)
+  syncPetCurQ(i)
   // 后台预生成解析：题目已出时立即开始，用户读题/作答期间解析已备好，答完秒出（答前不显示，不剧透）
   const gIt = questions.value[i]
   if (gIt && gIt.stem && !gIt.err) maybeEnhance(i)
@@ -1226,7 +1229,7 @@ async function verifyQuestion(q) {
   const c = pickGenC()
   if (!c || !c.key) return true
   try {
-    const sys = '你是公考行测出题质检员。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②是否恰好一个正确选项（禁止多选、无正确选项、两选项同真、选项全对）；③选项与题干相关、无逻辑谬误。只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"..."}'
+    const sys = '你是公考行测出题质检员。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②是否恰好一个正确选项（禁止多选、无正确选项、两选项同真、选项全对）；③选项与题干相关、无逻辑谬误；④若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"..."}'
     const user = '题干：' + String(q.stem || '') + '\n选项：' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n答案：' + String(q.answer || '')
     const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 400)
     const m = String(r || '').match(/"ok"\s*:\s*(true|false)/)
@@ -1367,7 +1370,7 @@ function cancel() { clearTimers(); emit('close') }
 function backToConfig() { clearTimers(); phase.value = 'config' }
 const topTitle = computed(() => {
   if (phase.value === 'gen') return '⏳ AI 出卷中…'
-  if (phase.value === 'doing') return '📝 作答中 · ' + (curPaper ? curPaper.name : '模拟卷')
+  if (phase.value === 'doing') return '📝 作答中 · ' + (curPaper.value ? curPaper.value.name : '模拟卷')
   if (phase.value === 'result') return '📄 成绩单'
   return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'import' ? '📂 导入组卷' : srcMode.value === 'wrong' ? '📚 错题组卷' : '📝 模拟组卷'
 })
@@ -1455,8 +1458,8 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
               <select v-model="m.subject" class="tb-sel">
                 <option v-for="s in SUBJECTS" :key="s" :value="s">{{ s }}</option>
               </select>
-              <input type="number" min="1" max="80" v-model.number="m.count" class="ep-inp" />
-              <input type="number" min="1" max="120" v-model.number="m.refMin" class="ep-inp" />
+              <input v-model.number="m.count" type="number" min="1" max="80" class="ep-inp" />
+              <input v-model.number="m.refMin" type="number" min="1" max="120" class="ep-inp" />
               <span class="ep-perq">{{ moduleRefSec(m) }}s</span>
               <button class="ep-x" @click="rmRow(i)">×</button>
             </div>
@@ -1592,7 +1595,7 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
             </select>
             <input v-if="singleDir === 'custom'" v-model="singleDirText" class="pv-edit" style="margin-top: 6px" placeholder="输入自定义问法，如：最能削弱上述结论？" />
             <div v-if="dirLib.length" class="ep-chips" style="margin-top: 6px">
-              <button v-for="q in dirLib" :key="q" class="fp-b" @click="setDirText(q)">{{ q }}</button>
+              <button v-for="dir in dirLib" :key="dir" class="fp-b" @click="setDirText(dir)">{{ dir }}</button>
             </div>
             <span class="ep-hint">不同板块题干可自由问法（如判断推理：最能削弱 / 最不能 / 前提假设…），点上面快捷问法或自定义</span>
           </div>
@@ -1617,6 +1620,14 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
               <option value="分组分类">分组分类（6图）</option>
             </select>
             <span class="ep-hint">固定某种图推出题形式；「不限」= 一组图/两组图/九宫格/分组分类 自动轮换</span>
+          <div class="ep-param">
+            <label>⑦ 出题方式</label>
+            <div class="ep-chips">
+              <button class="fp-b" :class="{ on: !singleLocal }" @click="singleLocal = false">🤖 AI 出题（丰富多变）</button>
+              <button class="fp-b" :class="{ on: singleLocal }" @click="singleLocal = true">🎲 本地真题生成（零额度）</button>
+            </div>
+            <span class="ep-hint">本地 = 黑白块/汉字/字母/旋转/数量/对称/叠加/分组等真题高频规律，确定性且永不裁切；AI 出题失败也会自动回退本地</span>
+          </div>
           </div>
           <div class="ep-param">
             <label>
@@ -1715,7 +1726,7 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
             <div class="ep-list-scroll">
               <div v-for="(c, i) in quizCol" :key="c.id" class="ep-paper">
                 <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
-                <button class="ep-paper-btn" @click="startRedo(c)" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + (c.stem || '').slice(0, 80) + '（累计错' + c.wrongCount + '次 · 连对' + c.correctStreak + '）'">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ (c.stem || '').slice(0, 22) }}…</button>
+                <button class="ep-paper-btn" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + (c.stem || '').slice(0, 80) + '（累计错' + c.wrongCount + '次 · 连对' + c.correctStreak + '）'" @click="startRedo(c)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ (c.stem || '').slice(0, 22) }}…</button>
                 <button class="ep-x" @click="delQuizCol(i)">×</button>
               </div>
             </div>
@@ -1774,20 +1785,20 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
       <div v-else-if="phase === 'preview'" class="pp-extract">
         <div class="pv-hd">🔎 识别结果预览 · 共 {{ previewList.length }} 题（可校对 / 删除，再决定去向）</div>
         <div class="pv-list">
-          <div v-for="(q, i) in previewList" :key="i" class="pv-item">
+          <div v-for="(item, i) in previewList" :key="i" class="pv-item">
             <div class="pv-top">
               <span class="pv-no">第 {{ i + 1 }} 题</span>
-              <select v-model="q.subject" class="tb-sel pv-subj">
+              <select v-model="item.subject" class="tb-sel pv-subj">
                 <option v-for="s in SUBJECTS" :key="s" :value="s">{{ s }}</option>
               </select>
               <button class="btn btn-gh pv-x" @click="delPreview(i)">🗑</button>
             </div>
-            <textarea v-if="previewEdit === i" v-model="q.stem" rows="3" class="pv-edit" @blur="previewEdit = -1"></textarea>
-            <div v-else class="pv-stem" @click="previewEdit = i" title="点击编辑题干">{{ q.stem }}</div>
-            <div v-if="q.options && q.options.length" class="pv-opts">
-              <span v-for="(o, oi) in q.options" :key="o.k" class="pv-opt"><b>{{ o.k }}.</b> {{ o.t }}</span>
+            <textarea v-if="previewEdit === i" v-model="item.stem" rows="3" class="pv-edit" @blur="previewEdit = -1"></textarea>
+            <div v-else class="pv-stem" title="点击编辑题干" @click="previewEdit = i">{{ item.stem }}</div>
+            <div v-if="item.options && item.options.length" class="pv-opts">
+              <span v-for="o in item.options" :key="o.k" class="pv-opt"><b>{{ o.k }}.</b> {{ o.t }}</span>
             </div>
-            <div class="pv-ans">答案：<b>{{ q.answer || '—' }}</b></div>
+            <div class="pv-ans">答案：<b>{{ item.answer || '—' }}</b></div>
           </div>
         </div>
         <div class="pv-actions">

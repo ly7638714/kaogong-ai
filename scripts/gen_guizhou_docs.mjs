@@ -247,7 +247,6 @@ function buildTex() {
 
 // ============ 4. Typst ============
 function typTable(rows) {
-  const cols = Math.max(1, rows[0].length)
   let t = '#table(columns: (' + (rows[0].map(() => '1fr').join(', ')) + '), stroke: 0.5pt, align: left, '
   rows.forEach((r, ri) => { r.forEach((c) => { t += (ri === 0 ? '[#text(weight: "bold")[' : '[') + escTyp(c) + ']], ' }) })
   t += ')\n\n'
@@ -338,4 +337,4 @@ async function main() {
   await htmlToPdf('file:///' + htmlPath.split(/[\\/]/).map(encodeURIComponent).join('/'), pdfPath)
   console.log('ALL DONE ->', OUT)
 }
-main().catch((e) => { console.error('ERR', e); process.exit(1) })
+main().catch((e) => { console.error('ERR', e); process.exit(1) })

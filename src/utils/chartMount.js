@@ -1,4 +1,3 @@
-/* global ResizeObserver */
 // ECharts 按需挂载：扫描容器内 .gen-chart[data-echarts] 并渲染成统计图
 import * as echarts from 'echarts/core'
 import { BarChart, LineChart, PieChart } from 'echarts/charts'
@@ -29,7 +28,7 @@ export function disposeCharts(root) {
     const ent = registry.get(el)
     if (ent) {
       try { ent.chart.dispose() } catch (e) {}
-      if (ent.ro) { try { ent.ro.disconnect() } catch (e2) {} }
+      if (ent.ro) { try { ent.ro.disconnect() } catch (e) {} }
       registry.delete(el)
     }
   })

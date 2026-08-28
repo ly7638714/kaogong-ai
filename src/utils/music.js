@@ -83,6 +83,10 @@ export function nextTrack() {
   const n = (musicIndex.value + 1) % musicList.value.length
   playTrack(n)
 }
+export function prevTrack() {
+  const n = (musicIndex.value - 1 + musicList.value.length) % musicList.value.length
+  playTrack(n)
+}
 export function setVolume(v) {
   musicVol.value = v
   if (audio) audio.volume = v

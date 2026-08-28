@@ -1,4 +1,4 @@
-import { buildProfessorPrompt, SUB_PROFILE } from '../src/api/professor.js'
+import { buildProfessorPrompt } from '../src/api/professor.js'
 const SUB_VARIANTS = {
   '判断推理': ['削弱型', '加强型', '前提假设型', '结论推出型', '解释型', '评价型', '论证缺陷型', '翻译推理', '真假话', '分析推理'],
   '逻辑判断': ['削弱型', '加强型', '前提假设型', '结论推出型', '解释型', '评价型', '论证缺陷型', '翻译推理', '真假话', '分析推理', '一拖五'],

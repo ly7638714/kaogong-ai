@@ -50,18 +50,24 @@ export async function testFigConn(c) {
   }
 }
 
-const FIG_PROMPT = `你是公考行测「图形理解复刻专家」。请仔细看这张截图（可能是图形推理 / 数量关系几何 / 资料分析图表 / 其他带图的题），把题目里的核心图形/表格用 SVG 精准复刻出来，帮助考生看懂题意。
+const FIG_PROMPT = `你是公考行测「图形理解复刻专家」。请仔细看这张截图（可能是图形推理 / 数量关系几何 / 资料分析图表 / 其他带图的题），把题目里的核心图形/表格用 SVG 精准复刻出来，并【在图上标注规律线索】帮助考生一眼看懂，像老师在图上画辅助线做笔记。
 
 只输出一个 JSON，不要输出 JSON 以外的任何内容：
-{"type":"图形推理|几何|表格|图表|其他","summary":"一句话概括题目图形","tips":"快速解题的关键观察点","svg":"<svg ...>...</svg>"}
+{"type":"图形推理|几何|表格|图表|其他","summary":"一句话概括题目图形","rule":"一句话点明本题规律（如：黑点每次向右移一格；对称轴数递增；黑白叠加黑+黑=白），无规律则空","tips":"快速解题的关键观察点","svg":"<svg ...>...</svg>"}
 
 SVG 要求：
 1. viewBox="0 0 300 300"，先画 <rect width="300" height="300" fill="#ffffff"/> 垫白底，再用深色线条画图形
 2. 用 <rect>/<circle>/<ellipse>/<line>/<path>/<polygon>/<text> 精确画出题中图形（格子、形状、箭头、坐标轴、标注、数字等），线条描边色 #222，必要时可加少量填充色便于区分
-3. 文字用 <text fill="#111111" font-size="14">，中文直接写在标签里（如需换行用多个 <text>）
-4. 如果截图里有多个图（如 A/B/C/D 选项或题干多图），请全部画出并分别用 <text> 标注 A/B/C/D
-5. 如果是表格/图表，用 <rect> 画单元格边框 + <text> 写字
-6. 禁止使用 <image>、<script>、<foreignObject>、style 属性、on* 事件属性`
+3. 【规律标注（图形推理/几何题必做）】在复刻图上叠加清晰标注，用不同颜色：
+   - 移动/变化方向 → 红色/橙色箭头（stroke="#ef4444" 或 #f97316，箭头用 polygon/path）
+   - 辅助线 → 虚线（stroke="#f59e0b" stroke-dasharray="4 3"）
+   - 高亮/圈出变化元素 → 半透明红框（fill="rgba(239,68,68,0.15)" stroke="#ef4444"）
+   - 对称轴 → 蓝色虚线（stroke="#3b82f6" stroke-dasharray="5 3"）
+   标注要克制清晰、不遮挡原图关键信息；标注元素放在图形之上（后画）
+4. 文字用 <text fill="#111111" font-size="14">，中文直接写在标签里（如需换行用多个 <text>）
+5. 如果截图里有多个图（如 A/B/C/D 选项或题干多图），请全部画出并分别用 <text> 标注 A/B/C/D
+6. 如果是表格/图表，用 <rect> 画单元格边框 + <text> 写字（不强制标注）
+7. 禁止使用 <image>、<script>、<foreignObject>、style 属性、on* 事件属性`
 
 // 容错提取 JSON（去 markdown 围栏，失败再试数组）
 function extractJson(raw) {
@@ -95,6 +101,42 @@ export function sanitizeSvg(svg) {
   return s.trim()
 }
 
+// 「读题提取」提示词：用图形增强视觉模型把图片里的题目提取成文字（区分纯文字/含图形），
+// 供「未配置主视觉模型」时走文字模型作答（DeepSeek 纯文本也能答）
+const READ_PROMPT = `你是公考题目识别助手。请仔细看这张图片，把里面的行测题目完整提取出来。要求：
+1. 逐字保留题干、问法、选项 A-D、数字/图表数据（如有）；识别不清的字用□标注，绝不编造。
+2. 判断图片类型：如果图片只有文字（题干/选项/材料，没有图形/图片/表格），type 填 "text"；如果含有图形（图形推理、几何图、示意图、柱状/折线图等）或表格，type 填 "graph"。
+3. 若有图形/表格，用 1-2 句话描述图形特征（形状、数量、位置、变化线索），供答题参考；若纯文字，fig 填空字符串。
+只输出 JSON：{"type":"text|graph","text":"提取出的完整题目文字","fig":"图形特征描述（无则空）"}，不要输出 JSON 以外的内容。`
+
+// 用图形增强视觉模型读取图片里的题目 → { ok, type, text, fig }
+export async function readQuestionFromImage(dataUrl, questionText = '') {
+  const c = figCfg()
+  if (!c) return null
+  const content = [
+    { type: 'text', text: READ_PROMPT + (questionText ? '\n\n用户补充：' + String(questionText).slice(0, 300) : '') },
+    { type: 'image_url', image_url: { url: dataUrl } }
+  ]
+  const h = { 'Content-Type': 'application/json' }
+  if (c.key) h['Authorization'] = 'Bearer ' + c.key
+  const body = { model: c.model, messages: [{ role: 'user', content }], max_tokens: 2400, stream: false, temperature: 0.2 }
+  const resp = await fetch(c.url, { method: 'POST', headers: h, body: JSON.stringify(body) })
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({}))
+    throw new Error(e.error?.message || 'HTTP ' + resp.status)
+  }
+  const d = await resp.json()
+  const text = (d.choices?.[0]?.message?.content || '').trim()
+  if (!text) return { ok: false, err: '模型无返回' }
+  const data = extractJson(text)
+  return {
+    ok: !!(data && data.text),
+    type: (data && data.type) || 'text',
+    text: (data && String(data.text)) || '',
+    fig: (data && String(data.fig)) || ''
+  }
+}
+
 // 主入口：识别并复刻截图 → { ok, type, summary, tips, svg }
 export async function analyzeFigImage(dataUrl, questionText = '') {
   const c = figCfg()
@@ -120,6 +162,7 @@ export async function analyzeFigImage(dataUrl, questionText = '') {
     ok: !!svg,
     type: (data && data.type) || '图形',
     summary: (data && data.summary) || '',
+    rule: (data && String(data.rule)) || '',
     tips: (data && data.tips) || '',
     svg
   }

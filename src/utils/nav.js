@@ -20,7 +20,7 @@ export function navBack() {
   const e = nav.stack.pop()
   try {
     if (window.history.state && window.history.state.__appNav) window.history.back()
-  } catch (err) {}
+  } catch (e) {}
   return e
 }
 

@@ -1,6 +1,7 @@
 // 数学公式渲染工具：先把公式用占位符保护，避免被 marked 破坏，再回填 KaTeX
 import katex from 'katex'
 import { marked } from 'marked'
+import { normalizeSvg } from './svgFix'
 
 function katexHtml(src, display) {
   try {
@@ -19,7 +20,7 @@ function cleanTex(src) {
   s = s.replace(/\sqrt{([^{}]*)}/g, '√($1)')
   s = s.replace(/^{?([^{}s]+)}?/g, (m, a) => a === '2' ? '²' : a === '3' ? '³' : ('^' + a))
   s = s.replace(/_{?([^{}s]+)}?/g, (m, a) => '_' + a)
-  const sym = { '\times': '×', '\div': '÷', '\approx': '≈', '\leq': '≤', '\geq': '≥', '\neq': '≠', '\pm': '±', '\cdot': '·', '\le': '≤', '\ge': '≥', '\ne': '≠', '\rightarrow': '→', '\Rightarrow': '⇒', '\infty': '∞', '\times': '×', '\%': '%', '\ ' : ' ' }
+  const sym = { '\\times': '×', '\\div': '÷', '\\approx': '≈', '\\leq': '≤', '\\geq': '≥', '\\neq': '≠', '\\pm': '±', '\\cdot': '·', '\\le': '≤', '\\ge': '≥', '\\ne': '≠', '\\rightarrow': '→', '\\Rightarrow': '⇒', '\\infty': '∞', '\\%': '%', '\\ ': ' ' }
   for (const k in sym) s = s.split(k).join(sym[k])
   return s.replace(/[{}]/g, '')
 }
@@ -61,6 +62,7 @@ export function renderMd(t) {
     let svg = inner.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*"[^"]*"/gi, '').replace(/\son\w+\s*=\s*'[^']*'/gi, '')
     if (!/<svg[\s\S]*?<\/svg>/i.test(svg)) return ''
+    svg = svg.replace(/<svg[\s\S]*?<\/svg>/gi, (blk) => normalizeSvg(blk)) // 零裁切：补 viewBox / 按内容自适应画布边界
     return '<div class="gen-svg">' + svg + '</div>'
   })
   // 给代码块包裹"复制"容器：<pre><code>...</code></pre> → div.code-wrap + button.code-copy

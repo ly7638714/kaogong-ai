@@ -1,7 +1,8 @@
 <template>
   <Teleport to="body">
     <div class="draft-ov" :style="bgStyle">
-      <canvas ref="cv" class="draft-canvas" :style="{ cursor: tool === 'pan' ? 'grab' : eraser ? 'cell' : 'crosshair' }"
+      <canvas
+ref="cv" class="draft-canvas" :style="{ cursor: tool === 'pan' ? 'grab' : eraser ? 'cell' : 'crosshair' }"
         @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up"></canvas>
       <div class="draft-bar">
         <button class="db-b db-close" @click="close()">✕ 关闭</button>
@@ -9,29 +10,29 @@
         <button v-for="t in tools" :key="t.k" class="db-b" :class="{ on: tool === t.k && !eraser }" @click="pickTool(t.k)">{{ t.k === 'shape' ? (shapeMode === 'rect' ? '🔷 方' : '⭕ 圆') : t.t }}</button>
         <span class="db-sep"></span>
         <button v-for="col in colors" :key="col" class="db-color" :class="{ on: !eraser && tool !== 'pan' && color === col }" :style="{ background: col }" @click="color = col; eraser = false; tool = 'pen'"></button>
-        <input type="color" v-model="color" class="db-colorpick" title="取色器：自由选择任意颜色" @input="eraser = false; tool = 'pen'" />
+        <input v-model="color" type="color" class="db-colorpick" title="取色器：自由选择任意颜色" @input="eraser = false; tool = 'pen'" />
         <span class="db-sep"></span>
-        <button class="db-b" @click="cycleNib()" :title="'笔头（真实笔尖 mm）：' + NIBS.join(' / ')">✒️ {{ nib }}mm</button>
-        <button class="db-b" :class="{ on: eraser }" @click="toggleEraser()" :title="eraser ? '再次点击切换橡皮大小（小/中/大）' : '进入橡皮擦除'">🧽 {{ eraser ? '橡皮·' + eraserSize : '橡皮' }}</button>
+        <button class="db-b" :title="'笔头（真实笔尖 mm）：' + NIBS.join(' / ')" @click="cycleNib()">✒️ {{ nib }}mm</button>
+        <button class="db-b" :class="{ on: eraser }" :title="eraser ? '再次点击切换橡皮大小（小/中/大）' : '进入橡皮擦除'" @click="toggleEraser()">🧽 {{ eraser ? '橡皮·' + eraserSize : '橡皮' }}</button>
         <button class="db-b" :disabled="!undoStack.length" @click="undo()">↩ 撤销</button>
-        <button class="db-b" @click="resetView()" title="画布复位到中心">🏠 复位</button>
+        <button class="db-b" title="画布复位到中心" @click="resetView()">🏠 复位</button>
         <button class="db-b" @click="clear()">🗑 清空</button>
-        <button class="db-b" @click="newPage()" title="新建空白草稿页">➕ 新页</button>
-        <button class="db-b" @click="switchPage(-1)" title="上一页">◀ {{ curPage + 1 }}/{{ pages.length }}</button>
-        <button class="db-b" @click="switchPage(1)" title="下一页">▶</button>
+        <button class="db-b" title="新建空白草稿页" @click="newPage()">➕ 新页</button>
+        <button class="db-b" title="上一页" @click="switchPage(-1)">◀ {{ curPage + 1 }}/{{ pages.length }}</button>
+        <button class="db-b" title="下一页" @click="switchPage(1)">▶</button>
         <button class="db-b db-save" @click="saveVersion()">💾 存版</button>
         <button class="db-b" :class="{ on: histShow }" @click="histShow = !histShow">📁 记录 {{ recs.length }}</button>
         <span class="db-sep"></span>
-        <button class="db-b" :class="{ on: paperBg }" @click="paperBg = !paperBg" title="空白纸=纯纸底遮住底层；透明=叠加在界面上">📄 {{ paperBg ? '纸' : '透' }}</button>
+        <button class="db-b" :class="{ on: paperBg }" title="空白纸=纯纸底遮住底层；透明=叠加在界面上" @click="paperBg = !paperBg">📄 {{ paperBg ? '纸' : '透' }}</button>
         <span class="db-opa">不透明 {{ opacity }}%</span>
-        <input type="range" class="db-range" min="0" max="100" step="1" v-model.number="opacity" @input="saveOpa" @change="saveOpa" />
+        <input v-model.number="opacity" type="range" class="db-range" min="0" max="100" step="1" @input="saveOpa" @change="saveOpa" />
       </div>
       <div v-if="title || lastTimeText" class="draft-hint">{{ title ? title + (lastTimeText ? ' · ' : '') : '' }}{{ lastTimeText ? '上次笔记：' + lastTimeText : '' }}{{ !title && !lastTimeText ? '草稿纸 · 关闭后可继续' : '' }}</div>
 
       <div v-if="histShow" class="draft-hist">
         <div class="dh-hd">📁 草稿历史 · 第 {{ curPage + 1 }} 页（{{ recs.length }} 条，最多 10 条）</div>
         <div v-if="!recs.length" class="dh-empty">暂无记录，涂画后点「💾 存版」</div>
-        <div v-for="(r, i) in recs.slice().reverse()" :key="r.t" class="dh-row">
+        <div v-for="r in recs.slice().reverse()" :key="r.t" class="dh-row">
           <img class="dh-thumb" :src="r.url" alt="" />
           <span class="dh-time">{{ fmtTime(r.t) }}</span>
           <button class="db-b" @click="loadRec(r.url)">📂 载入</button>
@@ -254,13 +255,13 @@ function down(e) {
   const p0 = pos(e)
   if (tool.value === 'pan') { panStart = p0; return }
   if (tool.value === 'line' || tool.value === 'shape') {
-    try { undoStack.push(toStoreUrl()); if (undoStack.length > 20) undoStack.shift() } catch (err) {}
+    try { undoStack.push(toStoreUrl()); if (undoStack.length > 20) undoStack.shift() } catch (e) {}
     drawing = true; dirty = true; lineStart = p0
     snapCanvas = document.createElement('canvas'); snapCanvas.width = cv.value.width; snapCanvas.height = cv.value.height
     snapCanvas.getContext('2d').drawImage(cv.value, 0, 0)
     return
   }
-  try { undoStack.push(toStoreUrl()); if (undoStack.length > 20) undoStack.shift() } catch (err) {}
+  try { undoStack.push(toStoreUrl()); if (undoStack.length > 20) undoStack.shift() } catch (e) {}
   drawing = true; dirty = true; lastT = Date.now()
   const p = pos(e); last = p; lastPt = p; prevMid = null
   curPts = [{ x: p.x, y: p.y, w: penW(p, e), first: true }]

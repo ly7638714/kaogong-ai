@@ -9,6 +9,7 @@ export function supportsVision(c) {
   if (p === 'openai' || p === 'anthropic' || p === 'custom') return true
   if (p === 'zhipu') return m.includes('v') || m.includes('vision')
   if (p === 'qwen') return m.includes('vl') || m.includes('vision')
+  // DeepSeek 已发布视觉模型（deepseek-v4-flash-vision-exp 等，OpenAI 兼容格式）
   if (p === 'ds') return m.includes('vision') || m.includes('vl')
   return false
 }
@@ -22,6 +23,17 @@ function hds(c) {
     h['Authorization'] = 'Bearer ' + c.key
   }
   return h
+}
+
+// 智能识图路由：发图时决定走哪条通道
+// ① vision=主视觉模型可识图（智谱/通义/OpenAI）→ 直接发图
+// ② fig-read=主视觉不能识图但有「图形增强」视觉模型 → 读图提取文字 → 文字模型作答
+// ③ graceful=都没有 → 仍接收图片，注入系统提示让模型礼貌引导
+export function imgRoute(cfg, hasFigModel) {
+  const v = cfg && cfg.vision
+  if (v && v.key && supportsVision(v)) return 'vision'
+  if (hasFigModel) return 'fig-read'
+  return 'graceful'
 }
 
 export function activeCfg(hasImg) {
@@ -73,7 +85,7 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   if (!resp.ok) {
     const bodyTxt = await resp.text().catch(() => '')
     let em = ''
-    try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (err) {}
+    try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (e) {}
     throw new Error('HTTP ' + resp.status + ' @' + c.url + (em ? ' · ' + String(em).slice(0, 160) : (bodyTxt ? ' · ' + bodyTxt.slice(0, 160) : '')))
   }
   const reader = resp.body.getReader()
@@ -115,7 +127,7 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   if (!full) {
     if (think)
       throw new Error(
-        '模型只输出了思考过程、未生成正式回答（多为思考占满输出上限所致）。请重试，或检查识图用视觉模型（deepseek-v4-flash-vision-exp）的 API Key 是否有效。'
+        '模型只输出了思考过程、未生成正式回答（多为思考占满输出上限所致）。请重试，或检查识图用视觉模型（如 DeepSeek deepseek-v4-flash-vision-exp / 智谱 GLM-5V / 通义 Qwen-VL）的 API Key 是否有效。'
       )
     throw new Error('模型未返回任何内容，请重试。')
   }
@@ -153,7 +165,7 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
       if (!resp.ok) {
         const bodyTxt = await resp.text().catch(() => '')
         let em = ''
-        try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (err) {}
+        try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (e) {}
         throw new Error('HTTP ' + resp.status + ' @' + c.url + (em ? ' · ' + String(em).slice(0, 160) : (bodyTxt ? ' · ' + bodyTxt.slice(0, 160) : '')))
       }
       const d = await resp.json()

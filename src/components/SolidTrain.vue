@@ -18,7 +18,6 @@ import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { addPoints as petAddPoints } from '../utils/pet'
 
-const props = defineProps({})
 const emit = defineEmits(['close', 'send-question'])
 
 // ===== 状态 =====
@@ -28,7 +27,6 @@ const mode = ref('view') // view | custom | net | section | missing | ai
 const is2d = ref(false)
 const wireframe = ref(false)
 const autoRotate = ref(true)
-const busy = ref(false)
 const quiz = ref(null)
 const picked = ref('')
 const aiQuiz = ref(null)
@@ -75,10 +73,8 @@ const hitObj = ref(null) // 高亮中的 mesh
 const stats = ref(null)
 let gridMesh = null, lightDir = null, lightDir2 = null
 // 6×6 体素
-const voxSize = ref(6)
 const voxLayer = ref(0) // 当前编辑层 0..5
 // 展开图涂色绘制
-const paintTab = ref(false)
 const paintNetIdx = ref(0)
 const paintBrush = ref('#e11d2e')
 const paintTool = ref('brush') // brush | line | fill | fillFace | erase
@@ -104,7 +100,6 @@ const trainPass = ref(false)
 // 考点问答
 const tipQuery = ref('')
 const tipFiltered = ref([])
-let hoverMesh = null
 
 const solid = computed(() => SOLIDS[solidIdx.value] || SOLIDS[0])
 const customCells = computed(() => [...customKeys.value].map(k => k.split(',').map(Number)))
@@ -528,7 +523,6 @@ function setExplode(v) {
     child.position.set(base[0] + dir.x * v, base[1] + dir.y * v, base[2] + dir.z * v)
   })
 }
-function toggleMode2(m) { toggleMode(m) }
 
 // ===== 展开图涂色 / 自由绘制（真题空间重构训练） =====
 const PAINT_GRID = 48 // 区域填色网格分辨率
@@ -826,10 +820,6 @@ function paintQuiz() {
   opts.push({ k: 'C', text: '不共边也不相对', isAns: false })
   const all = shuffle(opts)
   quiz.value = { type: 'paint', opts: all, answer: all.find(o => o.isAns).text, title: '把涂好色的展开图折成正方体，「' + faceName(paintSel.value) + '」与「' + (isAdj && otherFace != null ? faceName(otherFace) : (isOpp ? '它的对面' : '任一其它面')) + '」折叠后是？', extra: '空间重构 · 展开图涂色' }
-}
-function computeFoldPlanSafe(cells, adjacency) {
-  // 复用 solidTrain 的 computeFoldPlan（已 import？没有，用 validate 内部逻辑简化：直接判断共边=相邻，相隔一格=相对）
-  return null
 }
 
 // ===== 空间想象力训练：旋转到目标视角 =====
@@ -1599,7 +1589,6 @@ watch([pickColor, scaleVal, styleMode, lightMode, bgMode, gridOn, gridSize], () 
 })
 watch(explodeVal, v => setExplode(v))
 
-const view2d = ref('front')
 function view2dPath(dir) {
   if (mode.value === 'custom') {
     const cs = customCells.value
@@ -1700,7 +1689,7 @@ const foldProgPct = computed({
           <div v-if="mode === 'view' && hasParams" class="param-sliders">
             <div v-for="pr in solid.params" :key="pr.k" class="param-row">
               <span>{{ pr.label }}</span>
-              <input type="range" :min="pr.min" :max="pr.max" :step="pr.step" v-model.number="params[pr.k]" />
+              <input v-model.number="params[pr.k]" type="range" :min="pr.min" :max="pr.max" :step="pr.step" />
               <b>{{ Number(params[pr.k]).toFixed(pr.step < 0.1 ? 2 : 1) }}</b>
             </div>
           </div>
@@ -1712,23 +1701,23 @@ const foldProgPct = computed({
                 <summary>🎛 个性化外观 · 点击立体表面/棱线看细节</summary>
                 <div class="prs-body">
                   <div class="prs-row"><span class="prs-l">🎨 颜色</span>
-                    <input type="color" v-model="pickColor" class="prs-color" />
+                    <input v-model="pickColor" type="color" class="prs-color" />
                     <button v-for="c in PALETTE" :key="c" class="sw" :style="{ background: c }" @click="pickColor = c"></button>
                     <button class="btn btn-gh prs-chip" @click="pickColor = ''">默认</button>
                   </div>
-                  <div class="prs-row"><span class="prs-l">📐 大小</span><input type="range" min="0.4" max="2.2" step="0.05" v-model.number="scaleVal" /><b>{{ Number(scaleVal).toFixed(2) }}x</b></div>
+                  <div class="prs-row"><span class="prs-l">📐 大小</span><input v-model.number="scaleVal" type="range" min="0.4" max="2.2" step="0.05" /><b>{{ Number(scaleVal).toFixed(2) }}x</b></div>
                   <div class="prs-row"><span class="prs-l">🕶 样式</span>
                     <button class="btn btn-gh prs-chip" :class="{ on: styleMode === 'solid' }" @click="styleMode = 'solid'">实体</button>
                     <button class="btn btn-gh prs-chip" :class="{ on: styleMode === 'wire' }" @click="styleMode = 'wire'">线框</button>
                     <button class="btn btn-gh prs-chip" :class="{ on: styleMode === 'glass' }" @click="styleMode = 'glass'">半透明</button>
                   </div>
-                  <div class="prs-row"><span class="prs-l">🔄 自转</span><input type="range" min="0" max="5" step="0.2" v-model.number="rotSpeed" /><b>{{ Number(rotSpeed).toFixed(1) }}x</b></div>
+                  <div class="prs-row"><span class="prs-l">🔄 自转</span><input v-model.number="rotSpeed" type="range" min="0" max="5" step="0.2" /><b>{{ Number(rotSpeed).toFixed(1) }}x</b></div>
                   <div class="prs-row"><span class="prs-l">🧭 视角</span>
                     <button v-for="(v, k) in CAM_PRESETS" :key="k" class="btn btn-gh prs-chip" @click="setCameraPreset(k)">{{ ({ front: '前', back: '后', top: '俯', bottom: '仰', left: '左', right: '右', iso: '等轴' })[k] }}</button>
                   </div>
                   <div class="prs-row"><span class="prs-l">🔲 网格</span>
                     <button class="btn btn-gh prs-chip" :class="{ on: gridOn }" @click="gridOn = !gridOn">{{ gridOn ? '开' : '关' }}</button>
-                    <input type="range" min="4" max="24" step="2" v-model.number="gridSize" :disabled="!gridOn" style="flex:1" />
+                    <input v-model.number="gridSize" type="range" min="4" max="24" step="2" :disabled="!gridOn" style="flex:1" />
                   </div>
                   <div class="prs-row"><span class="prs-l">💡 光照</span>
                     <button class="btn btn-gh prs-chip" :class="{ on: lightMode === 'std' }" @click="lightMode = 'std'">标准</button>
@@ -1780,7 +1769,7 @@ const foldProgPct = computed({
                   <button v-for="ly in 6" :key="ly - 1" class="btn btn-gh vox-chip" :class="{ on: voxLayer === ly - 1 }" @click="setVoxLayer(ly - 1)">{{ ly === 1 ? '底层' : (ly === 6 ? '顶层' : '第' + ly + '层') }}</button>
                 </div>
                 <div class="vox-grid big">
-                  <button v-for="cell in layerCells(voxLayer)" :key="cell.k" class="vox-cell" :class="{ on: customKeys.has(cell.k) }" @click="toggleVox(cell.k)" :title="'(' + cell.x + ',' + voxLayer + ',' + cell.z + ')'"></button>
+                  <button v-for="cell in layerCells(voxLayer)" :key="cell.k" class="vox-cell" :class="{ on: customKeys.has(cell.k) }" :title="'(' + cell.x + ',' + voxLayer + ',' + cell.z + ')'" @click="toggleVox(cell.k)"></button>
                 </div>
                 <div v-if="aiRefPin && aiImg" class="ai-ref-pin">
                   <img :src="aiImg" class="ai-ref-img" alt="参照原图" />
@@ -1836,7 +1825,7 @@ const foldProgPct = computed({
                 </select>
                 <button class="btn btn-gh" @click="addComboPart()">添加</button>
               </div>
-              <div class="prs-row"><span class="prs-l">💥 爆炸</span><input type="range" min="0" max="3" step="0.1" v-model.number="explodeVal" /><b>{{ Number(explodeVal).toFixed(1) }}</b></div>
+              <div class="prs-row"><span class="prs-l">💥 爆炸</span><input v-model.number="explodeVal" type="range" min="0" max="3" step="0.1" /><b>{{ Number(explodeVal).toFixed(1) }}</b></div>
               <div class="prs-row">
                 <button class="btn btn-gh" @click="exportCombo()">📋 导出</button>
                 <button class="btn btn-gh" @click="importCombo()">📥 导入</button>
@@ -1847,7 +1836,7 @@ const foldProgPct = computed({
               <div v-for="(pt, i) in comboParts" :key="i" class="combo-it">
                 <span class="combo-idx">{{ i + 1 }}</span>
                 <span class="combo-name">{{ partLabel(pt) }}</span>
-                <input type="color" :value="pt.color || '#22d3ee'" @input="pt.color = $event.target.value; buildStage()" class="combo-color" />
+                <input type="color" :value="pt.color || '#22d3ee'" class="combo-color" @input="pt.color = $event.target.value; buildStage()" />
                 <button class="btn btn-gh" @click="moveComboPart(i, -1)">↑</button>
                 <button class="btn btn-gh" @click="moveComboPart(i, 1)">↓</button>
                 <button class="btn btn-gh" @click="removeComboPart(i)">🗑</button>
@@ -1919,7 +1908,7 @@ const foldProgPct = computed({
                 </button>
               </div>
               <div class="paint-tools">
-                <input type="color" v-model="paintBrush" class="prs-color" />
+                <input v-model="paintBrush" type="color" class="prs-color" />
                 <button class="btn btn-gh prs-chip" :class="{ on: paintTool === 'brush' }" @click="paintTool = 'brush'">✏️ 画笔</button>
                 <button class="btn btn-gh prs-chip" :class="{ on: paintTool === 'line' }" @click="paintTool = 'line'">📏 直线</button>
                 <button class="btn btn-gh prs-chip" :class="{ on: paintTool === 'fill' }" @click="paintTool = 'fill'">🪣 区域填色</button>
@@ -1969,7 +1958,7 @@ const foldProgPct = computed({
               </div>
               <div class="fold-slider">
                 <span>折叠进度</span>
-                <input type="range" min="0" max="100" v-model.number="foldProgPct" />
+                <input v-model.number="foldProgPct" type="range" min="0" max="100" />
                 <b>{{ Math.round(foldProg * 100) }}%</b>
               </div>
               <div class="fold-hint">💡 拖拽 3D 旋转查看；面沿折痕依次折起，最终围成正方体。</div>
@@ -1990,14 +1979,14 @@ const foldProgPct = computed({
                 <button class="btn btn-gh cut-chip" :class="{ on: cutTarget === 'custom' }" @click="setCutTarget('custom')">🎨 我的自定义立体 · {{ customKeys.size }}块</button>
               </div>
               <div class="cut-dirs">
-                <button v-for="d in DIR_PRESETS" :key="d.k" class="btn btn-gh cut-chip" :class="{ on: cutDir === d.k }" @click="applyCutDir(d.k)" :title="d.tip">{{ d.n }}</button>
+                <button v-for="d in DIR_PRESETS" :key="d.k" class="btn btn-gh cut-chip" :class="{ on: cutDir === d.k }" :title="d.tip" @click="applyCutDir(d.k)">{{ d.n }}</button>
                 <button class="btn btn-gh cut-chip" :class="{ on: cutDir === 'custom' }" @click="cutDir = 'custom'">🎛 自定义</button>
               </div>
               <div v-if="cutDir === 'custom'" class="cut-custom">
-                <div class="param-row"><span>方位角</span><input type="range" min="0" max="360" step="1" v-model.number="cutAz" @input="applyCustomAngles()" /><b>{{ cutAz }}°</b></div>
-                <div class="param-row"><span>仰角</span><input type="range" min="0" max="180" step="1" v-model.number="cutEl" @input="applyCustomAngles()" /><b>{{ cutEl }}°</b></div>
+                <div class="param-row"><span>方位角</span><input v-model.number="cutAz" type="range" min="0" max="360" step="1" @input="applyCustomAngles()" /><b>{{ cutAz }}°</b></div>
+                <div class="param-row"><span>仰角</span><input v-model.number="cutEl" type="range" min="0" max="180" step="1" @input="applyCustomAngles()" /><b>{{ cutEl }}°</b></div>
               </div>
-              <div class="param-row"><span>位置</span><input type="range" min="0" max="100" step="1" v-model.number="cutPos" @input="computeCut()" /><b>{{ cutPos }}%</b></div>
+              <div class="param-row"><span>位置</span><input v-model.number="cutPos" type="range" min="0" max="100" step="1" @input="computeCut()" /><b>{{ cutPos }}%</b></div>
               <div class="fold-btns">
                 <button class="btn" :class="cutOpen ? 'btn-pri' : 'btn-gh'" @click="toggleCutOpen()">{{ cutOpen ? '🔍 复原实体' : '🔪 剖开查看' }}</button>
                 <button class="btn btn-pri" @click="genSliceQuiz()">🎲 就这个切面出题</button>
@@ -2070,7 +2059,7 @@ const foldProgPct = computed({
           <template v-else>
             <div class="st-title">🤖 AI 根据「{{ aiLabel }}」出 4 选 1 题（含解析/考点/秒杀规律）</div>
             <div class="prs-row" style="margin:4px 0">
-              <label class="ai-hard-lb"><input type="checkbox" v-model="aiHard" /> 🎯 真题难度（接近国考/省考）</label>
+              <label class="ai-hard-lb"><input v-model="aiHard" type="checkbox" /> 🎯 真题难度（接近国考/省考）</label>
               <button class="btn btn-gh" @click="searchRealQuestions()">📡 联网搜真题</button>
               <button class="btn btn-gh" @click="realShow = !realShow">{{ realShow ? '隐藏' : '📚 真题题库' }}</button>
             </div>

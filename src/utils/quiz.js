@@ -147,7 +147,7 @@ export function answerLetter(s) {
 
 // 资料分析「材料+题组」解析：从 AI 输出中拆出 材料 + N 道题
 // 期望格式：### 📄 材料 ... ### 第1题 ... ### ✅ 解析 ... ### 第2题 ...
-export function parseMaterialQuiz(text, n) {
+export function parseMaterialQuiz(text, _n) {
   if (!text || typeof text !== 'string') return null
   const src = String(text)
   // 1) 材料块：### 📄 材料 到 第一个 ### 第N题 之间（标题后可跟换行或同行内容，避免模型同行输出时漏抓材料）

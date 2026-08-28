@@ -173,6 +173,10 @@ export function createScene(container) {
   const mainGlow = makeGlowSprite(0x38bdf8)
   mainGlow.scale.setScalar(48)
   scene.add(mainGlow)
+  // 主星球（行测局长）文字标签
+  const mainLabel = makeLabel('行测局长', 0x38bdf8)
+  mainLabel.scale.set(5.2, 1.9, 1)
+  scene.add(mainLabel)
 
   // 轨道（六大板块）动态集合
   const orbitGroup = new THREE.Group()
@@ -240,7 +244,9 @@ export function createScene(container) {
   let hoveredKey = null // 悬停行星 key
   let selectedKey = null // 点击选择 key
   let focus = null // {key, t} 聚焦缓动
+  let earthHover = false // 悬停/选中主星球（地球）
   const pulses = [] // 能量环 {mesh, scale, max, alpha}
+  let flight = null // 数据飞行状态机 {seq, idx, stage, t, duration, fromPos, fromTgt, toPos, toTgt, holdT, travelT, onVisit, onDone}
   const onPlanetEnter = []
   const onPlanetLeave = []
   const onPlanetClick = []
@@ -291,6 +297,153 @@ export function createScene(container) {
     return { x, z }
   }
 
+  // ===== 数据飞行（🚀 火箭巡游）：火箭实体 + 弧线轨迹 + 相机跟随 =====
+  const EARTH_CAM = new THREE.Vector3(0, 16, 30)
+  const EARTH_TGT = new THREE.Vector3(0, 0, 0)
+
+  // 火箭实体（沿 +Z 朝向飞行方向；尾焰用辉光 Sprite 始终朝向相机）
+  function makeRocket() {
+    const g = new THREE.Group()
+    const bodyMat = new THREE.MeshPhongMaterial({ color: 0xe8f6ff, emissive: 0x1a3a55, emissiveIntensity: 0.45, shininess: 40 })
+    const hotMat = new THREE.MeshPhongMaterial({ color: 0xf87171, emissive: 0x991b1b, emissiveIntensity: 0.55, shininess: 30 })
+    // 箭身（绕 X 旋转后沿 Z 轴）
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.34, 1.5, 14), bodyMat)
+    body.rotation.x = Math.PI / 2
+    g.add(body)
+    // 整流罩（头锥）
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.9, 14), hotMat)
+    nose.rotation.x = Math.PI / 2
+    nose.position.z = 1.1
+    g.add(nose)
+    // 尾焰辉光
+    const flame = makeGlowSprite(0xffb020)
+    flame.scale.setScalar(1.1)
+    flame.position.z = -1.05
+    g.add(flame)
+    // 尾翼 ×3
+    for (let i = 0; i < 3; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.07, 0.3), hotMat)
+      const a = (i / 3) * Math.PI * 2
+      fin.position.x = Math.cos(a) * 0.34
+      fin.position.y = Math.sin(a) * 0.34
+      fin.position.z = -0.55
+      fin.rotation.z = a
+      g.add(fin)
+    }
+    g.scale.setScalar(0.9)
+    return g
+  }
+  const rocket = makeRocket()
+  rocket.visible = false
+  scene.add(rocket)
+
+  // 航段弧线轨迹（发光虚线：当前飞行路径）
+  const trailGeo = new THREE.BufferGeometry()
+  const trailPts = []
+  for (let i = 0; i <= 28; i++) trailPts.push(new THREE.Vector3())
+  trailGeo.setFromPoints(trailPts)
+  const trailMat = new THREE.LineBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0, depthWrite: false })
+  const trailLine = new THREE.Line(trailGeo, trailMat)
+  trailLine.frustumCulled = false
+  scene.add(trailLine)
+  function makeArc(from, to) {
+    const mid = from.clone().add(to).multiplyScalar(0.5)
+    mid.y = Math.max(from.y, to.y) + 4.5
+    return new THREE.QuadraticBezierCurve3(from, mid, to)
+  }
+  function updateTrail(curve) {
+    for (let i = 0; i <= 28; i++) {
+      trailPts[i].copy(curve.getPoint(i / 28))
+    }
+    trailGeo.attributes.position.needsUpdate = true
+  }
+  // 当前飞行目标（板块行星实时坐标 / 地球上空）
+  function flightTargetVec() {
+    const key = flight.seq[flight.idx]
+    const pl = planets.find((p) => p.key === key)
+    if (pl) {
+      const { x, z } = planetWorld(pl)
+      return new THREE.Vector3(x, 2.6, z)
+    }
+    return new THREE.Vector3(0, 3.4, 0)
+  }
+  function beginFlightLeg(stage, duration) {
+    flight.stage = stage
+    flight.t = duration
+    flight.duration = duration
+    flight.fromPos = rocket.position.clone()
+    flight.toPos = flightTargetVec()
+    if (stage !== 'hold') {
+      flight.dir = flight.toPos.clone().sub(flight.fromPos).normalize()
+      flight.curve = makeArc(flight.fromPos, flight.toPos)
+      updateTrail(flight.curve)
+      trailMat.opacity = 0.7
+    } else {
+      trailMat.opacity = 0.2
+    }
+  }
+  function applyFlightStep(dt) {
+    if (!flight) return
+    // 行星实时公转：不断追踪最新位置，保证火箭准确落点
+    if (flight.stage === 'to' || flight.stage === 'hold') {
+      flight.toPos.copy(flightTargetVec())
+      if (flight.stage === 'to') {
+        flight.curve = makeArc(flight.fromPos, flight.toPos)
+        updateTrail(flight.curve)
+        flight.dir.copy(flight.toPos.clone().sub(flight.fromPos).normalize())
+      }
+    }
+    flight.t -= dt
+    const prog = Math.max(0, Math.min(1, 1 - flight.t / (flight.duration || 1)))
+    const ease = prog < 0.5 ? 2 * prog * prog : 1 - Math.pow(-2 * prog + 2, 2) / 2
+    if (flight.stage === 'to' || flight.stage === 'toEarth') {
+      // 火箭沿弧线飞行 + 朝向
+      const rp = flight.curve.getPoint(ease)
+      rocket.position.copy(rp)
+      const tan = flight.curve.getTangent(ease)
+      rocket.lookAt(rp.clone().add(tan))
+      // 相机跟随：火箭后上方追拍
+      const camPos = rp.clone().add(flight.dir.clone().multiplyScalar(-9)).add(new THREE.Vector3(0, 5.2, 0))
+      camera.position.lerp(camPos, Math.min(1, dt * 6))
+      controls.target.lerp(flight.toPos, Math.min(1, dt * 5))
+    } else if (flight.stage === 'hold') {
+      // 到达行星：火箭悬停（轻微起伏）
+      const bob = Math.sin(performance.now() * 0.004) * 0.35
+      rocket.position.copy(flight.toPos)
+      rocket.position.y += 0.7 + bob
+      const camPos = rocket.position.clone().add(flight.dir.clone().multiplyScalar(-9)).add(new THREE.Vector3(0, 5.2, 0))
+      camera.position.lerp(camPos, Math.min(1, dt * 6))
+      controls.target.lerp(flight.toPos, Math.min(1, dt * 5))
+    }
+    if (flight.t > 0) return
+    if (flight.stage === 'to') {
+      // 到达行星：能量脉冲 + 萌宠数据提示
+      const key = flight.seq[flight.idx]
+      selectedKey = key
+      const pl = planets.find((x) => x.key === key)
+      if (pl) {
+        const { x, z } = planetWorld(pl)
+        spawnRing(x, z, pl.baseColor)
+      }
+      if (flight.onVisit) flight.onVisit(key)
+      beginFlightLeg('hold', flight.holdT)
+    } else if (flight.stage === 'hold') {
+      flight.idx++
+      if (flight.idx < flight.seq.length) beginFlightLeg('to', flight.travelT)
+      else beginFlightLeg('toEarth', flight.travelT)
+    } else {
+      // 回到地球上空：完成巡游，火箭返场隐藏
+      selectedKey = null
+      rocket.visible = false
+      trailMat.opacity = 0
+      const done = flight.onDone
+      flight = null
+      controls.enabled = true
+      controls.autoRotate = true
+      if (done) done()
+    }
+  }
+
   // 每帧更新函数：从数据源读取各行星等级/活跃度
   const api = {
     on(event, fn) {
@@ -306,6 +459,65 @@ export function createScene(container) {
     clearFocus() {
       selectedKey = null
       focus = null
+    },
+    // 数据飞行：按 seq（板块 key 数组）依次飞过 → 回地球（火箭巡游）
+    flyTour(seq, onVisit, onDone) {
+      if (flight) return
+      const list = (seq || []).filter((k) => k !== 'earth' && planets.some((p) => p.key === k))
+      if (!list.length) return
+      selectedKey = null
+      focus = null
+      controls.enabled = false
+      controls.autoRotate = false
+      // 火箭从地球上空点火起飞
+      rocket.position.set(0, 3.4, 0)
+      rocket.visible = true
+      flight = {
+        seq: list,
+        idx: 0,
+        stage: 'to',
+        t: 0,
+        duration: 1,
+        holdT: 1.5,
+        travelT: 2.0,
+        fromPos: new THREE.Vector3(0, 3.4, 0),
+        toPos: new THREE.Vector3(),
+        dir: new THREE.Vector3(0, 0, 1),
+        curve: null,
+        onVisit,
+        onDone
+      }
+      beginFlightLeg('to', flight.travelT)
+    },
+    // 平缓回到地球上空（不锁交互）
+    flyToEarth() {
+      if (flight) return
+      selectedKey = null
+      focus = null
+      const from = camera.position.clone()
+      const fromT = controls.target.clone()
+      const t0 = performance.now()
+      const dur = 900
+      const anim = () => {
+        const p = Math.min(1, (performance.now() - t0) / dur)
+        const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2
+        camera.position.lerpVectors(from, EARTH_CAM, ease)
+        controls.target.lerpVectors(fromT, EARTH_TGT, ease)
+        if (p < 1 && !flight) requestAnimationFrame(anim)
+      }
+      anim()
+    },
+    // 取消/中断数据飞行，恢复交互
+    cancelFlight() {
+      if (flight) {
+        flight = null
+        focus = null
+        rocket.visible = false
+        trailMat.opacity = 0
+        controls.enabled = true
+        controls.autoRotate = true
+        selectedKey = null
+      }
     },
     // 从某行星发起能量脉冲
     pulseByKey(key) {
@@ -332,6 +544,14 @@ export function createScene(container) {
       elapsedT += dt
       mainSphere.rotation.y += dt * 0.08
       stars.rotation.y += dt * 0.01
+      // 主星球（地球）交互：悬停/选中放大 + 呼吸脉冲 + 标签跟随
+      const earthInter = earthHover || selectedKey === 'earth'
+      const earthPulse = earthInter ? 1 + Math.sin(elapsedT * 4) * 0.05 : 1
+      mainSphere.scale.setScalar(1 + (earthInter ? 0.06 : 0) * earthPulse)
+      mainSphere.material.emissiveIntensity = 0.35 + (earthInter ? 0.3 : 0)
+      mainGlow.scale.setScalar(48 + (earthInter ? 8 : 0))
+      mainLabel.position.set(0, 6.6, 0)
+      mainLabel.material.opacity = earthHover || selectedKey === 'earth' ? 1 : 0.82
       // 更新行星
       planets.forEach((p, i) => {
         const t = targets && targets[i]
@@ -368,8 +588,9 @@ export function createScene(container) {
         r.alpha -= dt * 0.3
         r.mesh.material.opacity = Math.max(0, r.alpha)
       })
-      // 聚焦缓动
+      // 聚焦缓动 + 数据飞行
       applyFocusStep(dt)
+      applyFlightStep(dt)
       controls.update()
       renderer.render(scene, camera)
     },
@@ -382,6 +603,13 @@ export function createScene(container) {
       controls.autoRotate = !on
     },
     dispose() {
+      if (flight) {
+        flight = null
+        rocket.visible = false
+        trailMat.opacity = 0
+        controls.enabled = true
+        controls.autoRotate = true
+      }
       controls.dispose()
       renderer.dispose()
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
@@ -399,8 +627,10 @@ export function createScene(container) {
     mouse.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1)
     raycaster.setFromCamera(mouse, camera)
     const meshes = planets.map((p) => p.mesh)
+    meshes.push(mainSphere)
     const hits = raycaster.intersectObjects(meshes, false)
     if (hits.length) {
+      if (hits[0].object === mainSphere) return { key: 'earth', mesh: mainSphere }
       return planets.find((p) => p.mesh === hits[0].object)
     }
     return null
@@ -412,11 +642,13 @@ export function createScene(container) {
       if (hoveredKey) {
         const prev = planets.find((x) => x.key === hoveredKey)
         if (prev) prev.hover = false
+        else if (hoveredKey === 'earth') earthHover = false
         onPlanetLeave.forEach((fn) => fn(hoveredKey))
       }
       hoveredKey = k
       if (p) {
-        p.hover = true
+        if (p.key === 'earth') earthHover = true
+        else p.hover = true
         renderer.domElement.style.cursor = 'pointer'
         onPlanetEnter.forEach((fn) => fn(k, p))
       } else {

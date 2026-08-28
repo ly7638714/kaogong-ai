@@ -79,7 +79,7 @@ const PLATE_KEYS = [
  * @param {string} txt   用户提问文本
  * @returns {string}     追加的复盘指引 markdown（无则返回 ''）
  */
-export function buildReview(full, bm, txt) {
+export function buildReview(full, bm, _txt) {
   const f = String(full || '')
   // 模型已按 SYS 输出复盘小节 → 以模型为准
   if (HAS_REVIEW(f)) return ''

@@ -16,6 +16,18 @@ const D = () => ({
   ttsVoice: '',
   ttsRate: 0.98,
   ttsPitch: null,
+  ttsMode: 'glm', // 真人朗读引擎：glm=智谱超拟人 / openai=OpenAI兼容CosyVoice / edge=Edge免费神经 / sys=系统语音
+  ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
+  ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },
+  ttsEdgeVoice: 'zh-CN-XiaoxiaoNeural',
+  petVoice: true, // 萌宠语音朗读总开关（配合真人 TTS 引擎）
+  petSkin: 'lixingyun', // 萌宠角色皮肤：lixingyun=李星云 / xueshen=薛神 / custom=自定义人物
+  skinImgs: {}, // 每个角色皮肤的自定义形象（用户上传的动漫图片，dataURL）
+  skinVoices: {}, // 每个角色皮肤绑定的大模型克隆声线 { skinId: { engine, voice, name, model } }
+  petCustom: { name: '自定义人物', persona: '你是一位由用户自定义的角色，性格按用户设定，热情可靠，像朋友一样陪伴用户备考。' }, // 自定义人物：名字 / 人设
+  customSkins: [], // 用户新增的自定义角色列表 [{ id:'custom2', name, persona }]
+  globalVoice: null, // 全局音色快照（语音设置里的音色；切换非克隆角色时恢复，保证全局音色=萌宠音色一致）
+  petImg: '', // 全局自定义形象（未分皮肤时生效）
   examMode: false, // 考场计时：开启后按问数限时并统计用时
   fontSize: 14.5,
   examDate: '2026-11-29',
@@ -43,7 +55,7 @@ const D = () => ({
   szFrom: '2025-10',
   szTo: ''
 })
-export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false })
+export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null })
 export function load() {
   try {
     const s = localStorage.getItem('xc_cfg')
@@ -52,7 +64,9 @@ export function load() {
       store.cfg = Object.assign(D(), d, {
         text: Object.assign(D().text, d.text || {}),
         vision: Object.assign(D().vision, d.vision || {}),
-        fig: Object.assign(D().fig, d.fig || {})
+        fig: Object.assign(D().fig, d.fig || {}),
+        ttsGm: Object.assign(D().ttsGm, d.ttsGm || {}),
+        ttsOpenAI: Object.assign(D().ttsOpenAI, d.ttsOpenAI || {})
       })
     }
   } catch (e) {}
@@ -127,3 +141,5 @@ export const saveNotes = () => {
     localStorage.setItem('xc_notes', JSON.stringify(store.notes))
   } catch (e) {}
 }
+
+

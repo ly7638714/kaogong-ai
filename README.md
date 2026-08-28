@@ -17,7 +17,7 @@
 |---|---|---|
 | 数据层 | `03_资料/` 本地名师讲义、真题、演示截图 | ✅ 已归置 |
 | 知识层 | `01_源码/src/kb.js`（SYS 通用协议 + 10 专项模式）、积累四大库（常识/时政/成语/实词） | ✅ 已蒸馏 |
-| 应用层 | `01_源码/` Vue3 + Vite5 + PWA，6 大页面 + 统一考场（出题/做题）+ 趣味功能 | ✅ 已完成 |
+| 应用层 | `01_源码/` Vue3 + Vite5 + PWA，6 大页面 + 统一考场（出题/做题）+ 趣味功能 + 页签深链/全局异常捕获（v3.1.0） | ✅ 已完成 |
 | 分发层 | `02_发布物/`（网页产物+zip）、`04_安卓/`（HBuilderX 项目）、GitHub Pages CI | ✅ 已就绪（APK 需 HBuilderX 重打包） |
 
 **技术栈**：Vue3（Composition API）、Vite5、vite-plugin-pwa、three.js（3D）、pdfjs-dist（PDF 解析）、KaTeX、marked、ECharts（统计图）、docx、Web Speech API（朗读/语音）、File System Access API（本地文件夹保存）。
@@ -52,12 +52,12 @@ kaogong-review-skill-main/
 │   ├── dist/           构建产物（gitignore）
 │   └── package.json / vite.config.js / index.html / .github/workflows/pages.yml
 │
-├── 02_发布物/         网页发布产物（index.html/assets/sw.js/zip）+ 部署说明 + 视觉Key指南
+├── 02_发布物/         网页发布产物（index.html/assets/sw.js/zip，仅留最新 APK）+ 部署说明 + 视觉Key指南
 ├── 03_资料/           按板块归置的学习资料
 ├── 04_安卓/           HBuilderX 5+App 项目（web 资源已与最新构建同步）+ APK打包指南
-├── archive_旧版本/    归档区
-├── scripts/           sync-dist.ps1（一键构建+同步三端+重建zip）
-├── README.md / 使用说明.md
+├── archive_旧版本/    归档区（旧版源码/旧 skill 体系/APK 历史版本）
+├── scripts/           发布同步脚本 sync-dist.ps1（一键构建+同步三端+重建zip；与 01_源码/scripts 开发验证脚本区分）
+├── README.md / 使用说明.md / 对话功能使用与开发说明.md / PROJECT_ROADMAP.md / CHANGELOG.md / LICENSE
 ```
 
 ---

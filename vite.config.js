@@ -26,7 +26,7 @@ export default defineConfig({
         display: 'standalone',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }]
       },
-      workbox: { navigateFallback: null }
+      workbox: { navigateFallback: null, maximumFileSizeToCacheInBytes: 4 * 1024 * 1024 }
     })
   ]
 })
