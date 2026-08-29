@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
 
 // mock chatOnce so petAsk / petAnalyzeCurrent don't hit network
-vi.mock('../api/client', () => ({ chatOnce: vi.fn(async () => 'mock-reply') }))
+vi.mock('../api/client', () => ({ chatOnce: vi.fn(async () => 'mock-reply'), setCostCtx: vi.fn() }))
 import { petBuildQContext, petAnalyzeCurrent, petAsk, petChat, petSpeakReply, petBuildKnowledge, petDetectPlate } from '../utils/pet'
 import { chatOnce } from '../api/client'
 

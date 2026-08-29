@@ -20,8 +20,9 @@ const D = () => ({
   ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
   ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },
   ttsEdgeVoice: 'zh-CN-XiaoxiaoNeural',
+  voiceCustom: { hidden: {}, names: {} }, // 音色市场自定义：隐藏/重命名已有音色
   petVoice: true, // 萌宠语音朗读总开关（配合真人 TTS 引擎）
-  petSkin: 'lixingyun', // 萌宠角色皮肤：lixingyun=李星云 / xueshen=薛神 / custom=自定义人物
+  petSkin: 'lixingyun', // 萌宠角色皮肤：xueshen=薛神 / zhangruonan=章若楠 / lixingyun=李星云 / jiruxue=姬如雪 / custom=自定义人物
   skinImgs: {}, // 每个角色皮肤的自定义形象（用户上传的动漫图片，dataURL）
   skinVoices: {}, // 每个角色皮肤绑定的大模型克隆声线 { skinId: { engine, voice, name, model } }
   petCustom: { name: '自定义人物', persona: '你是一位由用户自定义的角色，性格按用户设定，热情可靠，像朋友一样陪伴用户备考。' }, // 自定义人物：名字 / 人设
@@ -55,7 +56,7 @@ const D = () => ({
   szFrom: '2025-10',
   szTo: ''
 })
-export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null })
+export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null } })
 export function load() {
   try {
     const s = localStorage.getItem('xc_cfg')
@@ -69,6 +70,33 @@ export function load() {
         ttsOpenAI: Object.assign(D().ttsOpenAI, d.ttsOpenAI || {})
       })
     }
+  } catch (e) {}
+  // v3.7.1+ 清理：删除已从智谱账号移除的旧克隆声线绑定（用户要求只保留四个内置角色声线）
+  try {
+    const DELETED_VOICES = new Set([
+      'a7e0ac3c-685b-58a0-8508-1b4b2e574a1e', // 自定义声线_mtdwsmwq
+      '1b284f8d-aa42-5d21-979a-f8b958e497dd', // 自定义声线_mtdwd09f
+      '62f427ab-cc29-554e-b094-b99d389b851e', // fullflow_1787978090100
+      '748035cc-23c4-5f7f-a305-68a5bdd6d191', // test_repro_1787978048912
+      '0d7c7263-9237-5365-97ce-c5b06142b8b5', // 自定义2声线
+      'd4320d29-9625-5833-88d6-fd18bb0e62e0' // 自定义声线
+    ])
+    const sv = store.cfg.skinVoices || {}
+    for (const k of Object.keys(sv)) {
+      const v = sv[k]
+      if (v && (DELETED_VOICES.has(v.voice) || DELETED_VOICES.has(v.name))) delete sv[k]
+    }
+    const BUILTIN_NAMES = new Set(['薛神', '章若楠', '李星云', '姬如雪'])
+    store.cfg.customSkins = (store.cfg.customSkins || []).filter((s) => !s || !BUILTIN_NAMES.has(s.name || ''))
+    const keepSkins = new Set(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
+    ;(store.cfg.customSkins || []).forEach((s) => { if (s && s.id) keepSkins.add(s.id) })
+    for (const k of Object.keys(sv)) if (!keepSkins.has(k)) delete sv[k]
+    store.cfg.skinVoices = sv
+    store.cfg.customSkins = (store.cfg.customSkins || []).filter((s) => {
+      if (!s) return false
+      const v = s.voice || {}
+      return !DELETED_VOICES.has(s.voice || '') && !DELETED_VOICES.has(v.voice) && !BUILTIN_NAMES.has(s.name || '')
+    })
   } catch (e) {}
   try {
     const m = localStorage.getItem('xc_msgs')

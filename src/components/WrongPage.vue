@@ -6,7 +6,7 @@ import { exportObsidianMd, copyObsidianWrong, exportAnkiCsv } from '../utils/exp
 import { activeCfg, chatOnce, supportsVision } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
 import { ankiAddNote } from '../utils/ankiConnect'
-import { addPoints as petAddPoints, buildWrongAnalysis } from '../utils/pet'
+import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
 
 const cur = ref(-1),
   show = ref(false)
@@ -275,6 +275,9 @@ function openRedo() {
   redoPick.value = ''
   redoT.value = 0
   redo.value = true
+  // 二刷/三刷同样支持萌宠「读题」：只读题干+选项，不念解析（避免剧透答案）
+  store.curQ = { plate: q.plate || q.subject, subject: q.subject || q.plate, kind: q.kind || q.variant || '', stem: q.q || q.stem || q.text, options: q.options || [], answer: q.answer || q.ans || q.correct || '', explain: q.explain || q.analysis || '', your: q.your || q.answerUser || '', ok: false }
+  store.readCtx = { type: 'redo', title: ((q.redoHistory || []).length ? '三刷' : '二刷') + '·' + (q.plate || q.subject || '行测'), text: buildRedoReadable(q) }
   if (redoTimer) clearInterval(redoTimer)
   redoTimer = setInterval(() => {
     redoT.value++
@@ -317,6 +320,10 @@ function submitRedo(correct, picked) {
     redoTimer = null
   }
   applyRedo(q, correct, redoT.value, picked || '')
+  if (!correct) {
+    store.curQ = { ...store.curQ, your: picked || '', ok: false }
+    petAnalyzeCurrent({ redo: true })
+  }
 }
 function submitByChoice(k) {
   const q = redoQ.value
@@ -329,6 +336,10 @@ function submitByChoice(k) {
     redoTimer = null
   }
   applyRedo(q, correct, redoT.value, k)
+  if (!correct) {
+    store.curQ = { ...store.curQ, your: k, ok: false }
+    petAnalyzeCurrent({ redo: true })
+  }
 }
 function masteryOf(q) {
   if (!q) return 0
@@ -400,6 +411,11 @@ function openRaw(idx) {
 function buildWrongReadable(q) {
   const opts = (q.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || '').replace(/<[^>]+>/g, ' ')).join('。')
   return ((q.q || q.stem || q.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() + '。' + opts + '。' + buildWrongAnalysis(q)).slice(0, 1400)
+}
+// 二刷/三刷朗读用：只读题干+选项，不含解析
+function buildRedoReadable(q) {
+  const opts = (q.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || '').replace(/<[^>]+>/g, ' ')).join('。')
+  return ((q.q || q.stem || q.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '')).slice(0, 1200)
 }
 function toggleReason(r) {
   const i = frm.value.sel.indexOf(r)

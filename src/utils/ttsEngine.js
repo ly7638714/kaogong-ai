@@ -4,6 +4,7 @@
 /* global Audio, crypto, FormData, File */
 import { reactive } from 'vue'
 import { store } from '../store'
+import { recordCost, getTtsPrice, getCloneFee, beginCost } from './costTrack'
 
 // ============ 引擎元信息 ============
 export const TTS_ENGINES = [
@@ -22,8 +23,44 @@ function setStatus(state, msg) {
 }
 
 // ============ 文本清洗：去掉 Markdown / 代码 / SVG / LaTeX / emoji，只留适合朗读的正文 ============
+// 符号智能朗读：把箭头/数学符号/斜杠等按语境转成中文，避免读成“代码/英文”（去 AI 味关键一步）
+export function symbolsToChinese(text) {
+  let t = String(text || '')
+  // 先处理带数字的复合符号（避免与后面简单替换冲突）
+  t = t.replace(/(\d+(?:\.\d+)?)%/g, '百分之$1')
+  t = t.replace(/(\d+(?:\.\d+)?)\s*[~～]\s*(\d+(?:\.\d+)?)/g, '$1到$2')
+  t = t.replace(/(\d+(?:\.\d+)?)\s*[-－]\s*(\d+(?:\.\d+)?)/g, '$1到$2')
+  // 斜杠：数字/单位 → 每（公里/小时）；其余 → 或
+  t = t.replace(/([\u4e00-\u9fa5A-Za-z]+)\/([\u4e00-\u9fa5A-Za-z]+)/g, (m, a, b) => {
+    const unit = /^(公里|千米|米|厘米|毫米|小时|分钟|秒|天|月|年|次|人|个|元|克|千克|升|毫升|度|Hz|hz|km|m|s|h|min|day|月|年|次|人|元)$/i
+    return (unit.test(a) && unit.test(b)) ? a + '每' + b : a + '或' + b
+  })
+  t = t.replace(/(\d+)\/(\d+)/g, (m, a, b) => a + '分之' + b)
+  // 数学符号
+  const MAP = {
+    '→': '推出', '⇒': '推出', '⟹': '推出', '⟶': '推出', '➜': '推出',
+    '←': '得到', '⇐': '得到', '⟵': '得到',
+    '↔': '相互推出', '⇔': '等价于', '⟺': '等价于',
+    '≤': '小于等于', '≥': '大于等于', '≠': '不等于', '≈': '约等于', '≡': '恒等于',
+    '×': '乘', '÷': '除以', '±': '正负', '∓': '负正', '∞': '无穷大',
+    '√': '根号', 'π': '派', 'Σ': '求和', '∑': '求和', '△': '三角形', '∠': '角',
+    '°': '度', '‰': '千分之', 'µ': '微',
+    '＝': '等于', '=': '等于', '＋': '加', '+': '加', '－': '减', '−': '减',
+    '&': '和', '＠': '艾特', '@': '艾特', '％': '百分之',
+    '^': '次方', '·': '、', '•': '、',
+    'Ⅰ': '一', 'Ⅱ': '二', 'Ⅲ': '三', 'Ⅳ': '四', 'Ⅴ': '五',
+    '（': '（', '）': '）'
+  }
+  for (const k of Object.keys(MAP)) {
+    if (t.includes(k)) t = t.split(k).join(MAP[k])
+  }
+  // 单独的 %（未被数字替换）→ 百分号
+  t = t.replace(/%/g, '百分号')
+  // 清理重复空格
+  return t.replace(/\s{2,}/g, ' ').trim()
+}
 export function cleanSpeechText(text) {
-  return String(text || '')
+  return symbolsToChinese(String(text || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/~~~[\s\S]*?~~~/g, ' ')
     .replace(/`[^`]*`/g, ' ')
@@ -38,7 +75,7 @@ export function cleanSpeechText(text) {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\s+/g, ' ')
-    .trim()
+    .trim())
 }
 
 // ============ 长文分块：按句子边界切，避免一次请求超长 ============
@@ -68,6 +105,58 @@ export function chunkText(text, maxLen = 420) {
   })
 }
 
+// 分块朗读：首块更小（让第一段音频更快返回、开口更快），其余块保持 maxLen
+export function chunkForTts(text, maxLen, firstLen) {
+  let chunks = chunkText(text, maxLen)
+  if (chunks.length > 1 && firstLen > 0 && chunks[0].length > firstLen) {
+    const first = chunks[0]
+    let cut = -1
+    // 尽量在句号/逗号等自然停顿附近切，避免把话从中间掐断
+    for (let i = Math.min(first.length, firstLen); i > Math.max(6, firstLen - 24); i--) {
+      if ('。！？!?；;，,、'.includes(first[i])) { cut = i + 1; break }
+    }
+    if (cut < 0) cut = Math.min(first.length, firstLen)
+    const head = first.slice(0, cut)
+    const rest = first.slice(cut)
+    chunks = [head, ...(chunkText(rest, maxLen) || []).filter(Boolean), ...chunks.slice(1)]
+  }
+  return chunks
+}
+// 滑动窗口顺序合成：最多 W 个请求在途（避免一次性打满全部请求被限流、个别慢导致停顿），
+// 结果严格按分块顺序 onChunk 投递（gapless 播放器依赖顺序），第一块立即发出 → 开口更快、衔接更顺
+export async function slideSynthesize(chunks, worker, onChunk, W = 4) {
+  const results = []
+  let nextReq = 0
+  let nextEmit = 0
+  let inFlight = 0
+  let firstErr = ''
+  let resolveDone
+  const done = new Promise((r) => { resolveDone = r })
+  const bytesAll = []
+  const emit = () => {
+    while (results[nextEmit] !== undefined) {
+      const buf = results[nextEmit++]
+      if (buf) {
+        bytesAll.push(buf)
+        if (onChunk) { try { onChunk(buf) } catch (e) {} }
+      }
+    }
+  }
+  const pump = () => {
+    while (inFlight < W && nextReq < chunks.length) {
+      const idx = nextReq++
+      inFlight++
+      Promise.resolve()
+        .then(() => worker(chunks[idx]))
+        .then((buf) => { results[idx] = buf })
+        .catch((e) => { if (!firstErr) firstErr = e.message || '网络错误'; results[idx] = null })
+        .finally(() => { inFlight--; emit(); pump(); if (inFlight === 0 && nextReq >= chunks.length) resolveDone() })
+    }
+  }
+  pump()
+  await done
+  return { bytesAll, firstErr }
+}
 // ============ 统一音频播放器（一次只播一个）============
 let _player = { audio: null, url: '' }
 export function stopPlayback() {
@@ -88,7 +177,9 @@ export function playBytes(bytes, mime) {
   return new Promise((resolve) => {
     try {
       stopPlayback()
-      const blob = new Blob([bytes], { type: mime || 'audio/mpeg' })
+      // 单段播放（试音/回退）也走 WAV 平滑：去掉 GLM 开头的提示音“嘟嘟”，保证所有入口一致
+      const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes) : bytes
+      const blob = new Blob([data], { type: mime || 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       _player = { audio, url }
@@ -100,6 +191,116 @@ export function playBytes(bytes, mime) {
       resolve(false)
     }
   })
+}
+
+// ============ WAV 平滑：正确解析块 + 去开头纯音(嘟嘟)/静音 + 淡入淡出 ============
+// 智谱 GLM-TTS 的 WAV 结构特殊：data 块前有 AIGC/LIST 元数据块（data 块标记是 AIGC 不是 data），
+// 且每段音频开头都有“嘟嘟 叮叮”纯音提示音。这里统一：①按块解析出真正的 data；②去掉开头纯音与静音；
+// ③去掉结尾静音；④淡入淡出；⑤重建为标准 WAV（丢弃元数据）。
+export function smoothWavBytes(input) {
+  try {
+    const u8 = input instanceof Uint8Array ? input : new Uint8Array(input)
+    if (u8.length < 64) return input
+    const ascii = (o, n) => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(u8[o + i]); return s }
+    if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return input
+    // 逐块解析，找到 data 块（跳过 AIGC/LIST 等元数据）
+    let dataOff = -1, dataLen = 0, rate = 0, ch = 1, bits = 16
+    let i = 12
+    while (i + 8 <= u8.length) {
+      const cid = ascii(i, 4)
+      const size = u8[i + 4] | (u8[i + 5] << 8) | (u8[i + 6] << 16) | (u8[i + 7] << 24)
+      if (cid === 'fmt ') {
+        // fmt 数据区从 i+8 起：声道数 data+2、采样率 data+4、位深 data+14
+        ch = u8[i + 10] | (u8[i + 11] << 8)
+        rate = u8[i + 12] | (u8[i + 13] << 8) | (u8[i + 14] << 16) | (u8[i + 15] << 24)
+        bits = u8[i + 22] | (u8[i + 23] << 8)
+        i += 8 + size + (size & 1)
+      } else if (cid === 'data') {
+        dataOff = i + 8; dataLen = size
+        break
+      } else {
+        i += 8 + size + (size & 1)
+      }
+      if (i >= u8.length) break
+    }
+    if (dataOff < 0 || dataLen < 8) return input
+    if (dataOff + dataLen > u8.length) return input
+    const bytesPer = bits / 8
+    if (bytesPer < 1 || !ch || !rate) return input
+    const blockAlign = ch * bytesPer
+    const frames = Math.floor(dataLen / blockAlign)
+    if (frames < 32) return input
+    const read = (fi, ci) => {
+      const o = dataOff + fi * blockAlign + ci * bytesPer
+      if (bytesPer === 2) { const v = u8[o] | (u8[o + 1] << 8); return v >= 0x8000 ? v - 0x10000 : v }
+      const v = u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16) | (u8[o + 3] << 24)
+      return v >= 0x80000000 ? v - 0x100000000 : v
+    }
+    // 每 10ms 窗口的 RMS 与过零率
+    const winSize = Math.max(1, Math.floor(rate / 100))
+    const winInfo = (w) => {
+      const s0 = w * winSize, s1 = Math.min(s0 + winSize, frames)
+      let rms = 0, zc = 0
+      for (let f = s0; f < s1; f++) {
+        let peak = 0
+        for (let c = 0; c < ch; c++) { const v = Math.abs(read(f, c)); if (v > peak) peak = v }
+        rms += peak * peak
+        if (f > s0) { const a = read(f - 1, 0), b = read(f, 0); if ((a < 0) !== (b < 0)) zc++ }
+      }
+      const n = s1 - s0
+      return { rms: Math.sqrt(rms / n), zcr: zc / n }
+    }
+    const rmsThresh = Math.max(90, 0.012 * 32767)
+    const zcrTone = 0.055
+    const maxWin = Math.floor(rate * 4 / winSize) // 最多扫 4s 的开头提示音/静音（智谱 GLM 开头提示音可达 ~2s）
+    // 开头：跳过 静音 或 纯音(嘟嘟) —— 直到遇到语音样（高过零率）
+    let start = 0
+    for (let w = 0; w < maxWin && w < Math.ceil(frames / winSize); w++) {
+      const info = winInfo(w)
+      if (info.rms < rmsThresh) { start = w * winSize + winSize; continue } // 静音
+      if (info.zcr < zcrTone) { start = w * winSize + winSize; continue } // 纯音（嘟嘟/叮叮）
+      break // 语音开始
+    }
+    // 结尾：去掉末尾静音（最多 500ms）
+    let end = frames
+    const endWin = Math.min(Math.ceil(frames / winSize), Math.floor(rate * 0.5 / winSize))
+    for (let w = Math.ceil(frames / winSize) - 1; w >= Math.ceil(frames / winSize) - endWin; w--) {
+      if (w < 0) break
+      const info = winInfo(w)
+      if (info.rms < rmsThresh) { end = w * winSize; continue }
+      break
+    }
+    if (end - start < 32) return input
+    const newFrames = end - start
+    const newDataLen = newFrames * blockAlign
+    // 重建标准 WAV（丢弃 AIGC/LIST 元数据，浏览器播放更稳）
+    const ab = new ArrayBuffer(44 + newDataLen)
+    const out = new Uint8Array(ab)
+    const ws = (o, s) => { for (let k = 0; k < s.length; k++) out[o + k] = s.charCodeAt(k) }
+    ws(0, 'RIFF'); ws(8, 'WAVE'); ws(12, 'fmt '); ws(36, 'data')
+    const dv = new DataView(ab)
+    dv.setUint32(4, 36 + newDataLen, true)
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true)
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate * blockAlign, true)
+    dv.setUint16(32, blockAlign, true); dv.setUint16(34, bits, true)
+    dv.setUint32(40, newDataLen, true)
+    const fadeFrames = Math.max(1, Math.floor(rate * 0.006))
+    for (let fi = 0; fi < newFrames; fi++) {
+      let f = 1
+      if (fi < fadeFrames) f = fi / fadeFrames
+      else if (fi > newFrames - fadeFrames - 1) f = (newFrames - 1 - fi) / fadeFrames
+      const o = 44 + fi * blockAlign
+      for (let c = 0; c < ch; c++) {
+        const v = read(start + fi, c)
+        const nv = Math.round(v * Math.max(0, Math.min(1, f)))
+        if (bytesPer === 2) { out[o + c * 2] = nv & 0xff; out[o + c * 2 + 1] = (nv >> 8) & 0xff }
+        else { out[o + c * 4] = nv & 0xff; out[o + c * 4 + 1] = (nv >> 8) & 0xff; out[o + c * 4 + 2] = (nv >> 16) & 0xff; out[o + c * 4 + 3] = (nv >> 24) & 0xff }
+      }
+    }
+    return ab
+  } catch (e) {
+    return input
+  }
 }
 
 // ============ 流式播放器：分块边到边播（解决“文字出来半天才发音”的滞后）============
@@ -139,7 +340,7 @@ export function spNext() {
     else spNext()
   }
 }
-export function spEnqueue(bytes, mime) { _sp.q.push({ bytes, mime }); spNext() }
+export function spEnqueue(bytes, mime) { _sp.q.push({ bytes: /wav/i.test(mime) ? smoothWavBytes(bytes) : bytes, mime }); spNext() }
 export function spStop() {
   _sp.q = []
   const a = _sp.audio
@@ -151,6 +352,120 @@ export function spStop() {
 }
 export function spPlaying() { return !!( _sp.audio && !_sp.audio.paused && !_sp.audio.ended) || _sp.playing }
 export function spSetCallbacks(endCb, errCb) { _sp.endCb = endCb; _sp.errCb = errCb }
+
+// ============ 无缝流式播放器（Web Audio 精确调度，采样点级无缝，零卡顿）============
+// 旧播放器每个分块单独建 Audio 元素，块间切换有加载/启动空隙 → 感觉卡顿。
+// 这里把每个分块解码成 AudioBuffer，按 ctx.currentTime 时间轴首尾精确衔接播放，像真人说话一样无缝隙。
+let _gap = { ctx: null, started: false, nextAt: 0, queue: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0 }
+// 解码串行链：decodeAudioData 是异步的，多个分块若并发解码会乱序完成，
+// 导致「后一块先开播、前一块解码完又叠加上来」（上一句没读完就响下一句）。
+// 用 promise 链把「解码+调度」严格串行化，保证永远按分块顺序无缝衔接。
+let _gapChain = Promise.resolve()
+function gapCtx() {
+  if (_gap.ctx) return _gap.ctx
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) { _gap.fallback = true; return null }
+    _gap.ctx = new AC()
+  } catch (e) { _gap.fallback = true; return null }
+  return _gap.ctx
+}
+export function gapAvailable() {
+  return !!(window.AudioContext || window.webkitAudioContext)
+}
+// 在用户手势内同步创建/恢复 AudioContext（保证 gapless 能出声；异步创建会被浏览器挂起为 suspended）
+export function gapEnsure() {
+  const ctx = gapCtx()
+  if (ctx && ctx.state === 'suspended') { try { ctx.resume().catch(() => {}) } catch (e) {} }
+  return ctx
+}
+// 首次用户手势（点击/触摸）预创建 AudioContext，之后所有朗读（含自动朗读）都能无缝出声
+export function gapInitOnGesture() {
+  if (typeof window === 'undefined') return
+  const kick = () => {
+    gapEnsure()
+    try { window.removeEventListener('pointerdown', kick); window.removeEventListener('keydown', kick) } catch (e) {}
+  }
+  try { window.addEventListener('pointerdown', kick, { once: true }); window.addEventListener('keydown', kick, { once: true }) } catch (e) {}
+}
+function gapBytes(buf) {
+  if (buf instanceof ArrayBuffer) return buf
+  if (ArrayBuffer.isView(buf)) return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  return buf
+}
+// 入队：立即并行解码（不等上一块播完），调度仍严格串行 → 后续块提前就绪，块间断流更少、首句更快
+export function gaplessEnqueue(bytes, mime) {
+  const token = _gap.token
+  const dec = gapDecode(bytes, mime)
+  _gapChain = _gapChain.then(async () => {
+    if (token !== _gap.token || _gap.stopping) return // 已停止/新一轮朗读 → 丢弃残留分块，防止叠音
+    const audioBuf = await dec
+    if (token !== _gap.token || _gap.stopping) return
+    gapStart(audioBuf)
+  }).catch(() => {})
+  return _gapChain
+}
+// 解码（并行）：WAV 先平滑去开头提示音/静音；Web Audio 不可用/自动播放被拦/解码失败 → null（跳过该块不中断）
+async function gapDecode(bytes, mime) {
+  try {
+    const ctx = gapCtx()
+    if (!ctx || _gap.fallback) { _gap.fallback = true; return null }
+    if (ctx.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
+    if (ctx.state !== 'running') { _gap.fallback = true; return null }
+    const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes) : bytes
+    return await ctx.decodeAudioData(gapBytes(data).slice(0))
+  } catch (e) {
+    return null
+  }
+}
+// 调度（串行）：按 AudioContext 时间轴首尾精确衔接，像真人说话一样无缝隙
+function gapStart(audioBuf) {
+  if (!audioBuf || _gap.stopping) return
+  const ctx = _gap.ctx
+  if (!ctx || _gap.fallback) return
+  try {
+    _gap.queue.push(audioBuf)
+    _gap.active++
+    if (!_gap.started) {
+      _gap.started = true
+      _gap.nextAt = ctx.currentTime + 0.015
+    }
+    const src = ctx.createBufferSource()
+    src.buffer = audioBuf
+    src.connect(ctx.destination)
+    src.start(_gap.nextAt)
+    _gap.nextAt += audioBuf.duration
+    src.onended = () => {
+      _gap.active--
+      if (_gap.active <= 0) _gap.queue = []
+      if (_gap.active <= 0 && _gap.endCb && !_gap.stopping) {
+        const cb = _gap.endCb; _gap.endCb = null; _gap.errCb = null
+        cb()
+      }
+    }
+  } catch (e) {
+    _gap.active = Math.max(0, _gap.active - 1)
+  }
+}
+export function gaplessStop() {
+  _gap.token++
+  _gapChain = Promise.resolve()
+  _gap.stopping = true
+  try { if (_gap.ctx) _gap.ctx.close().catch(() => {}) } catch (e) {}
+  _gap.ctx = null
+  _gap.started = false
+  _gap.nextAt = 0
+  _gap.queue = []
+  _gap.active = 0
+  _gap.endCb = null
+  _gap.errCb = null
+  _gap.stopping = false
+  _gap.fallback = false
+}
+export function gaplessPlaying() {
+  return !!(_gap.ctx && _gap.ctx.state === 'running' && _gap.active > 0)
+}
+export function gaplessSetCallbacks(endCb, errCb) { _gap.endCb = endCb; _gap.errCb = errCb }
 
 // ============ ① 智谱 GLM-TTS（超拟人·真人级）============
 export const GLM_PRESET_VOICES = [
@@ -187,6 +502,15 @@ export function gmCfg() {
     speed: clampSpeed(store.cfg.ttsRate)
   }
 }
+// 克隆音色内置显示名（智谱账号不支持改名，这里把克隆音色在应用内统一显示为中文名，直接内置、无需用户二次设置）
+const CLONE_VOICE_DISPLAY = {
+  'lixingyun_v_1787930497537': '李星云',
+  'a6d7ba90-7cd6-5ef6-9f37-d259112f8be1': '李星云',
+  '姬如雪声线_mtdxfni0': '姬如雪',
+  '18a24e59-6e8c-57bd-aeb8-6584c7a7ada2': '姬如雪',
+  'zhangruonan_mtdytfmo': '章若楠',
+  '83eac18d-fd6a-531b-9a71-67b0e6d340ee': '章若楠'
+}
 // 拉取智谱音色列表（需 Key；失败返回 null）
 export async function listGmVoices() {
   const cfg = gmCfg()
@@ -199,7 +523,11 @@ export async function listGmVoices() {
     if (!arr.length) return null
     const nameOf = {}
     GLM_PRESET_VOICES.forEach((v) => { nameOf[v.id] = v.name })
-    return arr.map((v) => ({ id: v.voice || v.voice_name, name: nameOf[v.voice_name] || v.voice_name || v.voice, emoji: '🎙️' }))
+    return arr.map((v) => ({
+      id: v.voice || v.voice_name,
+      name: nameOf[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice] || v.voice_name || v.voice,
+      emoji: '🎙️'
+    }))
   } catch (e) {
     return null
   }
@@ -210,11 +538,13 @@ export async function glmSynthesize(text, opts = {}) {
   if (!cfg) return { ok: false, msg: '未配置智谱 Key（可在设置·语音里填写，或一键复用图形增强 Key）' }
   const voice = opts.voice || cfg.voice
   const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
-  const chunks = chunkText(text, Number(opts.chunkSize) || 380)
+  const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
-  const bytesAll = []
-  for (const c of chunks) {
-    try {
+  try { beginCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', kind: 'audio' }) } catch (e) {}
+  // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
+  const { bytesAll, firstErr } = await slideSynthesize(
+    chunks,
+    async (c) => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
@@ -222,17 +552,18 @@ export async function glmSynthesize(text, opts = {}) {
       })
       if (!r.ok) {
         const e = await r.json().catch(() => ({}))
-        return { ok: false, msg: (e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status }
+        throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
-      const buf = await r.arrayBuffer()
-      bytesAll.push(buf)
-      if (opts.onChunk) { try { opts.onChunk(buf) } catch (e) {} }
-    } catch (e) {
-      return { ok: false, msg: e.message || '网络错误' }
-    }
-  }
-  if (!bytesAll.length) return { ok: false, msg: '合成失败' }
+      return await r.arrayBuffer()
+    },
+    opts.onChunk
+  )
+  if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   const total = bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll)
+  try {
+    const chars = chunks.join('').length
+    recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((chars / 1000) * getTtsPrice() * 100000) / 100000, note: chars + ' 字' })
+  } catch (e) {}
   return { ok: true, bytes: total, mime: 'audio/wav' }
 }
 function concatBuffers(buffs) {
@@ -284,11 +615,12 @@ export async function openaiSynthesize(text, opts = {}) {
   if (!cfg) return { ok: false, msg: '未配置 OpenAI 兼容 Key（设置·语音·OpenAI 兼容）' }
   const voice = opts.voice || cfg.voice
   const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
-  const chunks = chunkText(text, Number(opts.chunkSize) || 380)
+  const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
-  const bytesAll = []
-  for (const c of chunks) {
-    try {
+  // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
+  const { bytesAll, firstErr } = await slideSynthesize(
+    chunks,
+    async (c) => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
@@ -296,16 +628,13 @@ export async function openaiSynthesize(text, opts = {}) {
       })
       if (!r.ok) {
         const e = await r.json().catch(() => ({}))
-        return { ok: false, msg: (e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status }
+        throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
-      const buf = await r.arrayBuffer()
-      bytesAll.push(buf)
-      if (opts.onChunk) { try { opts.onChunk(buf) } catch (e) {} }
-    } catch (e) {
-      return { ok: false, msg: e.message || '网络错误' }
-    }
-  }
-  if (!bytesAll.length) return { ok: false, msg: '合成失败' }
+      return await r.arrayBuffer()
+    },
+    opts.onChunk
+  )
+  if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg' }
 }
 
@@ -331,7 +660,8 @@ export async function cloneCosyVoice(file, opts = {}) {
     })
     if (!r.ok) {
       const d = await r.json().catch(() => ({}))
-      return { ok: false, msg: (d && (d.message || d.error)) || 'HTTP ' + r.status }
+      const em = errMsg(d)
+      return { ok: false, msg: em || 'HTTP ' + r.status }
     }
     const d = await r.json().catch(() => ({}))
     return { ok: true, name, voice: model + ':' + name, data: d }
@@ -453,6 +783,35 @@ export async function prepareCloneAudio(file, opts = {}) {
   }
 }
 
+// 智谱 GLM-ASR：把参考音频转成文字（克隆时传给 text，避免克隆音色“复读参考音频开头内容”）
+async function zhipuAsr(file, key) {
+  try {
+    const bytes = await file.arrayBuffer()
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: file.type || 'audio/wav' }), 'ref_voice.wav')
+    form.append('model', 'glm-asr')
+    form.append('language', 'zh')
+    const r = await fetch('https://open.bigmodel.cn/api/paas/v4/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + key },
+      body: form
+    })
+    if (!r.ok) return ''
+    const d = await r.json().catch(() => ({}))
+    return ((d.segments || []).map((s) => s.text).join('') || '').trim()
+  } catch (e) {
+    return ''
+  }
+}
+
+// 统一解析各家 API 错误（兼容 {error:{message,code}} / {error:'...'} / {message:'...'}）
+function errMsg(d) {
+  if (!d) return ''
+  if (d.error && typeof d.error === 'object') return d.error.message || d.error.code || ''
+  if (typeof d.error === 'string') return d.error
+  return d.message || ''
+}
+
 // ============ 智谱 GLM-TTS-Clone 音色克隆（用现有智谱 Key，3-30 秒参考音频即可）============
 export async function cloneZhipuVoice(file, opts = {}) {
   const gm = store.cfg.ttsGm || {}
@@ -464,14 +823,29 @@ export async function cloneZhipuVoice(file, opts = {}) {
   const base = String(opts.url || 'https://open.bigmodel.cn/api/paas/v4').trim().replace(/\/+$/, '').replace(/\/audio\/speech$/, '')
   const name = String(opts.name || ('pet_voice_' + Date.now())).trim().slice(0, 30)
   try {
-    // 1) 上传音频 → file_id（purpose=voice-clone-input）
+    try { beginCost({ feature: 'clone', provider: 'glm', model: 'glm-tts-clone', kind: 'audio' }) } catch (e) {}
+    // 1) 上传音频（purpose=voice-clone-input）与参考音频文字转写【并行】执行，上传不会被转写拖住
+    let text = String(opts.text || '').trim()
     const form = new FormData()
     form.append('purpose', 'voice-clone-input')
     form.append('file', file)
-    const up = await fetch(base + '/files', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form })
+    const upPromise = fetch(base + '/files', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form })
+    const asrPromise = text ? Promise.resolve(text) : zhipuAsr(file, key)
+    let up = await upPromise
+    // 上传失败自动重试 1 次（网络抖动）
     if (!up.ok) {
-      const d = await up.json().catch(() => ({}))
-      return { ok: false, msg: '音频上传失败：' + ((d && (d.message || d.error)) || 'HTTP ' + up.status) }
+      const form2 = new FormData()
+      form2.append('purpose', 'voice-clone-input')
+      form2.append('file', file)
+      await new Promise((r) => setTimeout(r, 1200))
+      up = await fetch(base + '/files', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form2 }).catch(() => null)
+    }
+    const asrText = await asrPromise
+    if (text || asrText) text = String(asrText || text || '').trim()
+    if (!up || !up.ok) {
+      const d = up ? await up.json().catch(() => ({})) : {}
+      const em = errMsg(d)
+      return { ok: false, msg: '音频上传失败（已重试 1 次）：' + (em || (up ? 'HTTP ' + up.status : '网络错误')) + '。请检查网络与 API Key，或换 CosyVoice2 后端重试。' }
     }
     const ud = await up.json().catch(() => ({}))
     const fileId = (ud && (ud.id || (ud.data && ud.data.id))) || ''
@@ -479,8 +853,11 @@ export async function cloneZhipuVoice(file, opts = {}) {
     // 2) 克隆音色（3 秒参考音频即可；返回音色 ID 供 GLM-TTS 直接合成）
     // 注意：智谱要求 input（试听音频文本）不能为空，缺了会报 1214 错误
     const input = String(opts.input || '你好，我是你的行测智能助教，很高兴认识你，我会一直陪伴你高效备考。').slice(0, 200)
-    const body = { model: 'glm-tts-clone', voice_name: name, file_id: fileId, input, request_id: 'pet_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) }
-    if (opts.text) body.text = String(opts.text).slice(0, 200)
+    // text = 参考音频的文字转录（已在并行阶段得到），避免克隆音色“复读参考音频开头内容（英文提示语等）”
+    // voice_name 必须唯一：智谱拒绝重名（报 1214 音色名称已存在），这里加时间戳后缀保证不冲突（显示名仍用 name）
+    const voiceName = name + '_' + Date.now().toString(36)
+    const body = { model: 'glm-tts-clone', voice_name: voiceName, file_id: fileId, input, request_id: 'pet_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) }
+    if (text) body.text = String(text).slice(0, 200)
     const cl = await fetch(base + '/voice/clone', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
@@ -488,12 +865,14 @@ export async function cloneZhipuVoice(file, opts = {}) {
     })
     if (!cl.ok) {
       const d = await cl.json().catch(() => ({}))
-      return { ok: false, msg: '音色克隆失败：' + ((d && (d.message || d.error)) || 'HTTP ' + cl.status) }
+      const em = errMsg(d)
+      return { ok: false, msg: '音色克隆失败：' + (em || 'HTTP ' + cl.status) }
     }
     const cd = await cl.json().catch(() => ({}))
     const d1 = cd && cd.data ? cd.data : cd
     const voiceId = String((cd && (cd.id || cd.voice || cd.voice_id)) || (d1 && (d1.id || d1.voice || d1.voice_id)) || '').trim()
     if (!voiceId) return { ok: false, msg: '克隆未返回音色 ID' }
+    try { recordCost({ feature: 'clone', provider: 'glm', model: 'glm-tts-clone', cost: getCloneFee(), note: '音色克隆：' + name }) } catch (e) {}
     return { ok: true, name, voice: voiceId, preview: String((cd && (cd.preview_audio || cd.preview_url)) || (d1 && (d1.preview_audio || d1.preview_url)) || '') }
   } catch (err) {
     return { ok: false, msg: err.message || '网络错误' }
@@ -645,6 +1024,8 @@ export function sysSpeaking() {
 // speakPro(text, { voice, rate, pitch, speed, onEnd, onError }) —— 按 store.cfg.ttsMode 分发
 export async function speakPro(text, opts = {}) {
   stopSpeakPro()
+  gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
+  gapInitOnGesture()
   const mode = store.cfg.ttsMode || 'glm'
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
@@ -652,7 +1033,7 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 120, onChunk: (buf) => spEnqueue(buf, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -665,7 +1046,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 120, onChunk: (buf) => spEnqueue(buf, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)
@@ -695,6 +1076,8 @@ function streamFinish(r, opts) {
       if (opts.onEnd) opts.onEnd()
       resolve({ ok })
     }
+    // 同时挂 Web Audio 与旧分块播放器的收尾回调：实际由“真正出声的那套”触发（done 防重入）
+    if (gapAvailable()) gaplessSetCallbacks(() => finish(true), () => finish(false))
     spSetCallbacks(() => finish(true), () => finish(false))
   })
 }
@@ -712,9 +1095,11 @@ async function finishSpeak(r, opts) {
 export function stopSpeakPro() {
   stopPlayback()
   spStop()
+  gaplessStop()
   sysStop()
 }
 export function speakingPro() {
-  return playing() || spPlaying() || sysSpeaking()
+  return playing() || spPlaying() || gaplessPlaying() || sysSpeaking()
 }
+
 

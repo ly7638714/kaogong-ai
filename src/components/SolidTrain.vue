@@ -17,6 +17,7 @@ import { parseQuiz } from '../utils/quiz'
 import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { addPoints as petAddPoints } from '../utils/pet'
+import { store } from '../store'
 
 const emit = defineEmits(['close', 'send-question'])
 
@@ -28,6 +29,13 @@ const is2d = ref(false)
 const wireframe = ref(false)
 const autoRotate = ref(true)
 const quiz = ref(null)
+// 立体训练生成的题也支持萌宠「读题」
+watch(quiz, (qz) => {
+  if (!qz) return
+  const opts = (qz.opts || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String((o && (o.text || o.t)) || o || '').replace(/<[^>]+>/g, ' ')).join('。')
+  store.readCtx = { type: 'solid', title: '立体训练·' + (qz.type || ''), text: (String(qz.title || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '')).slice(0, 1200) }
+  store.curQ = { plate: '判断推理', kind: '立体训练', stem: qz.title, options: (qz.opts || []).map((o) => ({ t: (o && (o.text || o.t)) || o })), answer: qz.answer || '' }
+})
 const picked = ref('')
 const aiQuiz = ref(null)
 const aiBusy = ref(false)

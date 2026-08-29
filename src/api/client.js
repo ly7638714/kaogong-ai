@@ -1,7 +1,11 @@
 /* global AbortSignal */
 // 底层 API 调用：双模型路由、鉴权头、流式/单次对话、AI 整理
 import { store } from '../store'
+import { recordCost, beginCost } from '../utils/costTrack'
 
+// 花费标注：调用方可在发起 AI 请求前 setCostCtx('pet'|'exam'|...) 标注功能归属（下一条记录消费后自动清空）
+let costCtx = ''
+export function setCostCtx(name) { costCtx = name || '' }
 export function supportsVision(c) {
   c = c || store.cfg.vision
   const m = (c.model || '').toLowerCase()
@@ -66,6 +70,10 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
     }
   }
   let _resp
+  const _t0 = Date.now()
+  const _hasImg = JSON.stringify(messages).includes('image_url')
+  const _feat = costCtx || (_hasImg || c === store.cfg.vision ? 'vision' : 'chat')
+    try { beginCost({ feature: _feat, provider: c.prov, model: c.model, kind: _hasImg ? 'img' : 'text' }) } catch (e) {}
   try {
     _resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: _sig })
   } catch (e) {
@@ -132,6 +140,10 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
     throw new Error('模型未返回任何内容，请重试。')
   }
   if (finish === 'length') full += '\n\n> ⚠️ 内容已达单次输出上限被截断，可继续追问剩余部分。'
+  try {
+    costCtx = ''
+    recordCost({ feature: _feat, provider: c.prov, model: c.model, kind: _hasImg ? 'img' : 'text', inText: JSON.stringify(messages), outText: full + think, sec: (Date.now() - _t0) / 1000 })
+  } catch (e) {}
   return full
 }
 
@@ -159,6 +171,10 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
       else { onAbort = () => ctrl.abort(); signal.addEventListener('abort', onAbort, { once: true }) }
     }
     try {
+      const t0 = Date.now()
+      const hasImg0 = JSON.stringify(messages).includes('image_url')
+      const feat0 = costCtx || (hasImg0 || c === store.cfg.vision ? 'vision' : 'chat')
+      try { beginCost({ feature: feat0, provider: c.prov, model: c.model, kind: hasImg0 ? 'img' : 'text' }) } catch (e) {}
       const resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: sig })
       clearTimeout(timer)
       if (onAbort) signal.removeEventListener('abort', onAbort)
@@ -171,6 +187,19 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
       const d = await resp.json()
       const m = d.choices?.[0]?.message || {}
       const t = (m.content || '').trim()
+      try {
+        const u = d.usage
+        costCtx = ''
+        recordCost({
+          feature: feat0, provider: c.prov, model: c.model, kind: hasImg0 ? 'img' : 'text',
+          inTokens: u && u.prompt_tokens != null ? u.prompt_tokens : null,
+          outTokens: u && u.completion_tokens != null ? u.completion_tokens : null,
+          reasonTokens: u && u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens != null ? u.completion_tokens_details.reasoning_tokens : 0,
+          inText: JSON.stringify(messages), outText: t,
+          exact: !!(u && u.prompt_tokens != null),
+          sec: (Date.now() - t0) / 1000
+        })
+      } catch (e) {}
       if (t) return t
       lastErr = new Error('模型返回为空，已自动重试')
     } catch (e) {

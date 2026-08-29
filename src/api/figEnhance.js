@@ -2,6 +2,7 @@
 // 辅助理解 图形推理 / 数量关系几何 / 资料分析图表 类题目。
 // 完全独立于上方文字/视觉模型：不配置不影响任何现有功能。
 import { store } from '../store'
+import { recordCost, beginCost } from '../utils/costTrack'
 
 export const FIG_PROVIDERS = {
   // —— 完全免费（本地离线，无需任何 Key）——
@@ -69,6 +70,21 @@ SVG 要求：
 6. 如果是表格/图表，用 <rect> 画单元格边框 + <text> 写字（不强制标注）
 7. 禁止使用 <image>、<script>、<foreignObject>、style 属性、on* 事件属性`
 
+// 资料分析专用：复刻材料（文字→结构化、表格→表、图→图）+ 标注每个问题数据在材料中的位置
+const FIG_PROMPT_ZL = `你是公考行测「资料分析材料复刻专家」。请仔细看这张截图（资料分析的题目截图：可能是纯文字材料、统计表格、柱状/折线/饼图，或文字+表格+图形混合材料），把【材料本身】用 SVG 精准复刻出来，并在图上【标注每个问题用到的数据位置】帮助考生一眼看懂"数据在哪里"。
+
+只输出一个 JSON，不要输出 JSON 以外的任何内容：
+{"type":"文字材料|表格|图表|混合","summary":"一句话概括这份材料（时间范围+核心指标）","tips":"读这份材料/找数据的要点","svg":"<svg ...>...</svg>"}
+
+SVG 要求：
+1. viewBox="0 0 620 高度自定"，先画 <rect width="620" height="H" fill="#ffffff"/> 垫白底；画布高度按内容调整，内容别裁切
+2. 【文字材料】把每一段整理成清晰的"分段块"：用 <rect> 画段落背景 + <text> 写出关键句（时间/主体/指标/数字），段落之间留白；不要逐字抄长文，保留所有关键数字与关系词（同比增长/其中/占比/比上年/累计等）
+3. 【表格材料】用 <rect> 画单元格边框还原表格（表头加深色底、行/列清楚、保留单位与合计行），<text> 写字
+4. 【图形材料】用 <rect>/<line>/<path> 还原柱状/折线/饼图，标出坐标轴、图例、数值
+5. 【数据位置标注（核心·绝不遮挡原信息）】对截图中出现的每一道问题（题干里可能有 1-N 道题，如"第1题…第2题…"或材料下方的问题），用 ①②③… 圆圈标注——但圆圈必须放在该数据旁的【空白边距处/行首外侧】，再用一根细引线（<line stroke="#ef4444" stroke-width="1"/>）从圆圈指向该数据，【绝不可把圆圈或色块盖在文字/数字上】；需要高亮时只用细边框（<rect stroke="#ef4444" stroke-width="1.5" fill="none"/>）圈出该数据，不用填充色盖住文字。图下方用 <text fill="#111" font-size="13"> 写一行图例："①=第1题：xxx数据（第X段/第X行第X列/图中X点）"；若截图没有具体题目，则用①②③标注材料里最关键的 3-4 处数据并说明其含义。整个 SVG 必须保证原图所有文字/数字完整可读，任何标注都不得遮住、压住、覆盖原有信息
+6. 文字用 <text fill="#111111" font-size="13">，中文直接写；行距拉开、排版整洁美观
+7. 禁止使用 <image>、<script>、<foreignObject>、style 属性、on* 事件属性`
+
 // 容错提取 JSON（去 markdown 围栏，失败再试数组）
 function extractJson(raw) {
   let s = String(raw || '').replace(/```(?:json)?/gi, '').trim()
@@ -120,6 +136,8 @@ export async function readQuestionFromImage(dataUrl, questionText = '') {
   const h = { 'Content-Type': 'application/json' }
   if (c.key) h['Authorization'] = 'Bearer ' + c.key
   const body = { model: c.model, messages: [{ role: 'user', content }], max_tokens: 2400, stream: false, temperature: 0.2 }
+  const _t0 = Date.now()
+  try { beginCost({ feature: 'fig', provider: c.prov, model: c.model, kind: 'img' }) } catch (e) {}
   const resp = await fetch(c.url, { method: 'POST', headers: h, body: JSON.stringify(body) })
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}))
@@ -128,6 +146,10 @@ export async function readQuestionFromImage(dataUrl, questionText = '') {
   const d = await resp.json()
   const text = (d.choices?.[0]?.message?.content || '').trim()
   if (!text) return { ok: false, err: '模型无返回' }
+  try {
+    const u = d.usage
+    recordCost({ feature: 'fig', provider: c.prov, model: c.model, kind: 'img', inTokens: u && u.prompt_tokens != null ? u.prompt_tokens : null, outTokens: u && u.completion_tokens != null ? u.completion_tokens : null, inText: JSON.stringify(content), outText: text, exact: !!(u && u.prompt_tokens != null), sec: (Date.now() - _t0) / 1000, cost: LOCAL_PROVS.includes(c.prov) ? 0 : undefined })
+  } catch (e) {}
   const data = extractJson(text)
   return {
     ok: !!(data && data.text),
@@ -138,16 +160,19 @@ export async function readQuestionFromImage(dataUrl, questionText = '') {
 }
 
 // 主入口：识别并复刻截图 → { ok, type, summary, tips, svg }
-export async function analyzeFigImage(dataUrl, questionText = '') {
+export async function analyzeFigImage(dataUrl, questionText = '', plate = '') {
   const c = figCfg()
   if (!c) return null
+  const prompt = plate === '资料分析' ? FIG_PROMPT_ZL : FIG_PROMPT
   const content = [
-    { type: 'text', text: FIG_PROMPT + (questionText ? '\n\n用户问题：' + String(questionText).slice(0, 400) : '') },
+    { type: 'text', text: prompt + (questionText ? '\n\n用户问题：' + String(questionText).slice(0, 400) : '') },
     { type: 'image_url', image_url: { url: dataUrl } }
   ]
   const h = { 'Content-Type': 'application/json' }
   if (c.key) h['Authorization'] = 'Bearer ' + c.key
   const body = { model: c.model, messages: [{ role: 'user', content }], max_tokens: 3200, stream: false, temperature: 0.2 }
+  const _t0 = Date.now()
+  try { beginCost({ feature: 'fig', provider: c.prov, model: c.model, kind: 'img' }) } catch (e) {}
   const resp = await fetch(c.url, { method: 'POST', headers: h, body: JSON.stringify(body) })
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}))
@@ -156,6 +181,10 @@ export async function analyzeFigImage(dataUrl, questionText = '') {
   const d = await resp.json()
   const text = (d.choices?.[0]?.message?.content || '').trim()
   if (!text) return { ok: false, err: '模型无返回' }
+  try {
+    const u = d.usage
+    recordCost({ feature: 'fig', provider: c.prov, model: c.model, kind: 'img', inTokens: u && u.prompt_tokens != null ? u.prompt_tokens : null, outTokens: u && u.completion_tokens != null ? u.completion_tokens : null, inText: JSON.stringify(content), outText: text, exact: !!(u && u.prompt_tokens != null), sec: (Date.now() - _t0) / 1000, cost: LOCAL_PROVS.includes(c.prov) ? 0 : undefined })
+  } catch (e) {}
   const data = extractJson(text)
   const svg = data && data.svg ? sanitizeSvg(String(data.svg)) : ''
   return {

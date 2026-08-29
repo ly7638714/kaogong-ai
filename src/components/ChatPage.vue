@@ -24,6 +24,7 @@ import ExamPanel from './ExamPanel.vue'
 import { addPoints as petAddPoints } from '../utils/pet'
 
 import SolidTrain from './SolidTrain.vue'
+import DataTrain from './DataTrain.vue'
 const toolsCollapsed = ref(false)
 try { toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
 function toggleTools() { toolsCollapsed.value = !toolsCollapsed.value; try { localStorage.setItem('xc_chat_tools', toolsCollapsed.value ? '1' : '0') } catch (e) {} }
@@ -71,15 +72,17 @@ try {
 const blStyle = computed(() => {
   if (!blPos.value) return {}
   return blPos.value.left != null
-    ? { left: blPos.value.left + 'px', top: blPos.value.top + 'px' }
-    : { right: blPos.value.right + 'px', bottom: blPos.value.bottom + 'px' }
+    ? { left: blPos.value.left + 'px', top: blPos.value.top + 'px', right: 'auto', bottom: 'auto' }
+    : { right: blPos.value.right + 'px', bottom: blPos.value.bottom + 'px', left: 'auto', top: 'auto' }
 })
 function onBlDown(e) {
   e.preventDefault()
-  const r = e.currentTarget.getBoundingClientRect()
+  const btn = e.currentTarget
+  const r = btn.getBoundingClientRect()
   const sx = e.clientX, sy = e.clientY
   const ox = sx - r.left, oy = sy - r.top
   let moved = false
+  try { btn.setPointerCapture(e.pointerId) } catch (_) {}
   const onMove = (ev) => {
     const x = ev.clientX - ox, y = ev.clientY - oy
     if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true
@@ -89,6 +92,7 @@ function onBlDown(e) {
   const onUp = () => {
     window.removeEventListener('pointermove', onMove, true)
     window.removeEventListener('pointerup', onUp, true)
+    try { btn.releasePointerCapture(e.pointerId) } catch (_) {}
     if (blPos.value) { try { localStorage.setItem('xc_bl_pos', JSON.stringify(blPos.value)) } catch (_) {} }
     if (!moved) backToLatest()
   }
@@ -132,6 +136,13 @@ function addMsg(m) {
   if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped && !m.quiz) {
     const quiz = parseQuiz(m.content)
     if (quiz) m.quiz = quiz
+  }
+  // 对话里 AI 出的选择题也支持萌宠「读题」
+  if (m.role === 'assistant' && m.quiz) {
+    const qz = m.quiz
+    const opts = (qz.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || o || '').replace(/<[^>]+>/g, ' ')).join('。')
+    store.readCtx = { type: 'chat', title: '对话出题·' + (detectBanKuai(String(qz.stem || '')) || '综合'), text: (String(qz.stem || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '')).slice(0, 1200) }
+    store.curQ = { plate: detectBanKuai(String(qz.stem || '')) || '综合', kind: '对话出题', stem: qz.stem, options: qz.options || [], answer: qz.answer || '', explain: qz.explain || '' }
   }
   saveMsgs()
   scroll()
@@ -324,7 +335,7 @@ async function runChat() {
   }
   let sys = buildSys()
   if (curFigRead) {
-    sys += '\n【重要】用户刚发了一张图片，图片内容已由辅助视觉模型提取为文字（见用户消息中【图片内容】标记），请直接基于该内容作答；若提取不完整可请用户补充，不要假装没收到图。'
+    sys += '\n【重要·图片已读取，直接作答】用户刚发了一张图片，图片数据已由专业 OCR 完整提取为文字（见用户消息中【图片内容】标记），数据准确可信。请【直接据此作答】：不要讨论自己能否看图、是否纯文本模型、OCR 是否完整，不要复述提取过程，不要自我怀疑——直接给出答案与解析即可；若确有数据缺失，再请用户补充。'
   } else if (curIsImg && !supportsVision(replyC)) {
     sys += '\n【重要】用户发了一张图片，但当前模型看不到图片内容。请礼貌地请用户用文字描述题目/图形关键信息，或提示到设置配置视觉模型；不要假装看到了图片。'
   }
@@ -434,8 +445,10 @@ async function runChat() {
 // 图形增强是否应自动复刻：仅当图片含图形/表格（或提问文字带图相关词）才触发，避免对文字截图/纯文字题浪费 token
 function shouldFigEnhance(q, imgType) {
   if (imgType === 'graph') return true
-  if (imgType === 'text') return false
   if (!q) return false
+  // 资料分析截图（哪怕纯文字材料）也要复刻+标注数据位置：材料就是"题"，必须可视化
+  if (detectBanKuai(String(q)) === '资料分析') return true
+  if (imgType === 'text') return false
   return /图形|图推|几何|表格|图表|柱状|折线|饼图|对称|展开图|立体|坐标|示意图|方格|宫格|一笔画/.test(q)
 }
 // 图推解析「补画标注图」：主回复没带 SVG 时，单独请求模型只输出一张带标注的原图
@@ -474,6 +487,44 @@ function figZoom(f) {
   if (f && f.svg) figView.value = f
 }
 function closeFigZoom() { figView.value = null }
+// 保存复刻图：SVG → PNG（canvas 光栅化，白底），失败回退下载 .svg
+function figSave(f) {
+  if (!f || !f.svg) return
+  try {
+    const raw = String(f.svg).trim()
+    const xml = new globalThis.XMLSerializer().serializeToString(new globalThis.DOMParser().parseFromString(raw, 'image/svg+xml'))
+    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    let w = 900, h = 600
+    const vb = raw.match(/viewBox\s*=\s*["']([\d.-]+)[\s,]+([\d.-]+)[\s,]+([\d.-]+)[\s,]+([\d.-]+)["']/)
+    if (vb) { w = Math.round(Number(vb[3])); h = Math.round(Number(vb[4])) }
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas')
+        cv.width = w; cv.height = h
+        const ctx = cv.getContext('2d')
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        cv.toBlob((b) => {
+          if (b) downloadBlob(b, '复刻图.png')
+          else downloadBlob(blob, '复刻图.svg')
+          URL.revokeObjectURL(url)
+        }, 'image/png')
+      } catch (e) { downloadBlob(blob, '复刻图.svg'); URL.revokeObjectURL(url) }
+    }
+    img.onerror = () => { downloadBlob(blob, '复刻图.svg'); URL.revokeObjectURL(url) }
+    img.src = url
+  } catch (e) { showToast('保存失败：' + e.message, 'error') }
+}
+function downloadBlob(b, name) {
+  const u = URL.createObjectURL(b)
+  const a = document.createElement('a')
+  a.href = u; a.download = name
+  document.body.appendChild(a)
+  a.click()
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(u) }, 500)
+}
 async function maybeFigEnhance(msg, imgs, q) {
   const c = figCfg()
   if (!c || !imgs || !imgs.length) return
@@ -483,7 +534,7 @@ async function maybeFigEnhance(msg, imgs, q) {
   scroll()
   try {
     const small = await compressImage(raw, 900, 0.75)
-    const res = await analyzeFigImage(small, q)
+    const res = await analyzeFigImage(small, q, detectBanKuai(String(q)))
     if (res && res.ok) {
       msg.fig = { ok: true, type: res.type, summary: res.summary, rule: res.rule || '', tips: res.tips, svg: res.svg }
     } else {
@@ -596,6 +647,10 @@ function pickQuiz(m, k) {
   if (!m || !m.quiz || m.quiz.picked) return
   m.quiz.picked = k
   m.quiz.correct = k === m.quiz.answer
+  const qz = m.quiz
+  const opts = (qz.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || o || '').replace(/<[^>]+>/g, ' ')).join('。')
+  store.readCtx = { type: 'chat', title: '对话出题·' + (detectBanKuai(String(qz.stem || '')) || '综合'), text: (String(qz.stem || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '') + '你的答案：' + String(k) + '；正确答案：' + String(qz.answer || '') + '。' + (qz.explain ? '解析：' + String(qz.explain).replace(/<[^>]+>/g, ' ').trim() : '')).slice(0, 1400) }
+  store.curQ = { plate: detectBanKuai(String(qz.stem || '')) || '综合', kind: '对话出题', stem: qz.stem, options: qz.options || [], answer: qz.answer || '', explain: qz.explain || '', your: k, ok: qz.correct }
   saveMsgs()
   if (m.quiz.correct) showToast('✅ 回答正确，看解析巩固', 'success')
   else showToast('❌ 选错了，正确答案是 ' + m.quiz.answer, 'error')
@@ -633,11 +688,13 @@ function openExam(src) {
   examPanelSrc.value = src || 'ai'
   examShow.value = true
   store.examOpen = true
+  store.uiCtx.panel = 'exam'
   navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : (src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : '模拟组卷') })
 }
 function closeExam() {
   examShow.value = false
   store.examOpen = false
+  store.uiCtx.panel = null
   examPaperData.value = null
   navBack()
 }
@@ -650,18 +707,32 @@ function openPaperData(paper) {
 }
 function openSolid() {
   solidShow.value = true
+  store.uiCtx.panel = 'solid'
   navOpen({ id: 'solid', label: '立体图推' })
 }
 function closeSolid() {
   solidShow.value = false
+  store.uiCtx.panel = null
+  navBack()
+}
+function openDataTrain() {
+  dtShow.value = true
+  store.uiCtx.panel = 'data'
+  navOpen({ id: 'data', label: '资料速算' })
+}
+function closeDataTrain() {
+  dtShow.value = false
+  store.uiCtx.panel = null
   navBack()
 }
 function onNavBack(e) {
   const ids = (e && e.detail) || []
-  if (ids.includes('exam')) { examShow.value = false; store.examOpen = false }
-  if (ids.includes('solid')) solidShow.value = false
+  if (ids.includes('exam')) { examShow.value = false; store.examOpen = false; store.uiCtx.panel = null }
+  if (ids.includes('solid')) { solidShow.value = false; store.uiCtx.panel = null }
+  if (ids.includes('data')) { dtShow.value = false; store.uiCtx.panel = null }
 }
 const solidShow = ref(false) // 立体图推训练
+const dtShow = ref(false) // 资料分析四层能力训练
 const bkPick = ref('判断推理')
 const bkOrigin = ref({ q: '', imgs: [], msgIdx: -1 })
 const BK_OPTIONS = [
@@ -907,8 +978,10 @@ function toggleSpeak(ev) {
     return
   }
   const c = msg.cloneNode(true)
-  const tb = c.querySelector('.think-box')
-  if (tb) tb.remove()
+  // 只朗读「回复正文」：移除功能按钮行 / 元信息标签（AI批改·时间·板块）/ 折叠按钮 / 图形头部与加载失败提示 / 思考过程
+  ;['.msg-actions', '.ans-tag', '.fold-btn', '.fig-hd', '.fig-busy', '.fig-fail', '.quiz-acts', '.think-box', '.code-copy'].forEach((sel) => {
+    c.querySelectorAll(sel).forEach((el) => el.remove())
+  })
   speak(c.innerText || '', {
     scene: store.cfg.ttsScene,
     rate: store.cfg.ttsRate,
@@ -1046,6 +1119,41 @@ function viewImg(src) {
 function closeImg() {
   imgView.value = null
 }
+// ===== 回复内 SVG 图 / ECharts 图表 统一灯箱（放大 / 保存 / 关闭）=====
+const svgBox = ref(null) // { type:'svg'|'chart', html }
+function openSvgBox(type, html) {
+  if (!html) return
+  svgBox.value = { type, html }
+}
+function closeSvgBox() { svgBox.value = null }
+function saveSvgBox() {
+  const b = svgBox.value
+  if (!b) return
+  if (b.type === 'svg') {
+    figSave({ svg: b.html }) // 复用复刻图保存：SVG→PNG
+  } else {
+    // ECharts 图表：用 echarts 实例导出 PNG
+    try {
+      const el = document.querySelector('.gen-chart[data-echarts]')
+      const inst = el && window.echarts ? window.echarts.getInstanceByDom(el) : null
+      if (inst && inst.getDataURL) {
+        const a = document.createElement('a')
+        a.href = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' })
+        a.download = '统计图.png'
+        document.body.appendChild(a); a.click(); a.remove()
+        return
+      }
+    } catch (e) {}
+    showToast('该图表暂不支持保存（可截图保存）', 'info')
+  }
+}
+// 点击消息里的 SVG / ECharts → 打开灯箱（内容为 v-html，用事件委托）
+function onMsgFigClick(ev) {
+  const svg = ev.target && ev.target.closest ? ev.target.closest('.gen-svg svg') : null
+  const chart = ev.target && ev.target.closest ? ev.target.closest('.gen-chart') : null
+  if (svg) { openSvgBox('svg', svg.outerHTML); return }
+  if (chart && chart.getAttribute('data-echarts')) { openSvgBox('chart', chart.outerHTML) }
+}
 function downloadImg() {
   const src = imgView.value
   if (!src) return
@@ -1156,6 +1264,8 @@ async function copyFullMsg() {
 }
 
 onMounted(() => { restoreDraft(); window.addEventListener('xc-ask', onAsk) })
+onMounted(() => document.addEventListener('click', onMsgFigClick))
+onUnmounted(() => document.removeEventListener('click', onMsgFigClick))
 onMounted(() => window.addEventListener('xc-open-exam', () => openExam('ai')))
 onMounted(() => window.addEventListener('xc-open-paper-data', (e) => openPaperData(e.detail)))
 onMounted(() => document.addEventListener('click', (e) => { if (modeOpen.value && !(e.target && e.target.closest && e.target.closest('.mode-pick'))) modeOpen.value = false }))
@@ -1262,6 +1372,7 @@ defineEmits(['export-review'])
               @click="store.cfg.examMode = !store.cfg.examMode; saveCfg()"
             >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
             <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
+            <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
             <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
             <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
           </div>
@@ -1362,9 +1473,13 @@ defineEmits(['export-review'])
                 <div v-if="m.fig && m.fig.ok" class="fig-card">
                   <div class="fig-hd">
                     <span>🖼 AI 图形复刻 · {{ m.fig.type }}</span>
+                    <div style="display:flex;gap:6px;align-items:center">
                     <button class="btn btn-gh" @click="figZoom(m.fig)">⛶ 放大</button>
+                    <button class="btn btn-gh" @click="figSave(m.fig)">💾 保存</button>
+                    <button class="btn btn-gh" title="收起这张复刻图" @click="m.figHide = !m.figHide">{{ m.figHide ? '🔽 展开' : '🔼 收起' }}</button>
                   </div>
-                  <div class="fig-svg" @click="figZoom(m.fig)" v-html="m.fig.svg"></div>
+                  </div>
+                  <div v-show="!m.figHide" class="fig-svg" @click="figZoom(m.fig)" v-html="m.fig.svg"></div>
                   <div v-if="m.fig.summary" class="fig-summary">📝 {{ m.fig.summary }}</div>
                   <div v-if="m.fig.rule" class="fig-rule">📐 规律：{{ m.fig.rule }}</div>
                   <div v-if="m.fig.tips" class="fig-tips">💡 {{ m.fig.tips }}</div>
@@ -1408,8 +1523,10 @@ defineEmits(['export-review'])
             <span class="skel" style="width: 55%; height: 14px"></span>
           </div>
         </div>
-        <!-- 回到最新：向上滚动后显示，可拖拽到不挡按钮的位置 -->
-        <button v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
+        <!-- 回到最新：全局悬浮按钮（Teleport 到 body，脱离滚动容器），点击回最新、可拖到页面任意位置并记忆 -->
+        <Teleport to="body">
+          <button v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
+        </Teleport>
       </div>
       <div v-if="imgs.length" class="img-strip">
         <div v-for="(im, i) in imgs" :key="i" class="img-thumb">
@@ -1517,11 +1634,15 @@ defineEmits(['export-review'])
     </div>
   </div>
 
-  <!-- 图形增强放大弹窗 -->
-  <div v-if="figView" class="img-view" @click.self="closeFigZoom()">
-    <div class="iv-body fig-zoom" v-html="figView.svg"></div>
+  <!-- 回复内 SVG / ECharts 统一灯箱 -->
+  <div v-if="svgBox" class="img-view" @click.self="closeSvgBox()">
+    <div v-if="svgBox.type === 'svg'" class="iv-body fig-zoom" v-html="svgBox.html"></div>
+    <div v-else class="iv-body fig-zoom">
+      <div v-html="svgBox.html"></div>
+    </div>
     <div class="iv-bar">
-      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeFigZoom()">✕ 关闭</button>
+      <button type="button" class="iv-btn" @click.stop.prevent="saveSvgBox()">💾 保存图片</button>
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeSvgBox()">✕ 关闭</button>
     </div>
   </div>
 
@@ -1529,9 +1650,11 @@ defineEmits(['export-review'])
   <div v-if="figView" class="img-view" @click.self="closeFigZoom()">
     <div class="iv-body fig-zoom" v-html="figView.svg"></div>
     <div class="iv-bar">
+      <button type="button" class="iv-btn" @click.stop.prevent="figSave(figView)">💾 保存图片</button>
       <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeFigZoom()">✕ 关闭</button>
     </div>
   </div>
+
   <!-- 存错题板块选择器 -->
   <div v-if="bkShow" class="img-view bk-sheet">
     <div class="bk-sheet-card">
@@ -1555,4 +1678,5 @@ defineEmits(['export-review'])
   <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" @close="closeExam" />
   
   <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
+  <DataTrain v-if="dtShow" @close="closeDataTrain" @send-question="onSolidQuestion" />
 </template>

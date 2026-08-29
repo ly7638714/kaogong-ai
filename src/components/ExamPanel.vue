@@ -9,6 +9,10 @@ import { renderMd } from '../utils/renderMd'
 import { genTutuQuestion } from '../utils/tutuGen'
 import { petAnalyzeCurrent } from '../utils/pet'
 import { verifyTruthTable } from '../utils/logicVerify'
+import { localQuizVerify } from '../utils/quizVerify'
+import { plateChecks, plateAiHint, plateLearn } from '../utils/quizVerifyProfiles'
+import { recordGenLog, genLogHint } from '../utils/quizLog'
+import { figCfg } from '../api/figEnhance'
 import { mountCharts } from '../utils/chartMount'
 import { diffCurve } from '../api/professor'
 
@@ -165,7 +169,7 @@ const SUB_VARIANTS = {
 
 // ===== 状态 =====
 const templateId = ref('gk_ds')
-const modules = ref((TEMPLATES.find((t) => t.id === 'gk_ds') || TEMPLATES[0]).modules.map((m) => ({ subject: m.subject, count: m.count, refMin: m.refMin })))
+const modules = ref((TEMPLATES.find((t) => t.id === 'gk_ds') || TEMPLATES[0]).modules.map((m) => ({ subject: m.subject, count: m.count, refMin: m.refMin, matType: m.matType || 'auto' })))
 const perQ = ref(60)            // 每题限时（秒），默认 60 秒（≤1分钟）
 const aiCap = ref(0)            // 每板块题量：0=全量（按卷面模板/用户设定），>0=抽样上限（快速）
 const genConcur = ref(3)        // 出卷并发度：并发出题请求数（视模型 API 限流调整）
@@ -201,6 +205,7 @@ const autoNext = ref(false) // 单题快练：答对自动进入下一题
 const singleDir = ref('auto') // 问法方向：auto=随机 / is=选是 / not=选非 / custom=自定义
 const singleLocal = ref(false) // 图推单题：🎲 本地真题生成（零额度、确定性质检）
 const tutuFormat = ref('auto') // 图推出题形式：auto=自动轮换 / 一组图 / 两组图 / 九宫格 / 分组分类
+const singleMatType = ref('auto') // 资料分析材料类型：auto=随机轮换 / text=纯文字 / table=表格 / chart=图形 / mixed=综合混合（真题：一篇材料配5题）
 // 六大板块 → 细分板块 层级
 const SIX_GROUPS = [
   { key: '判断推理', subs: ['图形推理', '定义判断', '类比推理', '逻辑判断'] },
@@ -370,7 +375,7 @@ function onTemplate() {
   useTemplate(t)
   showToast('已载入「' + t.name + '」卷面构成', 'success')
 }
-function addRow() { modules.value.push({ subject: '常识判断', count: 5, refMin: 5 }) }
+function addRow() { modules.value.push({ subject: '常识判断', count: 5, refMin: 5, matType: 'auto' }) }
 function rmRow(i) { modules.value.splice(i, 1) }
 function templateTotal(t) { return (t.modules || []).reduce((a, m) => a + (m.count || 0), 0) }
 function moduleRefSec(m) {
@@ -680,7 +685,7 @@ function startAi() {
           const variant = k === gn - 1 ? '综合分析' : (['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 6])
           plan.push({
             subject: '资料分析', difficulty: d, variant, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', group: true, groupId: gid, groupN: gn,
-            groupLeader: k === 0, matType: ['text', 'table', 'mixed', 'chart'][gid % 4],
+            groupLeader: k === 0, matType: (m.matType && m.matType !== 'auto') ? m.matType : ['text', 'table', 'mixed', 'chart'][gid % 4],
             stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
           })
           gi++
@@ -854,6 +859,26 @@ function buildSingleItems() {
   const vars = singleVars.value
   const batch = Math.max(1, Math.min(20, singleBatch.value || 1))
   const items = []
+  // 资料分析·真题题组模式：组量≥5 时，一篇完整材料（文字/表格/图形/综合，可自定义）配 5 题，第5题为综合分析；组量>5 拆多组
+  if (singlePlate.value === '资料分析' && batch > 1) {
+    let gid = 0
+    for (let g = 0; g < batch; g += 5) {
+      const gn = Math.min(5, batch - g)
+      const matType = singleMatType.value === 'auto' ? ['text', 'table', 'mixed', 'chart'][gid % 4] : singleMatType.value
+      const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
+      const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
+      for (let k = 0; k < gn; k++) {
+        const variant = k === gn - 1 ? '综合分析' : (['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 6])
+        items.push({
+          subject: '资料分析', difficulty: diff, variant, dir, dirText,
+          group: true, groupId: gid, groupN: gn, groupLeader: k === 0, matType,
+          stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
+        })
+      }
+      gid++
+    }
+    return items
+  }
   for (let i = 0; i < batch; i++) {
     const v = fixedVar || (vars.length ? vars[i % vars.length] : '')
     const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
@@ -920,11 +945,38 @@ function timeoutQ() {
   if (marks.value[i] != null) return
   marks.value[i] = { ok: false, pick: '', timeout: true, usedSec: perQ.value }
   syncPetCurQ(i)
-  showToast('⏰ 本题超时（' + perQ.value + ' 秒），已按答错计，萌宠正在分析…', 'error')
-  petAnalyzeCurrent()
+  showToast('⏰ 本题超时（' + perQ.value + ' 秒），已按答错计；萌宠正在帮你复盘——先看看是不是没读懂这道题…', 'error')
+  petAnalyzeCurrent({ timeout: true })
   if (singleMode.value) { qLeft.value = perQ.value; qElapsed.value = 0 } else nextQ()
 }
 // 核心出题：生成第 i 题（含题型轮换），供预生成/单题/重出共用
+// 资料分析材料 SVG 兜底绘制：把 Markdown/文字材料画成真题风格 SVG 表格/图表（迁移图推绘图能力）
+async function drawZlMaterialSVG(material, matType) {
+  const m = String(material || '').trim()
+  if (!m || /```svg/.test(m)) return m
+  const isDrawable = matType === 'table' || matType === 'mixed' || matType === 'chart' || /表格|柱状|折线|饼图|统计|同比|指标|比上年|增长/.test(m.slice(0, 220))
+  if (!isDrawable) return m
+  let c = null
+  try { c = figCfg() } catch (e) {}
+  if (!c || !c.key) return m
+  const prompt = '你是公考资料分析「材料图表绘制专家」。把下面这份资料分析材料画成一张真题风格的 SVG 图（表格或柱状/折线/饼图），只输出一个 ```svg 代码块，不要任何其他文字。' +
+    'SVG 铁律：<svg width=620 height=按内容 viewBox="0 0 620 H">、白底、深色描边、元素坐标在界内留≥8px、字体≥12px、数据自洽可验算。' +
+    '表格→<rect>画表头(深色底#1e3a5f+白字)+单元格+<text>写数据并标注单位；柱状/折线/饼图→坐标轴/图例/数值/年份清晰。材料内容：\n' + m.slice(0, 1200)
+  try {
+    const resp = await fetch(c.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(c.key ? { Authorization: 'Bearer ' + c.key } : {}) },
+      body: JSON.stringify({ model: c.model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], max_tokens: 3200, stream: false, temperature: 0.2 })
+    })
+    if (!resp.ok) return m
+    const d = await resp.json()
+    const text = String((d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '').trim()
+    const svgM = String(text).match(/```svg\s*\n?([\s\S]*?)```|<svg[\s\S]*?<\/svg>/)
+    const svg = svgM ? (svgM[1] || svgM[0]).trim() : ''
+    if (svg && svg.includes('<svg')) return m + '\n\n```svg\n' + svg + '\n```'
+  } catch (e) {}
+  return m
+}
 async function genOne(i) {
   const item = questions.value[i]
   if (!item || item.stem) return
@@ -964,14 +1016,26 @@ async function genOne(i) {
       const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 8000, 120000, genCtrl && genCtrl.signal)
       const parsed = parseMaterialQuiz(reply, gn)
       const okN = parsed && parsed.qs.length ? Math.min(gn, parsed.qs.length) : 0
+      // 本地唯一单选质检：题组里任何一题不满足「严格单选」→ 整组重出（保证质量是根本）
+      const badIdx = (parsed && parsed.qs || []).findIndex((qq) => !localQuizVerify(qq).ok)
+      if (okN >= Math.min(2, gn) && badIdx >= 0) {
+        failAll('（本组第 ' + (badIdx + 1) + ' 题未过本地唯一单选质检：' + localQuizVerify(parsed.qs[badIdx]).reason + '，可点「重出」重试整组）')
+        return
+      }
       if (okN >= Math.min(2, gn)) {
         // 材料/共用题干缺失时视为整组失败（缺材料题无法作答），触发重出而非静默拼成无材料题
         if (!parsed.material) { failAll('（材料缺失，可点「重出」重试整组）'); return }
+        // 资料分析：材料若没有 SVG 图，用图形增强模型兜底绘制成真题风格图表（迁移图推绘图能力）
+        let mat = parsed.material
+        if (isZL && !/```svg/.test(mat) && (item.matType === 'table' || item.matType === 'mixed' || item.matType === 'chart')) {
+          showToast('📊 正在把材料绘制成图表…', 'info')
+          mat = await drawZlMaterialSVG(mat, item.matType)
+        }
         for (let k = 0; k < gn; k++) {
           const slot = questions.value[i + k]
           const q = parsed.qs[k]
           if (slot && q) {
-            slot.stem = '【📄 材料】\n' + parsed.material + '\n\n' + q.stem
+            slot.stem = '【📄 材料】\n' + mat + '\n\n' + q.stem
             slot.options = q.options
             slot.answer = q.answer
             slot.explain = q.explain || ''
@@ -982,9 +1046,12 @@ async function genOne(i) {
           }
         }
       } else failAll('（材料题组生成格式异常，可点「重出」重试整组）')
+      // 写入出题历史（材料题组）：成功与否 + 失败原因，供 AI 学习
+      recordGenLog({ plate: item.subject, variant: item.variant || '', difficulty: item.difficulty || '', ok: !!parsed && okN >= Math.min(2, gn) && !questions.value[i + (gn - 1)].err, attempts: 1, reasons: [], src: 'group' })
     } catch (e) {
       if (genAbort) return // 取消出卷：静默返回，不记为出题失败
       failAll('（出题失败：' + e.message + '）')
+      recordGenLog({ plate: item.subject, variant: item.variant || '', difficulty: item.difficulty || '', ok: false, attempts: 1, reasons: [String(e && e.message || '')], src: 'group' })
     }
     return
   }
@@ -994,7 +1061,8 @@ async function genOne(i) {
     const dir = item.dir || resolveDir('auto')
     const dh = dirHint(item.subject, dir, item.dirText)
     const fmtHint = (item.subject === '图形推理' && singleMode.value && tutuFormat.value && tutuFormat.value !== 'auto') ? '本题出题形式固定为【' + tutuFormat.value + '】，请严格按【图形推理】子命题人的「SVG 布局铁律」中该形式的画布尺寸与格子布局出图。' : ''
-    const ask = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + dh +
+    const zlLearn = genLogHint(item.subject, variant) + (plateLearn(item.subject) ? '（本板块避坑：' + plateLearn(item.subject) + '）' : '')
+    const ask = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + (zlLearn ? '\n' + zlLearn : '') + dh +
       '【本次输出要求（提速，必须遵守）】只输出：题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X' +
       (item.subject === '逻辑判断' && variant === '真假话' ? ' + 末尾【验证数据】JSON' : '') +
       '。不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。' + fmtHint
@@ -1017,10 +1085,13 @@ async function genOne(i) {
     let qz = null
     let raw = reply || '' // 最近一次模型输出原文
     let fixHint = '' // 质检未通过原因 → 下一轮定向修正（减少盲目重出、更快成功）
+    const failReasons = [] // 各次质检失败原因 → 写入出题历史（供 AI 学习）
+    let genAttempts = 0 // 出题尝试次数（记录进历史）
     let ttVerified = false // 真假话已过程序真值表硬校验（比 AI 质检更强，免二次 AI 质检）
     let lastParsed = null // 解析成功的题先记下，作为放宽兜底（避免 AI 质检过严反复“多次重出”）
     const stage = (attempt, label) => { genStatus.value = (attempt > 0 ? '第 ' + (attempt + 1) + ' 次重出 · ' : '') + label }
     for (let attempt = 0; attempt < 3 && !qz; attempt++) {
+      genAttempts++
       stage(attempt, 'AI 生成中…')
       let cur = attempt === 0 ? parseQuiz(raw) : null
       if (!cur || !cur.options || cur.options.length < 4) {
@@ -1029,7 +1100,16 @@ async function genOne(i) {
         cur = parseQuiz(raw)
       }
       if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
-      lastParsed = cur // 解析成功即记下，供放宽兜底
+      // 本地唯一单选质检（确定性 skill）：通用硬规则 + 本板块/题型「质检子命题人」专属检查
+      const lv = localQuizVerify(cur)
+      const plateErr = plateChecks(cur, item.subject, variant)
+      const allErr = [...(lv.ok ? [] : [lv.reason]), ...plateErr]
+      if (allErr.length) {
+        const reason = allErr.join('；')
+        failReasons.push(reason)
+        fixHint = '。上一版未过本地质检（' + reason + '）：请修正使题目恰有唯一正确选项（单选），其余三项必须明显不符合问法，严禁重复/同义选项' + (plateLearn(item.subject) ? '（本板块避坑：' + plateLearn(item.subject) + '）' : ''); continue
+      }
+      lastParsed = cur // 解析成功且通过本地质检 → 记下，供放宽兜底
       if ((variant === '真假话' || String(raw).includes('【验证数据】')) && item.subject === '逻辑判断') {
         stage(attempt, '真值表硬校验中…')
         const vd = extractVerifyData(raw)
@@ -1039,12 +1119,15 @@ async function genOne(i) {
       }
       if (store.cfg.strictGen && !ttVerified) {
         stage(attempt, 'AI 质检中…')
-        const vq = await verifyQuestion(cur)
-        if (!vq) { fixHint = '。上一版未过 AI 质检（题干自洽/唯一解/恰一正确/无逻辑谬误）：请按反馈修正后重出'; continue }
+        const vq = await verifyQuestion(cur, item.subject, variant)
+        if (!vq) { failReasons.push('AI质检未过（唯一解/恰一正确/无逻辑谬误）'); fixHint = '。上一版未过 AI 质检（题干自洽/唯一解/恰一正确/无逻辑谬误）：请按反馈修正后重出'; continue }
       }
       qz = cur
     }
-    if (!qz && lastParsed && variant !== '真假话') qz = lastParsed // 放宽兜底：只要题干+4选项+答案解析成功就收下，避免卡死在“多次重出”
+    // 放宽兜底：本地唯一单选质检必须通过；未通过本地质检的题绝不收（保证唯一单选是底线）
+    // 写入出题历史（供 AI 学习：板块/题型/尝试次数/失败原因/是否成功）
+    recordGenLog({ plate: item.subject, variant, difficulty: item.difficulty || '', ok: !!qz, attempts: genAttempts, reasons: failReasons, src: 'single' })
+    if (!qz && lastParsed && variant !== '真假话' && localQuizVerify(lastParsed).ok) qz = lastParsed
     if (qz && qz.options && qz.options.length >= 4) {
       item.stem = qz.stem
       item.options = qz.options
@@ -1225,11 +1308,12 @@ function achieveText() {
   return '💪 再接再厉，错题都进本子重点刷'
 }
 // 出题严格质检：二次验证 题干自洽/唯一解/恰一正确（开启 strictGen 时对每道生成题执行）
-async function verifyQuestion(q) {
+async function verifyQuestion(q, plate, variant) {
   const c = pickGenC()
   if (!c || !c.key) return true
   try {
-    const sys = '你是公考行测出题质检员。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②是否恰好一个正确选项（禁止多选、无正确选项、两选项同真、选项全对）；③选项与题干相关、无逻辑谬误；④若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"..."}'
+    const learn = genLogHint(plate, variant) // 历史质检学习：过去这类题常错在哪
+    const sys = '你是公考行测出题质检员（严格单选）。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②【唯一正确项】必须且只能有一个选项符合题目问法：禁止多选、禁止无正确选项、禁止两个选项同真、禁止选项全对、禁止两个选项同义重复；③选非题（错误的是/不属于/不能推出/不符合）必须保证其余三项均【符合】问法、只有答案项【不符合】；选是题反之；④选项与题干相关、无逻辑谬误；⑤若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。' + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"指出具体是哪几个选项都成立/都不成立/重复，便于重出修正"}'
     const user = '题干：' + String(q.stem || '') + '\n选项：' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n答案：' + String(q.answer || '')
     const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 400)
     const m = String(r || '').match(/"ok"\s*:\s*(true|false)/)
@@ -1603,12 +1687,20 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
             <label>⑤ 组量</label>
             <select v-model="singleBatch" class="tb-sel">
               <option :value="1">1 题（单题）</option>
-              <option :value="5">5 题一组</option>
-              <option :value="10">10 题一组</option>
-              <option :value="15">15 题一组</option>
-              <option :value="20">20 题一组</option>
+              <template v-if="singlePlate === '资料分析'">
+                <option :value="5">5 题（1篇材料·真题5题组）</option>
+                <option :value="10">10 题（2篇材料）</option>
+                <option :value="15">15 题（3篇材料）</option>
+                <option :value="20">20 题（4篇材料）</option>
+              </template>
+              <template v-else>
+                <option :value="5">5 题一组</option>
+                <option :value="10">10 题一组</option>
+                <option :value="15">15 题一组</option>
+                <option :value="20">20 题一组</option>
+              </template>
             </select>
-            <span class="ep-hint">组内逐题作答，做完自动批改，可「再来一组」</span>
+            <span class="ep-hint">{{ singlePlate === '资料分析' ? '资料分析真题模式：一篇完整材料配5题（第5题为综合分析），可自定义材料形式；选 1 题则出单题' : '组内逐题作答，做完自动批改，可「再来一组」' }}</span>
           </div>
           <div v-if="singlePlate === '图形推理'" class="ep-param">
             <label>⑥ 出题形式</label>
@@ -1620,6 +1712,7 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
               <option value="分组分类">分组分类（6图）</option>
             </select>
             <span class="ep-hint">固定某种图推出题形式；「不限」= 一组图/两组图/九宫格/分组分类 自动轮换</span>
+
           <div class="ep-param">
             <label>⑦ 出题方式</label>
             <div class="ep-chips">
@@ -1628,6 +1721,17 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
             </div>
             <span class="ep-hint">本地 = 黑白块/汉字/字母/旋转/数量/对称/叠加/分组等真题高频规律，确定性且永不裁切；AI 出题失败也会自动回退本地</span>
           </div>
+          </div>
+          <div v-if="singlePlate === '资料分析'" class="ep-param">
+            <label>⑥ 材料类型（真题：一篇材料配5题）</label>
+            <select v-model="singleMatType" class="tb-sel">
+              <option value="auto">随机轮换（文字/表格/图形/综合）</option>
+              <option value="text">纯文字材料</option>
+              <option value="table">表格材料</option>
+              <option value="chart">图形材料（柱状/折线/饼图）</option>
+              <option value="mixed">综合混合（文字+表格+图形）</option>
+            </select>
+            <span class="ep-hint">组量选 5/10/15/20 时按真题模式出「完整材料 + 每5题一组」（第5题为综合分析题）；选 1 题则出单题。材料会尽量绘制成 SVG 表格/图表。</span>
           </div>
           <div class="ep-param">
             <label>

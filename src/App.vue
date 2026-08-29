@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveMyMem, saveNotes } from './store'
-import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio } from './utils/tts'
+import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
+import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive } from './utils/costTrack'
 import { PLATE_MODE } from './api'
 import { FIG_PROVIDERS, fillFigProvPreset, testFigConn } from './api/figEnhance'
 import ChatPage from './components/ChatPage.vue'
@@ -22,9 +23,11 @@ import { APP_VERSION } from './version'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
 import { nav, navBack, syncNavFromHistory } from './utils/nav'
 import { webdavUpload, webdavDownload } from './utils/webdav'
+import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
+import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
-import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName } from './utils/pet'
+import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice } from './utils/pet'
 const tabs = [
   { k: 'ck', t: '🚀 看板' },
   { k: 'chat', t: '💬 对话' },
@@ -215,6 +218,139 @@ const expType = ref('chat')
 const expShow = ref(false)
 const expBusy = ref(false)
 const setShow = ref(false)
+// ===== AI 用量与花费（实时追踪）=====
+const costShow = ref(false)
+const costStat = computed(() => costStats())
+const costToday = computed(() => costStat.value.today)
+const costPrices = ref(getPrices())
+const costOpen = ref(null)
+function costSavePrices() {
+  savePrices(costPrices.value)
+  showToast('✅ 计价表已保存（后续花费按新单价估算）', 'success')
+}
+// 进行中调用实时计时（costLive.active 为真时每 1s 刷新）
+const costElapsed = ref(0)
+let costTimer = null
+watch(
+  () => costLive.active,
+  (a) => {
+    if (costTimer) { clearInterval(costTimer); costTimer = null }
+    if (a) {
+      costElapsed.value = 0
+      costTimer = setInterval(() => { costElapsed.value = Math.max(1, Math.round((Date.now() - costLive.beganAt) / 1000)) }, 1000)
+    }
+  }
+)
+onUnmounted(() => { if (costTimer) clearInterval(costTimer) })
+function costKindLabel(k) { return COST_KINDS[k] || (k ? k : '—') }
+function costCostDetail(r) {
+  const parts = []
+  if (r.inCost != null && (r.inT || 0) > 0) parts.push('输入 ' + r.inT + ' tok × ¥' + (r.inCost / Math.max(1, r.inT) * 1000).toFixed(4) + '/千')
+  if (r.outCost != null && (r.outT || 0) > 0) parts.push('输出 ' + r.outT + ' tok × ¥' + (r.outCost / Math.max(1, r.outT) * 1000).toFixed(4) + '/千')
+  if (r.fixedCost) parts.push('固定费 ¥' + r.fixedCost)
+  return parts.join('；')
+}
+function costResetPrices() {
+  costPrices.value = JSON.parse(JSON.stringify(DEF_PRICES))
+  savePrices(costPrices.value)
+  showToast('↩️ 已恢复默认计价表', 'success')
+}
+// ===== 本地账号（登录门）=====
+const authLoading = ref(true)
+const authMode = ref('login')
+const authU = ref('')
+const authP = ref('')
+const authP2 = ref('')
+const authRemember = ref(true)
+const authErr = ref('')
+const authBusy = ref(false)
+const authOldP = ref('')
+const authNewP = ref('')
+const authDelP = ref('')
+function switchAuthMode(m) {
+  authMode.value = m
+  authErr.value = ''
+  authP2.value = ''
+}
+async function doAuthSubmit() {
+  // 本地账号：用户名 + 密码（登录 / 注册）
+  authErr.value = ''
+  authBusy.value = true
+  try {
+    if (authMode.value === 'register') {
+      if (authP.value !== authP2.value) { authErr.value = '两次输入的密码不一致'; return }
+      const r = await authRegister(authU.value, authP.value)
+      if (!r.ok) { authErr.value = r.msg; return }
+      const l = await authLogin(authU.value, authP.value, authRemember.value)
+      if (!l.ok) { authErr.value = l.msg; authMode.value = 'login'; return }
+      showToast('✅ 注册并登录成功，欢迎使用行测智能助教！', 'success')
+    } else {
+      const r = await authLogin(authU.value, authP.value, authRemember.value)
+      if (!r.ok) { authErr.value = r.msg; return }
+      showToast('✅ 欢迎回来，' + authState.user, 'success')
+    }
+    authU.value = ''
+    authP.value = ''
+    authP2.value = ''
+  } finally {
+    authBusy.value = false
+  }
+}
+function doLogout() {
+  authLogout()
+  authU.value = ''
+  authP.value = ''
+  authP2.value = ''
+  authErr.value = ''
+  showToast('👋 已退出登录（再次使用需登录）', 'info')
+}
+const authConfirm = ref(null) // 自定义确认弹窗 { msg, fn }
+function askConfirm(msg, fn) { authConfirm.value = { msg, fn } }
+function authConfirmYes() {
+  const c = authConfirm.value
+  authConfirm.value = null
+  if (c && c.fn) c.fn()
+}
+function authConfirmNo() { authConfirm.value = null }
+function doAuthReset() {
+  askConfirm('确定要重置本地账号吗？将清空本机所有注册账号与会话（对话/错题/笔记等学习数据不受影响）。', () => {
+    authResetLocal()
+    authU.value = ''
+    authP.value = ''
+    authP2.value = ''
+    authErr.value = ''
+    authMode.value = 'register'
+    showToast('🔄 已重置本地账号，请重新注册', 'info')
+  })
+}
+function toggleAuthGate(v) {
+  authSetEnabled(!!v)
+  showToast(v ? '🔐 已启用登录门（下次打开需登录）' : '🔓 已关闭登录门（无需登录即可使用）', 'info')
+}
+async function doChangePass() {
+  if (!authState.user) return
+  const r = await authChangePass(authState.user, authOldP.value, authNewP.value)
+  if (!r.ok) { showToast('❌ ' + r.msg, 'error'); return }
+  authOldP.value = ''
+  authNewP.value = ''
+  showToast('✅ 密码已修改', 'success')
+}
+function doDeleteUser() {
+  if (!authState.user) return
+  askConfirm('确定删除本机账号「' + authState.user + '」？将清除该账号记录并退出登录（学习数据保留）。', async () => {
+    const r = await authDeleteUser(authState.user, authDelP.value)
+    if (!r.ok) { showToast('❌ ' + r.msg, 'error'); return }
+    authDelP.value = ''
+    showToast('🗑 账号已删除', 'info')
+  })
+}
+function authGateInit() {
+  authInit().then(() => {
+    if (authHasUsers() && !authState.user) authMode.value = 'login'
+    else if (!authHasUsers()) authMode.value = 'register'
+    authLoading.value = false
+  })
+}
 const stStat = ref('检测中...')
 const stDot = ref('')
 const testBusy = ref(false)
@@ -643,9 +779,21 @@ const SET_GUIDE = [
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、3D背景、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
   { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、保存到本地文件夹、WebDAV 云同步、导入笔记、时政时间范围。', tips: '数据只存本机；换设备用导出/导入或 WebDAV。' },
+  { id: 'set-account', t: '🔐 账号', d: '本地登录门：注册/登录、修改密码、退出、删除账号、重置本地账号。', tips: '账号仅存本机（无服务器）；忘记密码可「重置本地账号」重新注册；不想每次登录可关闭登录门。' },
   { id: 'set-help', t: '🧭 帮助', d: '六步学习闭环、快捷键、常见问题、新手引导开关。', tips: '考前把快捷键和闭环过一遍；引导可一键全关或重开。' },
   { id: 'set-about', t: '📜 关于', d: '免责声明与开发者说明。', tips: '仅供个人学习使用，切勿商用；隐私与开发者信息见此处。' }
 ]
+
+// ===== 设置面板顶部状态总览（一键看清哪些没配）=====
+const stCfg = computed(() => {
+  const textOk = !!(store.cfg.text && store.cfg.text.key)
+  const visionOk = !!(store.cfg.vision && store.cfg.vision.key)
+  const ttsMode = store.cfg.ttsMode || 'glm'
+  const eng = TTS_ENGINES.find((e) => e.id === ttsMode)
+  const ttsLabel = (eng && eng.name.split('（')[0].split('·')[0].trim()) || ttsMode
+  const dataLoc = dirLabel.value || (store.cfg.dataDir ? store.cfg.dataDir : '本机')
+  return { textOk, visionOk, ttsLabel, dataLoc }
+})
 const tourShow = ref(false)
 const tourI = ref(0)
 const tourFold = ref(false)
@@ -663,31 +811,36 @@ function tourPrev() {
   if (tourI.value > 0) { tourI.value--; scrollSet(SET_GUIDE[tourI.value].id) }
 }
 // ===== 设置快速导航 =====
-const setNav = [
-  { id: 'set-api', t: 'API' },
-  { id: 'set-look', t: '外观' },
-  { id: 'set-voice', t: '语音' },
-  { id: 'set-bg', t: '背景' },
-  { id: 'set-data', t: '数据' },
-  { id: 'set-help', t: '帮助' },
-  { id: 'set-about', t: '关于' }
+// ===== 设置快速导航（按 6 大分组，点击自动展开并定位）=====
+const SET_GROUP_META = [
+  { id: 'ai', t: '🧠 模型' },
+  { id: 'voice', t: '🗣️ 语音' },
+  { id: 'look', t: '🎨 外观' },
+  { id: 'data', t: '💾 数据' },
+  { id: 'account', t: '🔐 账号' },
+  { id: 'fun', t: '🎵 趣味' },
+  { id: 'help', t: '❓ 帮助' }
 ]
+const setNav = SET_GROUP_META
 // ===== 设置分组手风琴：把超长设置面板分成 4 组，点击标题展开/收起 =====
+// ===== 设置分组手风琴：把设置面板分成 6 组，点击标题展开/收起 =====
 const SEC_GROUP = {
-  'set-api': 'model', 'set-vision': 'model', 'set-fig': 'model', 'set-voice': 'model',
+  'set-api': 'ai', 'set-vision': 'ai', 'set-fig': 'ai',
+  'set-voice': 'voice',
   'set-look': 'look', 'set-bg': 'look',
-  'set-data': 'fun',
+  'set-data': 'data',
+  'set-account': 'account',
   'set-help': 'help', 'set-about': 'help'
 }
 const chatFastModel = ref(localStorage.getItem('xc_chat_fast_model') || '')
 function saveChatFastModel() { try { localStorage.setItem('xc_chat_fast_model', String(chatFastModel.value || '').trim()) } catch (e) {} }
-const setGroup = ref('model')
+const setGroup = ref('ai')
 function toggleSetGroup(k) { setGroup.value = setGroup.value === k ? '' : k }
 function scrollSet(id) {
-  const g = SEC_GROUP[id]
-  if (g) setGroup.value = g
+  const g = SEC_GROUP[id] || id
+  if (g && SET_GROUP_META.some((m) => m.id === g)) setGroup.value = g
   setTimeout(() => {
-    const el = document.getElementById(id)
+    const el = document.getElementById(id) || document.querySelector('.set-group-bd .sec-t')
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, 60)
 }
@@ -720,6 +873,70 @@ function pickVoice(engine, voiceId) {
   saveCfg()
   savePetGlobalVoice()
 }
+// ===== 音色市场管理：隐藏/重命名/恢复已有音色 =====
+function vcNames(engine) {
+  const vc = store.cfg.voiceCustom || {}
+  return (vc.names && vc.names[engine]) || {}
+}
+function vcHidden(engine) {
+  const vc = store.cfg.voiceCustom || {}
+  return ((vc.hidden && vc.hidden[engine]) || [])
+}
+function voiceList(engine, base) {
+  const hidden = vcHidden(engine)
+  const names = vcNames(engine)
+  return (base || []).filter((v) => !hidden.includes(v.id)).map((v) => ({ ...v, name: names[v.id] || v.name }))
+}
+function hiddenVoicesList(engine, base) {
+  const hidden = vcHidden(engine)
+  const names = vcNames(engine)
+  return (base || []).filter((v) => hidden.includes(v.id)).map((v) => ({ ...v, name: names[v.id] || v.name }))
+}
+function hideVoice(engine, id) {
+  if (!store.cfg.voiceCustom) store.cfg.voiceCustom = {}
+  if (!store.cfg.voiceCustom.hidden) store.cfg.voiceCustom.hidden = {}
+  if (!store.cfg.voiceCustom.hidden[engine]) store.cfg.voiceCustom.hidden[engine] = []
+  if (!store.cfg.voiceCustom.hidden[engine].includes(id)) store.cfg.voiceCustom.hidden[engine].push(id)
+  saveCfg()
+  voiceUndo.value = { engine, id }
+  showToast('👻 已隐藏该音色（可撤销）', 'info')
+}
+function unhideVoice(engine, id) {
+  const vc = store.cfg.voiceCustom || {}
+  if (vc.hidden && vc.hidden[engine]) vc.hidden[engine] = vc.hidden[engine].filter((x) => x !== id)
+  saveCfg()
+}
+// 内联改名（不用 window.prompt，避免被应用内/环境拦截）
+const voiceRename = ref(null) // { engine, id, name }
+const voiceUndo = ref(null) // { engine, id } 上一步隐藏，可撤销
+function startRename(engine, id) {
+  const base = engine === 'glm' ? gmVoiceList.value : engine === 'openai' ? OPENAI_PRESET_VOICES : edgeVoiceList.value
+  const v = (base || []).find((x) => x.id === id)
+  voiceRename.value = { engine, id, name: vcNames(engine)[id] || (v && v.name) || '' }
+}
+function confirmRename() {
+  const r = voiceRename.value
+  if (!r) return
+  if (!store.cfg.voiceCustom) store.cfg.voiceCustom = {}
+  if (!store.cfg.voiceCustom.names) store.cfg.voiceCustom.names = {}
+  if (!store.cfg.voiceCustom.names[r.engine]) store.cfg.voiceCustom.names[r.engine] = {}
+  const n = String(r.name || '').trim()
+  if (n) store.cfg.voiceCustom.names[r.engine][r.id] = n
+  else delete store.cfg.voiceCustom.names[r.engine][r.id]
+  saveCfg()
+  showToast('✏️ 已' + (n ? '重命名为：' + n : '恢复默认名称'), 'success')
+  voiceRename.value = null
+}
+function cancelRename() { voiceRename.value = null }
+function undoHideVoice() {
+  const u = voiceUndo.value
+  if (!u) return
+  const vc = store.cfg.voiceCustom || {}
+  if (vc.hidden && vc.hidden[u.engine]) vc.hidden[u.engine] = vc.hidden[u.engine].filter((x) => x !== u.id)
+  saveCfg()
+  voiceUndo.value = null
+  showToast('↩️ 已撤销隐藏', 'success')
+}
 async function ttsPreview(engine, voiceId) {
   await previewVoice(engine, voiceId)
 }
@@ -737,6 +954,18 @@ const petEffectiveLabel = computed(() => {
   if (bv && bv.cloned) return '当前角色「' + petSkin.value.char + '」用克隆原声「' + (bv.name || bv.voice) + '」🧬（切走恢复全局）'
   return '所有角色与全局朗读共用：' + globalVoiceLabel.value
 })
+// 所有克隆音色清单（内置锁定 + 自定义可删），供「我的克隆音色」展示
+function petCloneVoiceList() {
+  const out = []
+  for (const sk of petAllSkins.value) {
+    const v = petSkinVoiceOf(sk.id)
+    if (v && v.cloned && v.voice) {
+      const userBound = !!(store.cfg.skinVoices && store.cfg.skinVoices[sk.id])
+      out.push({ skinId: sk.id, char: sk.char, name: v.name || '克隆音色', engine: v.engine, voice: v.voice, locked: petIsLocked(sk.id) && !userBound, userBound })
+    }
+  }
+  return out
+}
 async function loadGmVoices() {
   gmVoiceStat.value = '正在拉取官方音色…'
   const list = await listGmVoices()
@@ -788,7 +1017,7 @@ async function doCloneVoice() {
       showToast('❌ 音频无法解码：' + (pre && pre.error || '请换一个有效的 mp3/wav 文件'), 'error')
       return
     }
-    voiceCloneStat.value = '⏳ 已转码为 WAV（' + pre.seconds + ' 秒' + (pre.sliced ? '，已裁剪' : '') + '），正在上传并克隆（约 10-40 秒）…'
+    voiceCloneStat.value = '⏳ 已转码为 WAV（' + pre.seconds + ' 秒' + (pre.sliced ? '，已裁剪' : '') + '），正在上传音频 + 识别参考文字 + 克隆（约 10-40 秒）…'
     const name = cloneVoiceName.value.trim() || (petSkin.value.char + '声线')
     const r = cloneBackend.value === 'zhipu'
       ? await cloneZhipuVoice(pre.file, { name, text: cloneVoiceText.value.trim() })
@@ -807,8 +1036,11 @@ async function doCloneVoice() {
     else { store.cfg.ttsOpenAI.voice = r.voice; if (model) store.cfg.ttsOpenAI.model = model }
     store.cfg.ttsMode = engine
     saveCfg()
-    voiceCloneStat.value = '✅ 大模型克隆成功！「' + r.name + '」已绑定给『' + petSkin.value.char + '』并启用（引擎：' + (cloneBackend.value === 'zhipu' ? '智谱 GLM-TTS-Clone' : 'CosyVoice2') + '）。以后切到这个角色就会用这个克隆原声。'
+    voiceCloneStat.value = '✅ 大模型克隆成功！「' + r.name + '」已绑定给『' + petSkin.value.char + '』并启用（引擎：' + (cloneBackend.value === 'zhipu' ? '智谱 GLM-TTS-Clone' : 'CosyVoice2') + '）。可继续上传新音频重新克隆/换声。'
     showToast('🧬 克隆成功：' + r.name + ' → ' + petSkin.value.char, 'success')
+    // 允许重复上传重新克隆：清空已选文件
+    voiceFileObj = null
+    voiceFileName.value = ''
   } catch (e) {
     voiceCloneStat.value = '❌ ' + e.message
   } finally {
@@ -827,6 +1059,18 @@ function doUnbindSkinVoice(skinId) {
   const sk = petAllSkins.value.find((x) => x.id === skinId)
   if (ok === null) { showToast('🔒 该角色声音已内置锁定，不可更改', 'error'); return }
   showToast('🗑 已解除「' + ((sk && sk.char) || skinId) + '」的克隆声线', 'info')
+}
+const cloneRename = ref(null) // { skinId, name }
+function doRenameCloneVoice(skinId) {
+  const bv = store.cfg.skinVoices && store.cfg.skinVoices[skinId]
+  if (!bv || !bv.voice) { showToast('🔒 内置克隆音色不可重命名', 'error'); return }
+  cloneRename.value = { skinId, name: bv.name || '' }
+}
+function confirmCloneRename() {
+  const r = cloneRename.value
+  if (!r) return
+  if (petRenameCloneVoice(r.skinId, r.name)) { saveCfg(); showToast('✏️ 已重命名克隆音色' + (String(r.name).trim() ? '：' + String(r.name).trim() : '（恢复角色名）'), 'success') }
+  cloneRename.value = null
 }
 function copyFigKey() {
   copyFigKeyToTts()
@@ -890,7 +1134,7 @@ function doAddCustom() {
 }
 function doRemoveCustom(id) {
   const ok = petRemoveCustomSkin(id)
-  if (ok) { applySkin('lixingyun'); showToast('🗑 已删除该自定义角色', 'info') }
+  if (ok) { applySkin(petAllSkins.value[0].id); showToast('🗑 已删除该自定义角色', 'info') }
   else showToast('该角色不可删除', 'error')
 }
 function doPetAsk(preset) {
@@ -899,6 +1143,24 @@ function doPetAsk(preset) {
   if (!t || petChatBusy.value) return
   petAskText.value = ''
   petAsk(t)
+}
+// 萌宠发图：压缩后走视觉模型 / 图形增强读图
+function onPetImgChat(ev) {
+  const f = ev.target.files && ev.target.files[0]
+  ev.target.value = ''
+  if (!f) return
+  if (!/^image\//.test(f.type)) { showToast('请选择图片文件', 'error'); return }
+  const rd = new FileReader()
+  rd.onload = () => { petAskImage(rd.result, petAskText.value.trim()) }
+  rd.onerror = () => showToast('图片读取失败', 'error')
+  rd.readAsDataURL(f)
+}
+// 萌宠语音输入（语音转文字，识别结果填入输入框）
+function petMic() {
+  if (recogActive()) { startRecog(() => {}); showToast('🎤 已停止', 'info'); return }
+  const ok = startRecog((txt) => { petAskText.value = txt })
+  if (!ok) showToast('当前浏览器不支持语音输入', 'info')
+  else showToast('🎤 正在听…（再点一次停止）', 'info')
 }
 
 function openSet() {
@@ -922,6 +1184,24 @@ const errLogText = computed(() => errLogList.value.length
   ? errLogList.value.map((e) => `[${e.t}] ${e.type}${e.comp ? '(' + e.comp + ')' : ''} ${e.msg}`).join('\n')
   : '暂无错误记录')
 function refreshErrLog() { errLogList.value = getErrorLog() }
+const quizLogCount = computed(() => genLogSize())
+function exportQuizLog() {
+  const json = exportGenLog()
+  if (!json || json === '[]') { showToast('暂无出题历史数据', 'info'); return }
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = '行测AI出题历史_' + new Date().toISOString().slice(0, 10) + '.json'
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 800)
+  showToast('✅ 已导出出题历史（' + quizLogCount.value + ' 条，可作训练数据）', 'success')
+}
+function clearQuizLog() {
+  askConfirm('确定清空全部出题历史数据吗？清空后 AI 的「历史质检学习」将从空开始重新积累。', () => {
+    clearGenLog()
+    showToast('🧹 已清空出题历史', 'info')
+  })
+}
 function clearErrLog() { clearErrorLog(); errLogList.value = []; showToast('✅ 已清空错误日志', 'success') }
 
 // ===== 外观 & 数据管理（设置页增强）=====
@@ -1147,6 +1427,7 @@ function onKey(e) {
   }
 }
 onMounted(() => {
+  authGateInit()
   clampFloatPos()
   window.addEventListener('keydown', onKey)
   startStudyTrack()
@@ -1164,6 +1445,53 @@ onUnmounted(() => {
 })
 </script>
 <template>
+  <!-- 本地登录门：登录后才可使用（设置里可关闭） -->
+  <div v-if="authLoading" class="auth-gate">
+    <div class="auth-card auth-loading"><div class="auth-spin"></div><div>正在载入本地账号…</div></div>
+  </div>
+  <div v-else-if="authState.enabled && !authState.ok" class="auth-gate">
+    <div class="auth-card">
+      <div class="auth-brand">🧠 行测<span>智能助教</span></div>
+      <div class="auth-sub">本地账号 · 用户名 + 密码 · 登录后才可使用</div>
+      <div class="auth-tabs">
+        <button :class="{ on: authMode === 'login' }" @click="switchAuthMode('login')">🔓 登录</button>
+        <button :class="{ on: authMode === 'register' }" @click="switchAuthMode('register')">📝 注册</button>
+      </div>
+      <div class="auth-body">
+        <template v-if="authMode === 'login'">
+          <input v-model="authU" placeholder="用户名（2-20位 中英文/数字/下划线）" autocomplete="username" @keyup.enter="doAuthSubmit" />
+          <input v-model="authP" type="password" placeholder="密码（至少 4 位）" autocomplete="current-password" @keyup.enter="doAuthSubmit" />
+          <label class="auth-remember"><input v-model="authRemember" type="checkbox" /> 记住我（7 天内免登录）</label>
+          <div v-if="authErr" class="auth-err">{{ authErr }}</div>
+          <button class="btn btn-pri auth-submit" :disabled="authBusy" @click="doAuthSubmit">{{ authBusy ? '请稍候…' : '🔓 登录' }}</button>
+        </template>
+        <template v-else>
+          <input v-model="authU" placeholder="用户名（2-20位 中英文/数字/下划线）" autocomplete="username" />
+          <input v-model="authP" type="password" placeholder="密码（至少 4 位）" autocomplete="new-password" />
+          <input v-model="authP2" type="password" placeholder="确认密码" autocomplete="new-password" @keyup.enter="doAuthSubmit" />
+          <div v-if="authErr" class="auth-err">{{ authErr }}</div>
+          <button class="btn btn-pri auth-submit" :disabled="authBusy" @click="doAuthSubmit">{{ authBusy ? '请稍候…' : '📝 注册并登录' }}</button>
+        </template>
+      </div>
+      <details class="auth-help">
+        <summary>ℹ️ 什么是「本地账号」？</summary>
+        <div>账号仅保存在本机浏览器（localStorage），无服务器、不上传任何数据，用于防止他人随意使用你的备考数据。用户名 + 密码登录，勾「记住我」7 天内免登录。清除站点数据或换浏览器会丢失账号（对话/错题/笔记等学习数据不受影响），重新注册即可。忘记密码可点下方「重置本地账号」。</div>
+      </details>
+      <button class="auth-reset" @click="doAuthReset">🔄 忘记密码？重置本地账号（清空本机账号记录）</button>
+      <div class="auth-foot">💬 六大板块 · 名师方法论 · AI 出题/答疑/朗读 · 三端同步</div>
+    </div>
+  </div>
+  <!-- 自定义确认弹窗（账号重置/删除等，替代原生 confirm，PWA/webview 更稳） -->
+  <div v-if="authConfirm" class="auth-confirm-ov" @click.self="authConfirmNo()">
+    <div class="auth-confirm-box">
+      <div class="auth-confirm-title">⚠️ 请确认</div>
+      <div class="auth-confirm-msg">{{ authConfirm.msg }}</div>
+      <div class="auth-confirm-btns">
+        <button class="btn btn-gh" style="font-size: 13px" @click="authConfirmNo()">取消</button>
+        <button class="btn btn-pri" style="font-size: 13px" @click="authConfirmYes()">✅ 确认</button>
+      </div>
+    </div>
+  </div>
   <CosmosScene v-if="store.cfg.view3d && store.tab !== 'kb' && store.tab !== '3d'" :active-tab="store.tab" />
   <div v-if="wallStyle" class="bg-layer" :style="wallStyle"></div>
 <div class="app" :class="{ 'is-2d': !store.cfg.view3d, 'has-wall': wallStyle }">
@@ -1237,6 +1565,9 @@ onUnmounted(() => {
           <div class="dot" :class="stDot"></div>
           <span>{{ stStat }}</span>
         </div>
+        <button class="cost-pill" :class="{ warn: costToday > 0, live: costLive.active }" :title="costLive.active ? '🔴 正在调用 AI（' + (COST_FEATURES[costLive.feature] || costLive.feature) + ' · ' + (costLive.model || '') + '），完成自动记账' : '💰 AI 用量与花费（实时追踪）：点开查看明细、计价表、清空记录'" @click="costShow = true">
+          💰 {{ fmtCost(costToday) }}<span v-if="costLive.active" class="cost-pill-live"></span>
+        </button>
         <button class="btn" style="padding: 4px 12px; font-size: 13px" title="3D 学习数据驾驶舱：查看各板块学习数据的交互式 3D 场景" @click="store.tab = '3d'">
           🌌 3D数据
         </button>
@@ -1268,15 +1599,24 @@ onUnmounted(() => {
       <div class="pnl">
         <div class="pnl-top">
           <button class="pnl-top-b" title="返回上一层（也可按 Esc / 浏览器返回）" @click="setShow = false">← 返回</button>
-          <span class="pnl-top-t">⚙️ 设置（API / 朗读 / 外观 / 数据）</span>
+          <span class="pnl-top-t">⚙️ 设置（模型 / 语音 / 外观 / 数据 / 趣味 / 帮助）</span>
         </div>
+<div class="set-status">
+  <span class="set-st" :class="stCfg.textOk ? 'ok' : ''" :title="'文字模型：' + (stCfg.textOk ? '已配置 ' + (store.cfg.text.model || '') : '未配置（纯文字题无法作答）')">💬 文字 {{ stCfg.textOk ? '✅' : '未配' }}</span>
+  <span class="set-st" :class="stCfg.visionOk ? 'ok' : ''" :title="'视觉模型：' + (stCfg.visionOk ? '已配置 ' + (store.cfg.vision.model || '') : '未配置（发图/截图题无法识别）')">👁️ 视觉 {{ stCfg.visionOk ? '✅' : '未配' }}</span>
+  <span class="set-st" :title="'朗读引擎：' + stCfg.ttsLabel">🗣️ {{ stCfg.ttsLabel }}</span>
+  <span class="set-st" :title="'当前萌宠角色：' + petSkin.char">🐾 {{ petSkin.char }}</span>
+  <span class="set-st" :title="'数据位置：' + stCfg.dataLoc">💾 {{ stCfg.dataLoc }}</span>
+  <button class="btn btn-gh set-tour-btn" @click="openTour()">❓ 设置引导</button>
+</div>
         <div class="set-nav">
           <button v-for="n in setNav" :key="n.id" class="set-nav-b" @click="scrollSet(n.id)">{{ n.t }}</button>
         </div>
-        <button class="btn btn-gh set-tour-btn" @click="openTour()">❓ 设置引导（逐项讲解）</button>
-        <button class="set-group-hd" :class="{ on: setGroup === 'model' }" @click="toggleSetGroup('model')"><span>⚙️ 模型与语音（API / 朗读）</span><span class="sg-arrow">{{ setGroup === 'model' ? '▾' : '▸' }}</span></button>
-<div v-show="setGroup === 'model'" class="set-group-bd">
+
+<button class="set-group-hd" :class="{ on: setGroup === 'ai' }" @click="toggleSetGroup('ai')"><span class="sg-t">🧠 模型与 AI</span><span class="sg-desc">文字 / 视觉 / 图形增强</span><span class="sg-arrow">{{ setGroup === 'ai' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'ai'" class="set-group-bd">
 <div id="set-api" class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
+        <div class="sec-desc">纯文字题（常识 / 言语 / 数量 / 资料 / 判断）的 AI 大脑；推荐 DeepSeek，便宜且中文好。</div>
         <div class="fld">
           <label>提供商</label>
           <select v-model="store.cfg.text.prov" @change="fillProv('text')">
@@ -1322,6 +1662,7 @@ onUnmounted(() => {
 
 
         <div id="set-vision" class="sec-t">👁️ 视觉模型（图片/截图题 · 默认 DeepSeek 视觉，可选智谱 GLM-5V / 通义 Qwen-VL）</div>
+        <div class="sec-desc">发图 / 截图题（图推、资料表格、数学公式）必须配它才能看图；DeepSeek 可直接复用同一个 Key。</div>
         <div class="vis-tip">
           📌
           <b>截图/图片题必须配此模型才能看图</b>（图推图形、资料表格、数学公式）。启用步骤：①提供商选「DeepSeek（推荐，用同一个 Key，deepseek-v4-flash-vision-exp）」或「智谱 / 通义」②粘贴 Key ③点下方「保存并测试」。若发图仍无法识别，可到「图形增强」配免费视觉模型兜底。
@@ -1392,6 +1733,7 @@ onUnmounted(() => {
 
 
         <div id="set-fig" class="sec-t">🖼 图形理解增强（可选 · 独立开源模型 · 不影响上方文字/视觉模型）</div>
+        <div class="sec-desc">可选增强：用独立开源视觉模型把题目截图复刻成图贴进回复，辅助看懂原图，不影响主问答。</div>
         <div class="vis-tip">
           📌
           <b>可选项</b>：发图问 图形推理 / 数量关系几何 / 资料分析图表 时，用这个
@@ -1442,7 +1784,11 @@ onUnmounted(() => {
           </div>
         </details>
 
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'voice' }" @click="toggleSetGroup('voice')"><span class="sg-t">🗣️ 语音朗读</span><span class="sg-desc">引擎 / 音色市场 / 本机语音</span><span class="sg-arrow">{{ setGroup === 'voice' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'voice'" class="set-group-bd">
         <div id="set-voice" class="sec-t">🗣️ 语音 · 真人朗读（音色市场 · 去掉 AI 味）</div>
+        <div class="sec-desc">真人级朗读统一管理：引擎 / 音色市场 / 克隆原声 / 本机语音；全局音色 = 萌宠音色。</div>
         <div class="fld" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
           <label style="font-size: 13px; font-weight: 700">自动朗读 AI 回复</label>
           <button class="btn" :class="store.cfg.ttsOn !== false ? 'btn-pri' : 'btn-gh'" @click="toggleTtsSetting()">{{ store.cfg.ttsOn !== false ? '🔊 已开启' : '🔇 已关闭' }}</button>
@@ -1453,7 +1799,29 @@ onUnmounted(() => {
         <div style="font-size: 11px; color: var(--text3); margin: 2px 0 8px; line-height: 1.6">
           💡 <b>这里的全局音色 = 萌宠音色（同一套）</b>，全局朗读、刷题读题、萌宠讲话都用它。只有当你给某个角色<b>克隆了专属声线（🧬）</b>后，切到该角色才临时用克隆原声，切走即恢复此音色 —— 保证永远一致。
         </div>
-        <div style="font-size: 12px; color: var(--pri); margin-bottom: 8px">🎯 当前生效音色：{{ petEffectiveLabel }}</div>
+        <div style="font-size: 12px; color: var(--pri); margin-bottom: 4px">🎯 当前生效音色：{{ petEffectiveLabel }}</div>
+        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">每个音色卡都有 <b>✏️ 改名</b> / <b>👻 隐藏</b>（隐藏后可在各列表下方「已隐藏」一键恢复）；克隆音色在下方「🧬 我的克隆音色」管理（可重命名/删除/保留）。</div>
+        <button v-if="voiceUndo" class="btn btn-gh" style="font-size: 11px; margin-bottom: 8px" @click="undoHideVoice()">↩️ 撤销上一步隐藏（{{ voiceUndo.id }}）</button>
+        <div class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px; margin-bottom: 8px">
+          <label style="font-weight: 700">🧬 我的克隆音色（自定义名称 · 可删除/保留）</label>
+          <div v-if="petCloneVoiceList().length" style="margin-top: 6px">
+            <div v-for="cv in petCloneVoiceList()" :key="cv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px">
+              <span>{{ cv.char }} · <b>{{ cv.name }}</b> <span style="color: var(--text3)">({{ cv.engine === 'glm' ? '智谱' : 'CosyVoice2' }})</span></span>
+              <button class="btn btn-gh" style="font-size: 11px" @click="ttsPreviewBound(cv.skinId)">▶️ 试听</button>
+              <button v-if="cv.locked" class="btn btn-gh" style="font-size: 11px" disabled title="内置锁定，不可删除/改名">🔒 内置</button>
+              <template v-else-if="cloneRename && cloneRename.skinId === cv.skinId">
+                <input v-model="cloneRename.name" style="width: 110px; font-size: 11px; padding: 1px 3px" @keydown.enter.stop="confirmCloneRename()" />
+                <button class="btn btn-pri" style="font-size: 11px" @click="confirmCloneRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: 11px" @click="cloneRename = null">✖</button>
+              </template>
+              <template v-else>
+                <button class="btn btn-gh" style="font-size: 11px" title="重命名" @click="doRenameCloneVoice(cv.skinId)">✏️</button>
+                <button class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(cv.skinId)">🗑 删除</button>
+              </template>
+            </div>
+          </div>
+          <div v-else style="font-size: 11px; color: var(--text3); margin-top: 6px">暂无克隆音色；在「设置 → 萌宠 → 克隆『角色』原声」上传 3-30 秒参考音频即可生成并自动命名。</div>
+        </div>
         <div class="tts-engine-grid">
           <button v-for="eng in TTS_ENGINES" :key="eng.id" class="tts-engine-card" :class="{ on: store.cfg.ttsMode === eng.id }" @click="setTtsMode(eng.id)">
             <span class="te-name">{{ eng.name }}</span>
@@ -1476,11 +1844,22 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="voice-market">
-            <div v-for="v in gmVoiceList" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsGm.voice === v.id }" @click="pickVoice('glm', v.id)">
+            <div v-for="v in voiceList('glm', gmVoiceList)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsGm.voice === v.id }" @click="pickVoice('glm', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
               <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('glm', v.id)">▶️ 试听</button>
+              <template v-if="voiceRename && voiceRename.engine === 'glm' && voiceRename.id === v.id">
+                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+              </template>
+              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('glm', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('glm', v.id)">👻</button>
             </div>
+          </div>
+          <div v-if="hiddenVoicesList('glm', gmVoiceList).length" class="fld" style="margin-top: 4px">
+            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('glm', gmVoiceList)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('glm', hv.id)">恢复</a></span>
           </div>
           <div class="fld" style="display: flex; gap: 6px; align-items: center">
             <button class="btn btn-gh" style="font-size: 12px" @click="loadGmVoices()">🔄 刷新官方音色</button>
@@ -1521,18 +1900,29 @@ onUnmounted(() => {
                 <option value="cosy">🎨 CosyVoice2 · 硅基流动</option>
               </select>
               <button class="btn btn-gh" style="font-size: 12px" @click="$refs.voiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
-              <input ref="voiceFileInput" type="file" accept="audio/*" style="display: none" @change="onVoiceFile($event)" />
+              <input ref="voiceFileInput" type="file" accept="audio/*,video/*,.mp4,.mov,.mkv,.webm,.m4a" style="display: none" @change="onVoiceFile($event)" />
               <input v-model="cloneVoiceName" placeholder="音色名（如 李星云声线）" style="flex: 1; min-width: 120px" />
               <button class="btn btn-pri" style="font-size: 12px" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
             </div>
             <div v-if="voiceCloneStat" style="font-size: 11px; color: var(--text3); margin-top: 6px">{{ voiceCloneStat }}</div>
           </div>
           <div class="voice-market">
-            <div v-for="v in OPENAI_PRESET_VOICES" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsOpenAI.voice === v.id }" @click="pickVoice('openai', v.id)">
+            <div v-for="v in voiceList('openai', OPENAI_PRESET_VOICES)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsOpenAI.voice === v.id }" @click="pickVoice('openai', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
               <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('openai', v.id)">▶️ 试听</button>
+              <template v-if="voiceRename && voiceRename.engine === 'openai' && voiceRename.id === v.id">
+                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+              </template>
+              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('openai', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('openai', v.id)">👻</button>
             </div>
+          </div>
+          <div v-if="hiddenVoicesList('openai', OPENAI_PRESET_VOICES).length" class="fld" style="margin-top: 4px">
+            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('openai', OPENAI_PRESET_VOICES)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('openai', hv.id)">恢复</a></span>
           </div>
         </div>
 
@@ -1540,11 +1930,22 @@ onUnmounted(() => {
         <div v-if="store.cfg.ttsMode === 'edge'">
           <div class="sec-t" style="font-size: 13px">🚀 微软 Edge 神经音色（免费 · 无 Key）</div>
           <div class="voice-market">
-            <div v-for="v in edgeVoiceList" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsEdgeVoice === v.id }" @click="pickVoice('edge', v.id)">
+            <div v-for="v in voiceList('edge', edgeVoiceList)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsEdgeVoice === v.id }" @click="pickVoice('edge', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
               <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('edge', v.id)">▶️ 试听</button>
+              <template v-if="voiceRename && voiceRename.engine === 'edge' && voiceRename.id === v.id">
+                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+              </template>
+              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('edge', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('edge', v.id)">👻</button>
             </div>
+          </div>
+          <div v-if="hiddenVoicesList('edge', edgeVoiceList).length" class="fld" style="margin-top: 4px">
+            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('edge', edgeVoiceList)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('edge', hv.id)">恢复</a></span>
           </div>
           <div class="fld" style="display: flex; gap: 6px; align-items: center">
             <button class="btn btn-gh" style="font-size: 12px" @click="loadEdgeVoices()">🔄 刷新官方音色</button>
@@ -1622,10 +2023,11 @@ onUnmounted(() => {
             ⏹ 换句试听
           </button>
         </div>
-        </div>
-<button class="set-group-hd" :class="{ on: setGroup === 'look' }" @click="toggleSetGroup('look')"><span>🎨 主题与外观（统一管理：主题 / 强调色 / 护眼 / 壁纸 / 随手记）</span><span class="sg-arrow">{{ setGroup === 'look' ? '▾' : '▸' }}</span></button>
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'look' }" @click="toggleSetGroup('look')"><span class="sg-t">🎨 外观与主题</span><span class="sg-desc">主题 / 背景 / 随手记 / 冲刺 / 导出偏好</span><span class="sg-arrow">{{ setGroup === 'look' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'look'" class="set-group-bd">
 <div id="set-look" class="sec-t">🎨 主题与外观</div>
+        <div class="sec-desc">主题、强调色、护眼、字体、壁纸、随手记、备考冲刺、导出偏好统一管理。</div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">主题/文字配色/强调色/护眼/壁纸/随手记/字号 统一在此管理；顶栏 ☀️/🌙 可在「米白纸 / 深空黑」间快速切换白天黑夜。</div>
         <div class="sec-t">🎨 主题预设（iPad 笔记风 · 一键切换）</div>
         <div class="theme-grid">
@@ -1748,9 +2150,70 @@ onUnmounted(() => {
         </div>
 
 
+        <div id="set-bg" class="sec-t">🖼️ 背景（纯色 / 图片壁纸）</div>
+        <div class="sec-desc">主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 / 在线自动轮换。</div>
+        <div class="fld">
+          <label>背景类型</label>
+          <select v-model="store.cfg.bgMode" @change="saveCfg()">
+            <option value="default">默认（跟随主题）</option>
+            <option value="solid">纯色背景</option>
+            <option value="image">图片壁纸</option>
+          </select>
         </div>
-<button class="set-group-hd" :class="{ on: setGroup === 'fun' }" @click="toggleSetGroup('fun')"><span>🎵 趣味·数据·同步（音乐 / 萌宠 / 数据）</span><span class="sg-arrow">{{ setGroup === 'fun' ? '▾' : '▸' }}</span></button>
-<div v-show="setGroup === 'fun'" class="set-group-bd">
+        <div class="fld" style="margin-top: 8px">
+          <label>
+            <input v-model="store.cfg.bgAuto" type="checkbox" @change="toggleBgAuto()" />
+            🌐 在线壁纸自动轮换（每 5 分钟换一张，需联网）
+          </label>
+          <div class="exp-choices" style="margin-top: 6px">
+            <button class="btn btn-gh" @click="nextWallpaper()">🎲 换一张在线壁纸</button>
+          </div>
+</div>
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'data' }" @click="toggleSetGroup('data')"><span class="sg-t">💾 数据与同步</span><span class="sg-desc">保存位置 / 数据管理 / WebDAV / 时政</span><span class="sg-arrow">{{ setGroup === 'data' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'data'" class="set-group-bd">
+        <div id="set-data" class="sec-t">💾 数据保存位置（本地文件夹）</div>
+        <div class="sec-desc">数据保存位置与迁移：本地文件夹 / 导出导入备份 / WebDAV 云同步 / 时政范围。</div>
+        <div class="fld">
+          <label>电脑端：选择文件夹后，可一键把全部数据保存进去</label>
+          <div class="exp-choices">
+            <button class="btn btn-gh" @click="pickDir()">📁 选择保存文件夹</button>
+            <button class="btn btn-pri" @click="saveDataDir()">💾 保存全部数据</button>
+          </div>
+          <div v-if="dirLabel" style="font-size: 11px; color: var(--hud-cyan); margin-top: 4px">已选择文件夹：{{ dirLabel }}</div>
+          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            保存后会写入：数据备份.json / 错题集.md / 知识库积累.md。手机端或浏览器不支持选文件夹时，用上方「⬇️ 导出备份(JSON)」下载到手机，可自行移动到任意文件夹。所有数据默认存在本机 localStorage，不会上传。
+          </div>
+        </div>
+        <div class="sec-t">💾 数据管理</div>
+        <div class="exp-choices">
+          <button class="btn btn-pri" @click="exportAllData()">📦 导出全部数据</button>
+          <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
+            📦 导入全部数据
+            <input type="file" accept=".json,application/json" style="display: none" @change="importAllData" />
+          </label>
+          <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
+            📥 导入笔记(.md)
+            <input type="file" accept=".md,.markdown,text/markdown" style="display: none" @change="importNotes" />
+          </label>
+
+        </div>
+        <div class="exp-choices">
+          <button class="btn btn-gh" @click="clearResults()">🧹 清考试战绩</button>
+          <button class="btn btn-gh" @click="startOnboard()">🎓 重新引导</button>
+        </div>
+        <div class="exp-choices">
+          <button class="btn btn-gh" @click="clearWrong()">🧹 清空错题</button>
+          <button class="btn btn-gh" @click="clearChat()">🧹 清空对话</button>
+          <button class="btn btn-gh" style="color: var(--red)" @click="resetAll()">⚠️ 重置全部</button>
+        </div>
+        <div class="sec-t">🧪 出题历史数据（AI 质检学习）</div>
+        <div class="sec-desc">每次 AI 出题（单题/材料题组）的 板块/题型/尝试次数/质检失败原因/是否成功 都会记录在本地，统计后自动注入出题提示词，让 AI「越出越好」；数据可导出供后续训练。</div>
+        <div class="exp-choices">
+          <button class="btn btn-gh" @click="exportQuizLog()">📤 导出出题历史(JSON)</button>
+          <button class="btn btn-gh" @click="clearQuizLog()">🧹 清空出题历史</button>
+          <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
+        </div>
 <div class="sec-t">☁️ WebDAV 云同步</div>
         <div class="fld">
           <label>WebDAV 地址（上传/下载的备份文件完整 URL）</label>
@@ -1773,6 +2236,22 @@ onUnmounted(() => {
         </div>
 
 
+        <div class="sec-t">📰 时政时间范围</div>
+        <div class="set-note">📦 我的记忆库（常识/时政/成语/实词/笔记）已移至「🗂️ 积累」页管理，点击右侧宠物下方「📦 记忆库」即可查看/添加/删除/导出。</div>
+        <div class="fld">
+          <label>起始月份（默认 2025-10 起）</label>
+          <input v-model="store.cfg.szFrom" type="month" @change="saveCfg()" />
+        </div>
+        <div class="fld">
+          <label>截止月份（留空 = 动态到今天）</label>
+          <input v-model="store.cfg.szTo" type="month" @change="saveCfg()" />
+          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            悬浮窗时政只推送该时间范围内的国内/贵州事件。
+          </div>
+        </div>
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'fun' }" @click="toggleSetGroup('fun')"><span class="sg-t">🎵 趣味与陪伴</span><span class="sg-desc">萌宠 / 背景音乐 / 曲目</span><span class="sg-arrow">{{ setGroup === 'fun' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'fun'" class="set-group-bd">
         <div class="sec-t">🎵 学习背景音乐</div>
         <div class="fld">
           <label>播放控制</label>
@@ -1825,7 +2304,7 @@ onUnmounted(() => {
           <div class="skin-grid" style="grid-template-columns: repeat(4, 1fr); margin-top: 8px">
             <button v-for="s in petAllSkins" :key="s.id" class="skin-card" :class="{ on: petSkin.id === s.id }" @click="applySkin(s.id)">
               <PetAvatar :size="40" :skin-id="s.id" class="skin-av" />
-              <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="形象与声音已内置锁定，不可更改">🔒</span></span>
+            <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="形象与声音已内置锁定，不可更改">🔒</span></span>
               <span v-if="s.custom && s.id !== 'custom'" class="skin-desc" style="display:flex; gap:4px; justify-content:center">
                 <span style="cursor:pointer" @click.stop="applySkin(s.id)">✏️</span>
                 <span style="cursor:pointer" title="删除该自定义角色" @click.stop="doRemoveCustom(s.id)">🗑</span>
@@ -1865,7 +2344,7 @@ onUnmounted(() => {
         <div v-if="!petIsLocked(petSkin.id)" class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px">
           <label style="font-weight: 700">🎤 克隆『{{ petSkin.char }}』原声（大模型音色克隆 · 原声级）</label>
           <div style="font-size: 11px; color: var(--text3); margin: 4px 0">
-            上传一段 3-30 秒清晰的参考音频（说话/角色声均可，越清晰越像），大模型会克隆出该音色并<b>自动绑定到『{{ petSkin.char }}』</b>：之后一键切到这个角色，朗读就是克隆原声；切走则恢复「语音」里的全局音色（保持全局一致）。<b>支持 mp3/wav/m4a/aac/ogg 等常见格式（哪怕后缀是 .mp3 实为 m4a 也能识别），超过 30 秒会自动裁前 20 秒、去头尾静音、转成标准 WAV 再克隆</b>。配音版权请自行确保。
+            上传一段 3-30 秒清晰的参考音频（说话/角色声均可，越清晰越像），大模型会克隆出该音色并<b>自动绑定到『{{ petSkin.char }}』</b>：之后一键切到这个角色，朗读就是克隆原声；切走则恢复「语音」里的全局音色（保持全局一致）。<b>支持 mp3/wav/m4a/aac/ogg 以及 mp4/mov 等视频文件（自动提取其中的声音），哪怕后缀是 .mp3 实为 m4a 也能识别；超过 30 秒会自动裁前 20 秒、去头尾静音、转成标准 WAV 再克隆</b>。配音版权请自行确保。
           </div>
           <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
             <select v-model="cloneBackend" style="font-size: 12px; max-width: 190px">
@@ -1873,11 +2352,11 @@ onUnmounted(() => {
               <option value="cosy">🎨 CosyVoice2 · 硅基流动</option>
             </select>
             <button class="btn btn-gh" style="font-size: 12px" @click="$refs.skinVoiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
-            <input ref="skinVoiceFileInput" type="file" accept="audio/*" style="display: none" @change="onVoiceFile($event)" />
+            <input ref="skinVoiceFileInput" type="file" accept="audio/*,video/*,.mp4,.mov,.mkv,.webm,.m4a" style="display: none" @change="onVoiceFile($event)" />
             <input v-model="cloneVoiceName" :placeholder="petSkin.char + '声线'" style="flex: 1; min-width: 110px" />
             <button class="btn btn-pri" style="font-size: 12px" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
             <div style="width: 100%">
-              <input v-model="cloneVoiceText" placeholder="参考音频对应的文字内容（选填，填了克隆更像，如：天地玄黄，宇宙洪荒…）" style="width: 100%; margin-top: 6px" />
+              <input v-model="cloneVoiceText" placeholder="参考音频对应的文字内容（选填；留空会自动语音识别生成，填了克隆更像）" style="width: 100%; margin-top: 6px" />
             </div>
           </div>
           <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
@@ -1914,24 +2393,46 @@ onUnmounted(() => {
         </div>
 
 
-        <div id="set-bg" class="sec-t">🖼️ 背景（纯色 / 图片壁纸）</div>
-        <div class="fld">
-          <label>背景类型</label>
-          <select v-model="store.cfg.bgMode" @change="saveCfg()">
-            <option value="default">默认（跟随主题）</option>
-            <option value="solid">纯色背景</option>
-            <option value="image">图片壁纸</option>
-          </select>
-        </div>
-        <div class="fld" style="margin-top: 8px">
-          <label>
-            <input v-model="store.cfg.bgAuto" type="checkbox" @change="toggleBgAuto()" />
-            🌐 在线壁纸自动轮换（每 5 分钟换一张，需联网）
-          </label>
-          <div class="exp-choices" style="margin-top: 6px">
-            <button class="btn btn-gh" @click="nextWallpaper()">🎲 换一张在线壁纸</button>
-          </div>
-        </div>
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'account' }" @click="toggleSetGroup('account')"><span class="sg-t">🔐 账号与安全</span><span class="sg-desc">本地登录门 / 修改密码 / 退出 / 删除账号</span><span class="sg-arrow">{{ setGroup === 'account' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'account'" class="set-group-bd">
+  <div id="set-account" class="sec-t">🔐 本地账号（登录门）</div>
+  <div class="sec-desc">注册/登录后才可使用本项目；账号仅存本机 localStorage，不上传任何数据。</div>
+  <div class="fld">
+    <label>登录门开关</label>
+    <label style="font-weight: 400"><input type="checkbox" :checked="authState.enabled" @change="toggleAuthGate($event.target.checked)" /> 启用登录门（开启后需登录才能使用）</label>
+  </div>
+  <div v-if="authState.ok" class="fld">
+    <label>当前用户</label>
+    <div class="auth-cur">👤 {{ authState.user }}</div>
+  </div>
+  <div v-if="authState.ok" class="fld">
+    <label>修改密码</label>
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+      <input v-model="authOldP" type="password" placeholder="原密码" style="width: 120px" />
+      <input v-model="authNewP" type="password" placeholder="新密码(≥4位)" style="width: 140px" @keyup.enter="doChangePass" />
+      <button class="btn btn-gh" style="font-size: 12px" @click="doChangePass">✏️ 修改</button>
+    </div>
+  </div>
+  <div v-if="authState.ok" class="fld">
+    <label>退出 / 删除本机账号</label>
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+      <button class="btn btn-gh" style="font-size: 12px" @click="doLogout">🚪 退出登录</button>
+      <input v-model="authDelP" type="password" placeholder="输入密码删除账号" style="width: 160px" @keyup.enter="doDeleteUser" />
+      <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="doDeleteUser">🗑 删除账号</button>
+    </div>
+  </div>
+  <div class="fld" style="border-top: 1px dashed rgba(148,163,184,.2); padding-top: 10px; margin-top: 4px">
+    <label>🔐 登录方式</label>
+    <div style="font-size: 12px; color: var(--text2); line-height: 1.7">本地账号：<b>用户名 + 密码</b>（仅存本机浏览器，无服务器、不上传、无第三方服务）。勾「记住我」7 天内免登录；忘记密码可「重置本地账号」重新注册。</div>
+  </div>
+  <div class="fld">
+    <button class="btn btn-gh" style="font-size: 12px" @click="doAuthReset">🔄 重置本地账号（清空本机账号记录）</button>
+  </div>
+  <div style="font-size: 11px; color: var(--text3); margin-top: 4px">说明：本登录为「本地保护门」（无后端），防止他人随意使用；清除站点数据或换浏览器会丢失账号。删除账号 / 重置账号不影响对话、错题、笔记等学习数据。</div>
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'help' }" @click="toggleSetGroup('help')"><span class="sg-t">❓ 帮助与关于</span><span class="sg-desc">新手引导 / 使用帮助 / 关于 / 日志</span><span class="sg-arrow">{{ setGroup === 'help' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'help'" class="set-group-bd">
         <div class="sec-t">🧭 新手引导</div>
         <div v-if="store.cfg.bgMode === 'solid'" class="fld">
           <label>预设纯色</label>
@@ -1975,6 +2476,7 @@ onUnmounted(() => {
 
 
         <div id="set-help" class="sec-t">🧭 使用帮助</div>
+        <div class="sec-desc">六步学习闭环、快捷键、常见问题、新手引导开关。</div>
         <details class="guide">
           <summary>📈 六步学习闭环（建议每天按这个顺序用）</summary>
           <div class="guide-body">
@@ -2013,63 +2515,24 @@ onUnmounted(() => {
         </details>
 
 
-        <div id="set-data" class="sec-t">💾 数据保存位置（本地文件夹）</div>
-        <div class="fld">
-          <label>电脑端：选择文件夹后，可一键把全部数据保存进去</label>
-          <div class="exp-choices">
-            <button class="btn btn-gh" @click="pickDir()">📁 选择保存文件夹</button>
-            <button class="btn btn-pri" @click="saveDataDir()">💾 保存全部数据</button>
-          </div>
-          <div v-if="dirLabel" style="font-size: 11px; color: var(--hud-cyan); margin-top: 4px">已选择文件夹：{{ dirLabel }}</div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
-            保存后会写入：数据备份.json / 错题集.md / 知识库积累.md。手机端或浏览器不支持选文件夹时，用上方「⬇️ 导出备份(JSON)」下载到手机，可自行移动到任意文件夹。所有数据默认存在本机 localStorage，不会上传。
-          </div>
-        </div>
-        <div class="sec-t">💾 数据管理</div>
-        <div class="exp-choices">
-          <button class="btn btn-pri" @click="exportAllData()">📦 导出全部数据</button>
-          <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
-            📦 导入全部数据
-            <input type="file" accept=".json,application/json" style="display: none" @change="importAllData" />
-          </label>
-          <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
-            📥 导入笔记(.md)
-            <input type="file" accept=".md,.markdown,text/markdown" style="display: none" @change="importNotes" />
-          </label>
-
-        </div>
-        <div class="exp-choices">
-          <button class="btn btn-gh" @click="clearResults()">🧹 清考试战绩</button>
-          <button class="btn btn-gh" @click="startOnboard()">🎓 重新引导</button>
-        </div>
-        <div class="exp-choices">
-          <button class="btn btn-gh" @click="clearWrong()">🧹 清空错题</button>
-          <button class="btn btn-gh" @click="clearChat()">🧹 清空对话</button>
-          <button class="btn btn-gh" style="color: var(--red)" @click="resetAll()">⚠️ 重置全部</button>
-        </div>
-        <div class="sec-t">📰 时政时间范围</div>
-        <div class="set-note">📦 我的记忆库（常识/时政/成语/实词/笔记）已移至「🗂️ 积累」页管理，点击右侧宠物下方「📦 记忆库」即可查看/添加/删除/导出。</div>
-        <div class="fld">
-          <label>起始月份（默认 2025-10 起）</label>
-          <input v-model="store.cfg.szFrom" type="month" @change="saveCfg()" />
-        </div>
-        <div class="fld">
-          <label>截止月份（留空 = 动态到今天）</label>
-          <input v-model="store.cfg.szTo" type="month" @change="saveCfg()" />
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
-            悬浮窗时政只推送该时间范围内的国内/贵州事件。
-          </div>
-        </div>
-        </div>
-<button class="set-group-hd" :class="{ on: setGroup === 'help' }" @click="toggleSetGroup('help')"><span>❓ 帮助与关于</span><span class="sg-arrow">{{ setGroup === 'help' ? '▾' : '▸' }}</span></button>
-<div v-show="setGroup === 'help'" class="set-group-bd">
 <div id="set-about" class="sec-t">📜 关于 · 开发者说明</div>
+        <div class="sec-desc">免责声明、隐私说明、版本信息与开发者说明。</div>
         <div class="about-box">
           <p class="ab-warn">⚠️ 本项目仅供个人学习使用，切勿商用，违者必究。</p>
-          <p><b>隐私与数据</b>：全部数据（对话/错题/知识库/设置）只保存在你自己的浏览器 localStorage，应用无后端服务器、不上传任何数据；API Key 也只存本机。可用「数据管理 → 导出/导入备份、WebDAV 云同步、保存到本地文件夹」迁移。</p>
-          <p><b>开发者说明</b>：本项目为个人备考自用工具（Vue3 + Vite + PWA）。技术栈与构建见仓库 README / PROJECT_ROADMAP；`01_源码` 为唯一活跃源码，`scripts/sync-dist.ps1` 一键构建并同步三端（网页/发布包/安卓 web 资源）。欢迎在个人学习范围内二次开发。</p>
+          <p><b>隐私与数据</b>：全部数据（对话 / 错题 / 知识库 / 设置 / 萌宠）只保存在你自己的浏览器 localStorage，应用无后端服务器、不上传任何数据；API Key 也只存本机。迁移可用「数据与同步 → 导出/导入备份、WebDAV 云同步、保存到本地文件夹」。</p>
           <p><b>版本</b>：v{{ APP_VERSION }}（更新历史见仓库 CHANGELOG.md）</p>
-          <p><b>使用提示</b>：首次使用请先完成引导（设置 API Key 与视觉模型）；刷题→存错题→二刷复盘→积累记忆→统计→导出，形成闭环提分。</p>
+          <p><b>使用提示</b>：首次使用请先完成「设置引导」（重点：文字模型 + 视觉模型 + 语音试听）；日常按「看板→对话刷题→错题二刷→积累复习→统计→导出」闭环提分。</p>
+          <details class="guide">
+            <summary>🔧 开发者说明（模块地图 / 配置键 / 存储键 / 构建流程）</summary>
+            <div class="guide-body">
+              <p><b>技术栈</b>：Vue3（Composition API）+ Vite + PWA。`01_源码` 为唯一活跃源码；`scripts/sync-dist.ps1` 一键构建并同步三端（网页 / 发布包 / 安卓 web 资源）。</p>
+              <p><b>模块地图</b>：<code>src/App.vue</code> 设置面板与全局壳；<code>src/store.js</code> 全局状态（cfg/对话/错题/记忆/笔记）；<code>src/api/*</code> 各厂商 AI 适配（chat/vision/figEnhance）；<code>src/utils/tts*.js</code> 四引擎朗读与音色克隆；<code>src/utils/pet.js</code> 萌宠角色系统；<code>src/utils/music.js</code> 背景音乐；<code>src/kb.js</code> 知识库与名师方法论提示词；<code>src/components/*</code> 各板块页面。</p>
+              <p><b>设置面板结构（本次重构）</b>：6 大分组 = 🧠 模型与 AI / 🗣️ 语音朗读 / 🎨 外观与主题 / 💾 数据与同步 / 🎵 趣味与陪伴 / ❓ 帮助与关于。每组一个手风琴标题（`set-group-hd`）+ 内容容器（`set-group-bd`）；顶部 `set-status` 状态总览；导航 `setNav` 按组跳转（`scrollSet` 自动展开所属组）。新增设置项时：①在对应组内添加区块（`sec-t` + 内容 + 可选 `sec-desc`）②在 <code>store.cfg</code> 增加字段 ③必要时加入 <code>SEC_GROUP</code> / <code>SET_GUIDE</code>。</p>
+              <p><b>关键配置键（store.cfg）</b>：<code>text/vision</code>=文字/视觉模型（prov/key/url/model）；<code>fig</code>=图形增强；<code>ttsMode/ttsGm/ttsOpenAI/ttsEdgeVoice/ttsRate/ttsOn</code>=朗读；<code>petSkin/skinVoices/skinImgs/customSkins</code>=萌宠；<code>musicOn/musicVol/musicList</code>=音乐；<code>szFrom/szTo</code>=时政范围；<code>dataDir</code>=本地文件夹。</p>
+              <p><b>关键存储键（localStorage）</b>：<code>xc_cfg</code>=设置；<code>xc_msgs</code>=对话；<code>xc_wqs</code>=错题；<code>xc_my_mem</code>=记忆库；<code>xc_notes</code>=笔记；<code>xc_pet</code>=萌宠养成；<code>xc_chat_fast_model</code>=对话快模型。</p>
+              <p><b>质量流程</b>：改动后跑 <code>npm run lint</code>（零告警）→ <code>npm test</code> → <code>npm run build</code> → <code>scripts/sync-dist.ps1</code> 三端同步；完整文档见仓库 <code>01_源码/开发说明.md</code>。</p>
+            </div>
+          </details>
         </div>
         <div class="sec-t">ℹ️ 模型说明</div>
         <div style="font-size: 12px; color: var(--text3); line-height: 1.7">
@@ -2087,14 +2550,111 @@ onUnmounted(() => {
           </div>
         </div>
         <pre v-if="errLogShow" class="err-log">{{ errLogText }}</pre>
-        </div>
+</div>
 <div class="pnl-btns">
           <button class="btn btn-gh" @click="setShow = false">取消</button>
           <button class="btn btn-pri" :disabled="testBusy" @click="saveSet()">{{ testBusy ? '检测中…' : '保存并测试' }}</button>
         </div>
       </div>
     </div>
-    <!-- 导出弹窗 -->
+        <!-- 用量与花费面板（实时 · 全维度明细） -->
+    <div class="ov" :class="{ show: costShow }" @click.self="costShow = false">
+      <div class="pnl cost-pnl">
+        <div class="pnl-top">
+          <button class="pnl-top-b" title="关闭" @click="costShow = false">← 返回</button>
+          <span class="pnl-top-t">💰 AI 用量与花费（实时追踪 · 越详细越好）</span>
+        </div>
+        <div v-if="costLive.active" class="cost-live">
+          <span class="cl-dot"></span>正在调用
+          <b>{{ COST_FEATURES[costLive.feature] || costLive.feature }}</b>
+          <span v-if="costLive.kind" class="cl-kind">{{ COST_KINDS[costLive.kind] || costLive.kind }}</span>
+          <span class="cl-model">{{ costLive.model || costLive.provider || '' }}</span>
+          <span class="cl-sec">已 {{ costElapsed }}s</span>（完成即记账）
+        </div>
+        <div class="cost-sum">
+          <div class="cost-sum-it"><span>今日</span><b>{{ fmtCost(costStat.today) }}</b><i>{{ costStat.todayN }} 次</i></div>
+          <div class="cost-sum-it"><span>本周</span><b>{{ fmtCost(costStat.week) }}</b><i>{{ costStat.weekN }} 次</i></div>
+          <div class="cost-sum-it"><span>本月</span><b>{{ fmtCost(costStat.month) }}</b><i>{{ costStat.monthN }} 次</i></div>
+          <div class="cost-sum-it"><span>累计</span><b>{{ fmtCost(costStat.total) }}</b><i>{{ costStat.totalN }} 次</i></div>
+        </div>
+        <div class="cost-tok">
+          <span>🧮 累计 token：输入 <b>{{ fmtTok(costStat.totalInT) }}</b> + 输出 <b>{{ fmtTok(costStat.totalOutT) }}</b><template v-if="costStat.totalReasonT"> + 思考 <b>{{ fmtTok(costStat.totalReasonT) }}</b></template> = <b>{{ fmtTok(costStat.totalT) }}</b></span>
+        </div>
+        <div style="font-size: 11px; color: var(--text3); line-height: 1.6; margin: 6px 2px 8px">
+          📌 每次调用 <b>实时记一笔</b>：功能 / 模型 / 图文类型 / 输入·输出·思考 token（接口有 usage 用精确值并标「精确」，否则按文本估算）/ 耗时 / 费用明细。金额按下方计价表估算，仅供心里有底，以服务商账单为准；<b>本地免费服务（Ollama/LM Studio/Jan）计 ¥0</b>。
+        </div>
+        <div class="cost-cols">
+          <div class="cost-col">
+            <div class="sec-t" style="font-size: 13px">📊 按功能</div>
+            <div v-for="(v, k) in costStat.byFeat" :key="k" class="cost-row"><span>{{ COST_FEATURES[k] || k }}</span><b>{{ fmtCost(v) }}</b></div>
+            <div v-if="!Object.keys(costStat.byFeat).length" class="cost-empty">暂无记录</div>
+          </div>
+          <div class="cost-col">
+            <div class="sec-t" style="font-size: 13px">🤖 按模型</div>
+            <div v-for="(v, k) in costStat.byModel" :key="k" class="cost-row"><span>{{ k }}</span><b>{{ fmtCost(v) }}</b></div>
+            <div v-if="!Object.keys(costStat.byModel).length" class="cost-empty">暂无记录</div>
+          </div>
+          <div class="cost-col">
+            <div class="sec-t" style="font-size: 13px">🖼 按类型</div>
+            <div v-for="(v, k) in costStat.byKind" :key="k" class="cost-row"><span>{{ COST_KINDS[k] || k }}</span><b>{{ fmtCost(v) }}</b></div>
+            <div v-if="!Object.keys(costStat.byKind).length" class="cost-empty">暂无记录</div>
+          </div>
+          <div class="cost-col">
+            <div class="sec-t" style="font-size: 13px">🏢 按提供商</div>
+            <div v-for="(v, k) in costStat.byProv" :key="k" class="cost-row"><span>{{ k }}</span><b>{{ fmtCost(v) }}</b></div>
+            <div v-if="!Object.keys(costStat.byProv).length" class="cost-empty">暂无记录</div>
+          </div>
+        </div>
+        <div class="sec-t" style="font-size: 13px">🧾 最近记录（{{ costStat.list.length }}）<span style="font-weight:400;color:var(--text3);font-size:11px">点某条可展开费用明细</span></div>
+        <div class="cost-list">
+          <div v-for="(r, i) in costStat.list" :key="i" class="cost-it" :class="{ open: costOpen === i }" @click="costOpen = costOpen === i ? null : i">
+            <span class="ci-time" :title="fmtTime(r.t)">{{ fmtTime(r.t) }}</span>
+            <span class="ci-kind" :title="costKindLabel(r.kind)">{{ r.kind === 'img' ? '🖼' : r.kind === 'audio' ? '🔊' : '📝' }}</span>
+            <span class="ci-feat">{{ COST_FEATURES[r.feature] || r.feature }}</span>
+            <span class="ci-model" :title="'提供商：' + (r.provider || '?')">{{ r.model || r.provider || '?' }}</span>
+            <span class="ci-tk" :title="'输入 ' + r.inT + ' / 输出 ' + r.outT + (r.reasonT ? ' / 思考 ' + r.reasonT : '') + ' tok'">
+              {{ fmtTok(r.inT) }}/{{ fmtTok(r.outT) }}{{ r.reasonT ? '+' + fmtTok(r.reasonT) : '' }} tok{{ r.exact ? '·精确' : '·估' }}
+            </span>
+            <span v-if="r.sec" class="ci-sec">{{ r.sec }}s</span>
+            <b class="ci-cost" :title="costCostDetail(r)">{{ fmtCost(r.cost) }}</b>
+          </div>
+          <div v-if="!costStat.list.length" class="cost-empty">还没有 AI 调用记录，去问答/刷题/朗读试试（实时动态记）</div>
+        </div>
+        <div v-if="costOpen != null && costStat.list[costOpen]" class="cost-detail">
+          <div><b>时间：</b>{{ fmtTime(costStat.list[costOpen].t) }}</div>
+          <div><b>功能：</b>{{ COST_FEATURES[costStat.list[costOpen].feature] || costStat.list[costOpen].feature }}（{{ costKindLabel(costStat.list[costOpen].kind) }}）</div>
+          <div><b>模型：</b>{{ costStat.list[costOpen].model || '?' }}<span v-if="costStat.list[costOpen].provider">（{{ costStat.list[costOpen].provider }}）</span></div>
+          <div><b>Token：</b>输入 {{ costStat.list[costOpen].inT }} / 输出 {{ costStat.list[costOpen].outT }}<template v-if="costStat.list[costOpen].reasonT"> / 思考 {{ costStat.list[costOpen].reasonT }}</template>（{{ costStat.list[costOpen].exact ? '接口精确' : '文本估算' }}）</div>
+          <div v-if="costStat.list[costOpen].sec"><b>耗时：</b>{{ costStat.list[costOpen].sec }} 秒</div>
+          <div><b>费用明细：</b>{{ costCostDetail(costStat.list[costOpen]) || '—' }} = <b>{{ fmtCost(costStat.list[costOpen].cost) }}</b></div>
+          <div v-if="costStat.list[costOpen].note"><b>备注：</b>{{ costStat.list[costOpen].note }}</div>
+        </div>
+        <details class="guide" style="margin-top: 10px">
+          <summary>⚙️ 计价表（官方公开价已内置 · 元/百万 token；输入框为换算后的 元/千token=官方价÷1000，一般无需改）</summary>
+          <div class="guide-body">
+            <div v-for="(pr, mk) in costPrices" :key="mk" class="cost-price-row">
+              <span class="cp-name">{{ mk === 'ttsPer1k' ? '朗读(元/千字)' : mk === 'cloneFee' ? '克隆(元/次)' : mk }}</span>
+              <input v-if="mk === 'ttsPer1k' || mk === 'cloneFee'" v-model.number="costPrices[mk]" type="number" step="0.001" min="0" style="width: 90px" />
+              <template v-else>
+                <input v-model.number="costPrices[mk].in" type="number" step="0.001" min="0" style="width: 70px" title="输入价(元/千token = 官方元/百万 ÷ 1000)" />
+                <input v-model.number="costPrices[mk].out" type="number" step="0.001" min="0" style="width: 70px" title="输出价(元/千token = 官方元/百万 ÷ 1000)" />
+              </template>
+              <span class="cp-note">{{ pr.note || pr }}</span>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+              <button class="btn btn-pri" style="font-size: 12px" @click="costSavePrices()">💾 保存计价表</button>
+              <button class="btn btn-gh" style="font-size: 12px" @click="costResetPrices()">↩️ 恢复默认</button>
+              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('today'); costShow = true">🧹 清今日</button>
+              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('week'); costShow = true">🧹 清本周</button>
+              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('month'); costShow = true">🧹 清本月</button>
+              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('all')">🗑 清全部</button>
+            </div>
+          </div>
+        </details>
+        <div class="pnl-btns"><button class="btn btn-gh" @click="costShow = false">关闭</button></div>
+      </div>
+    </div>
+        <!-- 导出弹窗 -->
     <div class="ov" :class="{ show: expShow }" @click.self="expShow = false">
       <div class="pnl">
         <div class="pnl-top">
@@ -2332,7 +2892,7 @@ onUnmounted(() => {
               <span class="skin-name">新增自定义</span>
             </button>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">李星云/薛神为内置锁定角色（形象+克隆原声不可改）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
+          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">薛神/章若楠/李星云/姬如雪为内置锁定角色（形象+克隆原声不可改）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
         </div>
         <div v-if="bubble && !petMuted" class="pet-talk pp-talk">{{ bubble }}</div>
         <div class="pc-list pp-list">
@@ -2344,6 +2904,9 @@ onUnmounted(() => {
         </div>
         <div class="pc-input-row pp-input">
           <input v-model="petAskText" placeholder="问萌宠：这道题怎么解？掉什么坑？今天学什么？" style="flex: 1" @keydown.enter="doPetAsk()" />
+          <button class="btn btn-gh" style="font-size: 12px" title="发送图片（视觉模型识别）" @click="$refs.petImgChatInput.click()">📷</button>
+          <input ref="petImgChatInput" type="file" accept="image/*" style="display: none" @change="onPetImgChat($event)" />
+          <button class="btn btn-gh" style="font-size: 12px" title="语音输入（说问题转文字）" @click="petMic()">🎤</button>
           <button class="btn btn-pri" style="font-size: 12px; white-space: nowrap" :disabled="petChatBusy" @click="doPetAsk()">发送</button>
           <button class="btn btn-gh" style="font-size: 12px" :title="petSpeakReply ? '回复将用真人音色朗读' : '回复已静音'" @click="petSpeakReply = !petSpeakReply">{{ petSpeakReply ? '🔊' : '🔇' }}</button>
         </div>

@@ -3,9 +3,9 @@ import { store } from '../store'
 import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin } from '../utils/pet'
 
 describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
-  it('只保留 李星云 / 薛神 / 自定义 三个内置角色', () => {
+  it('四个内置锁定角色 + 自定义：薛神/章若楠/李星云/姬如雪 + 自定义', () => {
     const ids = PET_SKINS.map((s) => s.id)
-    expect(ids).toEqual(['lixingyun', 'xueshen', 'custom'])
+    expect(ids).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
   })
 
   it('每个皮肤都有形象/声线/人设', () => {
@@ -18,15 +18,22 @@ describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
     })
   })
 
-  it('李星云、薛神都自带大模型克隆原声（内置）且锁定', () => {
+  it('薛神/李星云/姬如雪自带大模型克隆原声（内置）且锁定，章若楠内置锁定', () => {
     const lx = PET_SKINS.find((s) => s.id === 'lixingyun')
     const xs = PET_SKINS.find((s) => s.id === 'xueshen')
+    const jr = PET_SKINS.find((s) => s.id === 'jiruxue')
+    const zr = PET_SKINS.find((s) => s.id === 'zhangruonan')
     expect(lx.voice.clonedVoice).toBe(true)
     expect(lx.voice.voice).toBe('a6d7ba90-7cd6-5ef6-9f37-d259112f8be1')
     expect(lx.locked).toBe(true)
     expect(xs.voice.clonedVoice).toBe(true)
     expect(xs.voice.voice).toBe('9e3957f5-74b0-5efa-b1fa-6894fdb7e45f')
     expect(xs.locked).toBe(true)
+    expect(jr.voice.clonedVoice).toBe(true)
+    expect(jr.voice.voice).toBe('18a24e59-6e8c-57bd-aeb8-6584c7a7ada2')
+    expect(jr.locked).toBe(true)
+    expect(zr.locked).toBe(true)
+    expect(zr.custom).toBeFalsy()
     expect(PET_SKINS.find((s) => s.id === 'custom').custom).toBe(true)
   })
 })
@@ -37,9 +44,11 @@ describe('内置角色锁定：形象/声线不可改', () => {
     store.cfg.skinImgs = {}
     store.cfg.skinVoices = {}
   })
-  it('李星云/薛神 locked，自定义不锁定', () => {
-    expect(petIsLocked('lixingyun')).toBe(true)
+  it('四个内置 locked，自定义不锁定', () => {
     expect(petIsLocked('xueshen')).toBe(true)
+    expect(petIsLocked('zhangruonan')).toBe(true)
+    expect(petIsLocked('lixingyun')).toBe(true)
+    expect(petIsLocked('jiruxue')).toBe(true)
     expect(petIsLocked('custom')).toBe(false)
   })
   it('锁定角色禁止上传形象', () => {
@@ -74,15 +83,15 @@ describe('多个自定义角色（自定义2/3/4…）', () => {
     pet.value.name = '李星云'
   })
 
-  it('初始 petAllSkins 只有 3 个内置', () => {
-    expect(petAllSkins.value.map((s) => s.id)).toEqual(['lixingyun', 'xueshen', 'custom'])
+  it('初始 petAllSkins 有 5 个内置（4锁定+1自定义）', () => {
+    expect(petAllSkins.value.map((s) => s.id)).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
   })
 
   it('新增自定义 → 自定义2，可切换、名字/人设可读写', () => {
     const e = petAddCustomSkin()
     expect(e.id).toBe('custom2')
     expect(e.name).toBe('自定义2')
-    expect(petAllSkins.value.length).toBe(4)
+    expect(petAllSkins.value.length).toBe(6)
     applyPetSkin('custom2')
     expect(store.cfg.petSkin).toBe('custom2')
     expect(pet.value.name).toBe('自定义2')
@@ -96,7 +105,7 @@ describe('多个自定义角色（自定义2/3/4…）', () => {
     petAddCustomSkin()
     const e3 = petAddCustomSkin()
     expect(e3.id).toBe('custom3')
-    expect(petAllSkins.value.length).toBe(5)
+    expect(petAllSkins.value.length).toBe(7)
   })
 
   it('删除自定义角色（含其形象/声线数据），内置不可删', () => {
@@ -111,12 +120,12 @@ describe('多个自定义角色（自定义2/3/4…）', () => {
     expect(petRemoveCustomSkin('lixingyun')).toBe(false)
   })
 
-  it('删除当前选中的自定义后回退到李星云', () => {
+  it('删除当前选中的自定义后回退到首位内置（薛神）', () => {
     const e = petAddCustomSkin()
     applyPetSkin(e.id)
     expect(store.cfg.petSkin).toBe('custom2')
     petRemoveCustomSkin(e.id)
-    expect(store.cfg.petSkin).toBe('lixingyun')
+    expect(store.cfg.petSkin).toBe('xueshen')
   })
 
   it('自定义角色可上传形象、可绑定克隆声线（不受锁）', () => {
@@ -156,6 +165,24 @@ describe('applyPetSkin 一键切换', () => {
     expect(store.cfg.ttsGm.voice).toBe('a6d7ba90-7cd6-5ef6-9f37-d259112f8be1')
   })
 
+  it('切到姬如雪：直接用内置克隆原声（无需再上传）', () => {
+    applyPetSkin('jiruxue')
+    expect(store.cfg.petSkin).toBe('jiruxue')
+    expect(pet.value.name).toBe('姬如雪')
+    expect(petSkinVoiceOf('jiruxue').cloned).toBe(true)
+    expect(store.cfg.ttsGm.voice).toBe('18a24e59-6e8c-57bd-aeb8-6584c7a7ada2')
+  })
+
+  it('切到章若楠：内置锁定 + 用克隆原声', () => {
+    applyPetSkin('zhangruonan')
+    expect(store.cfg.petSkin).toBe('zhangruonan')
+    expect(pet.value.name).toBe('章若楠')
+    expect(petSkinVoiceOf('zhangruonan').cloned).toBe(true)
+    expect(store.cfg.ttsGm.voice).toBe('83eac18d-fd6a-531b-9a71-67b0e6d340ee')
+  })
+
+
+
   it('切到自定义：名字/皮肤更新，声音保持全局', () => {
     applyPetSkin('custom')
     expect(store.cfg.petSkin).toBe('custom')
@@ -163,10 +190,10 @@ describe('applyPetSkin 一键切换', () => {
     expect(store.cfg.ttsGm.voice).toBe('tongtong')
   })
 
-  it('未知 id 回退默认（李星云）', () => {
+  it('未知 id 回退首位内置（薛神）', () => {
     applyPetSkin('nope')
-    expect(store.cfg.petSkin).toBe('lixingyun')
-    expect(petSkin.value.id).toBe('lixingyun')
+    expect(store.cfg.petSkin).toBe('xueshen')
+    expect(petSkin.value.id).toBe('xueshen')
   })
 })
 
@@ -226,8 +253,8 @@ describe('petImgOf 各皮肤形象', () => {
     store.cfg.skinImgs = {}
     store.cfg.petImg = ''
   })
-  it('李星云未上传时为空（无内置图）', () => {
-    expect(petImgOf('lixingyun')).toBe('')
+  it('李星云返回内置形象（PNG）', () => {
+    expect(petImgOf('lixingyun')).toMatch(/^data:image\/png;base64,/)
   })
   it('薛神返回内置形象', () => {
     expect(petImgOf('xueshen')).toMatch(/^data:image\/jpeg;base64,/)
@@ -303,6 +330,8 @@ describe('cloneZhipuVoice 智谱 GLM-TTS-Clone 音色克隆', () => {
       const b = JSON.parse(opt.body)
       expect(b.file_id).toBe('file_abc')
       expect(b.model).toBe('glm-tts-clone')
+      // voice_name 必须唯一（智谱拒绝重名），显示名=输入名+唯一后缀
+      expect(b.voice_name).toMatch(/^李星云原声_/)
       expect(b.input).toBeTruthy()
       expect(String(b.input).length).toBeGreaterThan(0)
       expect(b.text).toBe('李星云原声文本')
@@ -456,5 +485,47 @@ describe('薛神内置默认形象（图片）', () => {
   })
   it('其他无内置形象皮肤不受影响', () => {
     expect(petImgOf('custom')).toBe('')
+  })
+})
+
+describe('cloneZhipuVoice 自动转写参考音频（修复克隆音色复读英文开头）', () => {
+  beforeEach(() => {
+    store.cfg.ttsGm = { key: 'gm-key', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
+  })
+  it('未传 text 时自动调用 glm-asr 转写并传给克隆接口', async () => {
+    const calls = []
+    vi.stubGlobal('fetch', vi.fn(async (url, opt) => {
+      calls.push(String(url))
+      if (String(url).endsWith('/files')) return { ok: true, json: async () => ({ id: 'file_abc' }) }
+      if (String(url).includes('/audio/transcriptions')) {
+        return { ok: true, json: async () => ({ segments: [{ text: '人人都道生逢乱世身不由己。' }] }) }
+      }
+      if (String(url).includes('/voice/clone')) {
+        const b = JSON.parse(opt.body)
+        expect(b.text).toBe('人人都道生逢乱世身不由己。')
+        return { ok: true, json: async () => ({ voice: 'voice_clean_001' }) }
+      }
+      return { ok: false }
+    }))
+    const { cloneZhipuVoice } = await import('../utils/ttsEngine')
+    const r = await cloneZhipuVoice({ name: 'ref.mp3', type: 'audio/mp3', arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }, { name: '测试声线' })
+    expect(r.ok).toBe(true)
+    expect(r.voice).toBe('voice_clean_001')
+    expect(calls.some((u) => u.includes('/audio/transcriptions'))).toBe(true)
+    vi.unstubAllGlobals()
+  })
+  it('显式传入 text 时不再调 ASR', async () => {
+    let asrCalled = false
+    vi.stubGlobal('fetch', vi.fn(async (url, opt) => {
+      if (String(url).includes('/audio/transcriptions')) { asrCalled = true; return { ok: true, json: async () => ({ segments: [] }) } }
+      if (String(url).endsWith('/files')) return { ok: true, json: async () => ({ id: 'file_abc' }) }
+      if (String(url).includes('/voice/clone')) { expect(JSON.parse(opt.body).text).toBe('显式文本'); return { ok: true, json: async () => ({ voice: 'v2' }) } }
+      return { ok: false }
+    }))
+    const { cloneZhipuVoice } = await import('../utils/ttsEngine')
+    const r = await cloneZhipuVoice({ name: 'a.mp3', arrayBuffer: async () => new Uint8Array([1]).buffer }, { name: 'x', text: '显式文本' })
+    expect(r.ok).toBe(true)
+    expect(asrCalled).toBe(false)
+    vi.unstubAllGlobals()
   })
 })

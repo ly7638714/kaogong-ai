@@ -3,6 +3,8 @@ import { store } from '../store'
 import {
   cleanSpeechText,
   chunkText,
+  chunkForTts,
+  slideSynthesize,
   buildTtsUrl,
   clampSpeed,
   gmCfg,
@@ -58,6 +60,42 @@ describe('chunkText 长文分块', () => {
   })
 })
 
+describe('chunkForTts / slideSynthesize 朗读提速（首块更小 + 滑动窗口按序投递）', () => {
+  it('chunkForTts 首块更小且内容不丢失', () => {
+    const long = '第一句，这是比较长的一句话。第二句也在这里。第三句继续。第四句再补一点。第五句收尾。'.repeat(2)
+    const parts = chunkForTts(long, 60, 30)
+    expect(parts.length).toBeGreaterThan(1)
+    expect(parts[0].length).toBeLessThanOrEqual(30)
+    expect(parts.join('').replace(/\s+/g, '')).toBe(long.replace(/\s+/g, ''))
+  })
+
+  it('chunkForTts 短文本不切分、无 firstLen 时不缩首块', () => {
+    expect(chunkForTts('你好世界', 60, 30)).toEqual(['你好世界'])
+    const parts = chunkForTts('一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十。', 60, 0)
+    expect(parts[0].length).toBeGreaterThan(30)
+  })
+
+  it('slideSynthesize 乱序完成仍按序投递（gapless 依赖顺序）', async () => {
+    const chunks = ['块一', '块二', '块三', '块四']
+    const out = []
+    // worker 故意乱序完成：块2 最先、块0 最后
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms))
+    const r = await slideSynthesize(
+      chunks,
+      async (c) => {
+        if (c === '块三') { await delay(5); return c + '-buf' }
+        if (c === '块二') { await delay(15); return c + '-buf' }
+        if (c === '块一') { await delay(25); return c + '-buf' }
+        await delay(40)
+        return c + '-buf'
+      },
+      (buf) => out.push(buf)
+    )
+    // 顺序投递（块一→块二→块三→块四），不依赖完成顺序
+    expect(out).toEqual(['块一-buf', '块二-buf', '块三-buf', '块四-buf'])
+    expect(r.firstErr).toBe('')
+  })
+})
 describe('URL 与参数工具', () => {
   it('buildTtsUrl 归一化 OpenAI 兼容地址', () => {
     expect(buildTtsUrl('https://api.siliconflow.cn/v1')).toBe('https://api.siliconflow.cn/v1/audio/speech')

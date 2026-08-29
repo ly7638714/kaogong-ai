@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { store, saveWqs } from '../store'
 import { activeCfg, chatOnce, buildQuizSys } from '../api'
 import { parseQuiz } from '../utils/quiz'
@@ -26,6 +26,13 @@ const fmt = (s) => {
   return String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0')
 }
 const curQ = computed(() => (cur.value >= 0 && questions.value[cur.value] ? questions.value[cur.value] : null))
+// 模拟组卷也支持萌宠「读题」（只读题干+选项）
+watch(curQ, (q) => {
+  if (!q) return
+  const opts = (q.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || '').replace(/<[^>]+>/g, ' ')).join('。')
+  store.readCtx = { type: 'sim', title: '模拟组卷·' + plate.value, text: (String(q.stem || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '')).slice(0, 1200) }
+  store.curQ = { plate: plate.value, kind: '模拟组卷', stem: q.stem, options: q.options || [], answer: q.answer || '', explain: q.explain || '' }
+})
 const score = computed(() => questions.value.filter((q) => q.correct).length)
 
 function start() {
