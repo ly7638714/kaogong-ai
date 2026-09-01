@@ -148,6 +148,20 @@ export function recordCost(o) {
   persist()
   return fe.total
 }
+// 批次3.4 今日预算熔断：xc_cost_budget 元/日，0=不限制
+export function getBudget() {
+  try { return Number(localStorage.getItem('xc_cost_budget')) || 0 } catch (e) { return 0 }
+}
+export function setBudget(v) {
+  const n = Math.max(0, Number(v) || 0)
+  try { localStorage.setItem('xc_cost_budget', String(n)) } catch (e) {}
+  return n
+}
+export function todaySpend() { try { return costStats().today } catch (e) { return 0 } }
+export function budgetBlocked() {
+  const b = getBudget()
+  return b > 0 && todaySpend() >= b
+}
 export function clearCost(scope) {
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
   if (scope === 'today') costState.list = costState.list.filter((r) => r.t < dayStart.getTime())

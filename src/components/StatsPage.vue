@@ -1,10 +1,15 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { store, saveCfg } from '../store'
-import { detectBanKuai, activeCfg, chatOnce } from '../api'
+import { detectBanKuai, chatOnce } from '../api'
 import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
 import { downloadText } from '../utils/export'
 import { showToast } from '../utils/toast'
+import { safeGet, KEYS } from '../utils/storage'
+import { masteryOfPlate } from '../utils/mastery'
+import { kpointOf } from '../utils/kpointLib'
+import { useAi } from '../utils/useAi'
+const { run: aiRun } = useAi()
 const stats = computed(() => ({
   tot: store.msgs.filter((m) => m.role === 'user').length,
   q: store.msgs.filter(
@@ -111,13 +116,9 @@ const radarPlates = [
 ]
 const radar = computed(() => {
   const vals = radarPlates.map((p) => {
-    const wq = store.wqs.filter((q) => p.sub.includes(q.subject))
-    const wrongN = wq.length
-    const revN = wq.filter((q) => q.reviewed || q.digested).length
-    let v
-    if (wrongN === 0) v = 85
-    else v = Math.max(5, 100 - wrongN * 12 + revN * 3)
-    return { ...p, v: Math.round(Math.min(100, v)) }
+    const wrongN = store.wqs.filter((q) => p.sub.includes(q.subject)).length
+    // 批次6-6A 掌握度收编：统一走 mastery.js（与看板/CosmosScene 同口径）
+    return { ...p, v: masteryOfPlate(p.key, store.wqs, { plates: p.sub }), nodata: wrongN === 0 }
   })
   const cx = 110
   const cy = 105
@@ -132,13 +133,13 @@ const radar = computed(() => {
   const poly = vals.map((v, i) => pt(i, R * (v.v / 100)).map((x) => x.toFixed(1)).join(',')).join(' ')
   const axes = vals.map((v, i) => {
     const [x0, y0] = pt(i, R + 18)
-    return { x: x0.toFixed(1), y: y0.toFixed(1), label: v.label, val: v.v }
+    return { x: x0.toFixed(1), y: y0.toFixed(1), label: v.label + (v.nodata ? '·无数据' : ''), val: v.v }
   })
   return { rings, poly, axes, vals, W: 220, H: 220 }
 })
 // ===== 掌握度评估系统（六大板块 + 细分题型 + 目标分 + 综合评估 + 鼓励） =====
 const quizCol = ref([])
-try { quizCol.value = JSON.parse(localStorage.getItem('xc_quiz_col') || '[]') || [] } catch (e) {}
+quizCol.value = safeGet(KEYS.QUIZ_COL, [])
 const PLATES = [
   { key: '判断推理', label: '判断推理', weight: 30, subs: ['判断推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
   { key: '言语理解', label: '言语理解', weight: 30, subs: ['言语理解'] },
@@ -175,6 +176,32 @@ const mastery = computed(() =>
     return { ...p, v, attempts, variants }
   })
 )
+// 批次C·考点级下钻：读取时按题干/错题惰性打考点标签，聚合 正确率/错题/复盘率
+const kpoints = computed(() =>
+  PLATES.map((p) => {
+    const agg = {}
+    const bump = (k, done, ok, wrong, rev) => {
+      agg[k] = agg[k] || { done: 0, ok: 0, wrong: 0, rev: 0 }
+      const a = agg[k]
+      a.done += done; a.ok += ok; a.wrong += wrong; a.rev += rev
+    }
+    quizCol.value.filter((x) => p.subs.includes(x.subject)).forEach((x) => {
+      const k = kpointOf(x.subject, x.stem)
+      ;(x.history || []).forEach((h) => bump(k, 1, h.ok ? 1 : 0, 0, 0))
+    })
+    store.wqs.filter((q) => p.subs.includes(q.subject)).forEach((q) => {
+      bump(kpointOf(q.subject, q.question), 0, 0, 1, q.reviewed || q.digested ? 1 : 0)
+    })
+    const list = Object.entries(agg).map(([k, v]) => ({
+      k,
+      done: v.done, ok: v.ok, wrong: v.wrong, rev: v.rev,
+      rate: v.done ? Math.round((v.ok / v.done) * 100) : null,
+      revRate: v.wrong ? Math.round((v.rev / v.wrong) * 100) : null
+    })).filter((x) => x.done > 0 || x.wrong > 0)
+      .sort((a, b) => (b.wrong - a.wrong) || (b.done - a.done))
+    return { key: p.key, list }
+  })
+)
 const assessment = computed(() => {
   const plates = mastery.value.filter((p) => p.v != null)
   const totalW = plates.reduce((a, p) => a + p.weight, 0)
@@ -182,11 +209,24 @@ const assessment = computed(() => {
   const goal = store.cfg.goalScore || 70
   return { cur, goal, gap: cur != null ? goal - cur : null, pct: cur != null ? Math.round((cur / Math.max(1, goal)) * 100) : 0, started: plates.length > 0 }
 })
+// 批次8·目标分拆解：目标分按权重拆到每板块（需达/现状/差），让“差42分”变成可执行清单
+const goalBreakdown = computed(() => {
+  const goal = store.cfg.goalScore || 70
+  return mastery.value.map((p) => {
+    const need = Math.round(((goal * p.weight) / 100) * 10) / 10
+    const cur = p.v != null ? Math.round(((p.v * p.weight) / 100) * 10) / 10 : null
+    return { label: p.label, weight: p.weight, v: p.v, need, cur, gap: cur != null ? Math.round((need - cur) * 10) / 10 : null }
+  })
+})
 const advice = computed(() => {
   const arr = mastery.value.filter((p) => p.v != null).sort((a, b) => a.v - b.v)
   if (!arr.length) return { text: '还没有做题数据，快去「单题快练 / 模拟组卷」开始第一题吧！', weak: '', strong: '' }
   const weak = arr[0], strong = arr[arr.length - 1]
-  return { text: '弱势板块：' + weak.label + '（' + weak.v + '）→ 建议每天专项 10 题补强；优势板块：' + strong.label + '（' + strong.v + '）→ 保持手感并适当提速。', weak: weak.label, strong: strong.label }
+  // 单一板块有数据时不重复说「弱势/优势」，避免自相矛盾
+  const text = weak.label === strong.label
+    ? '当前重点板块：' + weak.label + '（' + weak.v + '）→ 稳住优势并稳步提升，可再刷专项 10 题巩固手感。'
+    : '弱势板块：' + weak.label + '（' + weak.v + '）→ 建议每天专项 10 题补强；优势板块：' + strong.label + '（' + strong.v + '）→ 保持手感并适当提速。'
+  return { text, weak: weak.label, strong: strong.label }
 })
 const QUOTES = [
   '🌱 种一棵树最好的时间是十年前，其次是现在——你已经在路上了！',
@@ -213,7 +253,7 @@ const quizRate = computed(() => {
 })
 // 成绩趋势（最近考试正确率，含目标线）
 const results = ref([])
-try { results.value = JSON.parse(localStorage.getItem('xc_paper_results') || '[]') || [] } catch (e) {}
+results.value = safeGet(KEYS.PAPER_RESULTS, [])
 const scoreTrend = computed(() => {
   const list = results.value.slice(-10).map((r) => ({ rate: Math.round(r.rate || 0), label: r.ts ? (new Date(r.ts).getMonth() + 1) + '/' + new Date(r.ts).getDate() : '', n: r.n || 0 }))
   const W = 600, H = 120, P = 24
@@ -246,6 +286,17 @@ const plateRate = computed(() => {
   }).sort((x, y) => y.rate - x.rate)
 })
 // ===== 学习热力图（近 15 周打卡日历）=====
+// 批次5-P5-3 热力图分桶：一次遍历 msgs/wqs/studyMap 建按日索引，每格 O(1) 读取（原 105 格各全量 filter）
+const byDay = computed(() => {
+  const b = {}
+  store.msgs.forEach((m) => {
+    if (m.role === 'user' && m.t) { const k = dayKey(m.t); if (k) (b[k] ||= { q: 0, w: 0, min: 0 }).q++ }
+  })
+  store.wqs.forEach((q) => { const k = dayKey(q.at || parseTime(q.time)); if (k) (b[k] ||= { q: 0, w: 0, min: 0 }).w++ })
+  const sm = studyMap()
+  for (const k in sm) { (b[k] ||= { q: 0, w: 0, min: 0 }).min = Math.round((sm[k] || 0) / 60) }
+  return b
+})
 const heat = computed(() => {
   const weeks = []
   const end = new Date()
@@ -258,10 +309,8 @@ const heat = computed(() => {
       const day = new Date(end)
       day.setDate(end.getDate() - (w * 7 + d))
       const key = dayKey(day.getTime())
-      const ask = store.msgs.filter((m) => m.role === 'user' && dayKey(m.t) === key).length
-      const wrong = store.wqs.filter((q) => dayKey(q.at || parseTime(q.time)) === key).length
-      const min = Math.round((studyMap()[key] || 0) / 60)
-      week.push({ key, cnt: ask + wrong, min })
+      const cell = byDay.value[key] || { q: 0, w: 0, min: 0 }
+      week.push({ key, cnt: cell.q + cell.w, min: cell.min })
     }
     weeks.push(week)
   }
@@ -340,14 +389,12 @@ async function exportReport(days = 7, fmt = 'md') {
     L.push('## 🤖 AI 学习总结与建议')
     L.push('')
     repBusy.value = true
-    try {
-      const c = activeCfg(false)
-      if (c && c.key) {
-        const sys = '你是公考行测督学教练。根据下面的学习数据，用 150-250 字输出：①一句话整体点评；②按优先级列出 3-4 条最该做的事（针对弱势板块、错题复盘、时间分配）；③一句鼓励。只输出正文，不要开场白。'
-        const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: L.join('\n').slice(0, 3000) }], 800, 90000)
-        L.push(String(r || '').trim() || '（AI 总结生成失败，可稍后重试）')
-      } else L.push('（未配置模型，跳过 AI 总结）')
-    } catch (e) { L.push('（AI 总结生成失败：' + e.message + '）') }
+    const r = await aiRun(async (c) => {
+      const sys = '你是公考行测督学教练。根据下面的学习数据，用 150-250 字输出：①一句话整体点评；②按优先级列出 3-4 条最该做的事（针对弱势板块、错题复盘、时间分配）；③一句鼓励。只输出正文，不要开场白。'
+      return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: L.join('\n').slice(0, 3000) }], 800, 90000)
+    }, { keyHint: '文字模型', onError: () => {} })
+    if (r == null) L.push('（未配置模型或生成失败，跳过 AI 总结）')
+    else L.push(String(r || '').trim() || '（AI 总结生成失败，可稍后重试）')
     repBusy.value = false
     L.push('')
   }
@@ -406,6 +453,16 @@ async function exportReport(days = 7, fmt = 'md') {
           <div class="ass-item"><div class="ass-num">{{ assessment.pct }}%</div><div class="ass-l">达成度</div></div>
         </div>
         <div class="ass-bar"><i :style="{ width: Math.min(100, assessment.pct) + '%' }"></i></div>
+        <div v-if="goalBreakdown.some((b) => b.v != null)" class="gb-breakdown" style="margin-top: 8px; font-size: 12px">
+          <div style="color: var(--text3); margin-bottom: 4px">🎯 目标 {{ assessment.goal }} 分拆解到板块（按权重）：</div>
+          <div v-for="b in goalBreakdown" :key="b.label" style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px">
+            <span style="width: 60px">{{ b.label }}</span>
+            <span style="width: 90px">需 {{ b.need }} 分</span>
+            <span style="width: 90px" :style="{ color: b.v == null ? 'var(--text3)' : b.gap > 0 ? 'var(--red,#fb7185)' : 'var(--green,#34d399)' }">{{ b.v == null ? '未开始' : '现状 ' + b.cur }}</span>
+            <span v-if="b.v != null && b.gap > 0" style="color: var(--red,#fb7185)">还差 {{ b.gap }}</span>
+            <span v-else-if="b.v != null" style="color: var(--green,#34d399)">已达标</span>
+          </div>
+        </div>
         <div class="ass-advice">📌 {{ advice.text }}</div>
         <div class="ass-quote">{{ encourage }}</div>
         <div class="fld" style="margin-top: 6px">
@@ -519,7 +576,7 @@ async function exportReport(days = 7, fmt = 'md') {
             class="radar-label"
           >{{ a.label }} {{ a.val }}</text>
         </svg>
-        <div class="radar-tip">掌握度按错题数与复盘率估算：错题越少、复盘越勤越高；全空默认 85。</div>
+        <div class="radar-tip">掌握度按错题数与复盘率估算：错题越少、复盘越勤越高；无数据板块按 0 绘制并标注「暂无」。</div>
       </div>
 
       <div class="sec-t">📚 细分题型掌握度</div>
@@ -529,7 +586,7 @@ async function exportReport(days = 7, fmt = 'md') {
           <div class="empty-t">还没有做题记录</div>
           <div class="empty-d">去「单题快练 / 模拟组卷」做题，这里会按 板块 + 细分题型 实时统计你的掌握度</div>
         </div>
-        <div v-for="p in mastery" :key="p.key" class="subm-plate">
+        <div v-for="(p, i) in mastery" :key="p.key" class="subm-plate">
           <div class="subm-hd">
             <span class="sp-name">{{ p.label }}</span>
             <span v-if="p.v != null" class="sp-v" :class="p.v >= 80 ? 'ok' : p.v >= 60 ? 'mid' : 'no'">{{ p.v }}</span>
@@ -544,6 +601,16 @@ async function exportReport(days = 7, fmt = 'md') {
               <span class="sv-rate">{{ x.done }}题 · {{ x.rate }}%</span>
             </div>
           </div>
+          <details v-if="kpoints[i] && kpoints[i].list.length" class="subm-kp" style="margin-top:6px">
+            <summary style="cursor:pointer;font-size:12.5px;color:var(--text2)">🔍 考点下钻（{{ kpoints[i].list.length }} 个考点）</summary>
+            <div class="subm-vars" style="margin-top:6px">
+              <div v-for="x in kpoints[i].list" :key="x.k" class="subm-var">
+                <span class="sv-name">{{ x.k }}</span>
+                <span class="sv-bar"><i :style="{ width: Math.max(3, x.rate || 0) + '%' }"></i></span>
+                <span class="sv-rate">{{ x.done }}题{{ x.wrong ? ' · 错' + x.wrong : '' }}{{ x.rev ? ' · 复盘' + x.rev : '' }}{{ x.rate != null ? ' · ' + x.rate + '%' : '' }}</span>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 

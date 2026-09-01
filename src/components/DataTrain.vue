@@ -238,6 +238,8 @@ watch(q, (qq) => {
 
 // 快捷键：Esc 返回 / A-D 作答 / → 下一题
 function onKey(e) {
+  const t = e.target
+  if (t && t.closest && t.closest('input,textarea,[contenteditable]')) return
   if (e.key === 'Escape') emit('close')
   const m = { a: 'A', b: 'B', c: 'C', d: 'D' }[String(e.key).toLowerCase()]
   if (m && !picked.value && q.value) pick(m)
@@ -400,8 +402,9 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
                 <span class="dt-qmode">{{ MODES.find((m) => m.k === mode).t }}<template v-if="mode === 'calc'"> · {{ STAGES.find((s) => s.k === stage).t }}</template></span>
                 <span class="dt-qidx">第 {{ idx }} 题</span>
               </div>
-              <div v-if="q.materialMd" class="dt-mat" v-html="md(q.materialMd)"></div>
-              <div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div>
+            <div v-if="q.materialMd" class="dt-mat" v-html="md(q.materialMd)"></div>
+            <div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div>
+            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">📌 本材料为训练用模拟数据（非真实统计），仅用于方法练习</div>
               <div class="dt-q" v-html="md(q.q)"></div>
             </div>
 
@@ -414,7 +417,7 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
             <div v-if="picked" class="dt-explain">
               <div class="dt-ex-t" :class="picked === q.answer ? 'ok' : 'bad'">
                 {{ picked === q.answer ? '✅ 回答正确' : '❌ 答错了，看这里' }}
-                <span v-if="picked === q.answer" class="dt-ex-gain">+{{ 10 + Math.min(streak.value, 10) * 2 }} 分</span>
+                <span v-if="picked === q.answer" class="dt-ex-gain">+{{ 10 + Math.min(streak, 10) * 2 }} 分</span>
               </div>
               <div class="dt-ex-b" v-html="md(q.explain)"></div>
               <div class="dt-ex-acts">
@@ -483,6 +486,7 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
 .dt-mat :deep(th), .dt-mat :deep(td) { border: 1px solid var(--glass-border); padding: 4px 9px; text-align: center; font-size: 12px; }
 .dt-mat :deep(th) { background: rgba(34, 211, 238, 0.12); color: var(--accent); }
 .dt-mat-svg svg { max-width: 100%; height: auto; border: 1px solid var(--glass-border); border-radius: 8px; background: #fff; }
+.dt-mat-note { font-size: 11.5px; color: var(--text3); border: 1px dashed var(--glass-border); border-radius: 8px; padding: 5px 9px; margin-bottom: 8px; background: rgba(251, 191, 36, 0.06); }
 .dt-q { font-size: 14px; line-height: 1.8; color: var(--text); }
 .dt-q :deep(strong) { color: var(--accent); }
 .dt-opts { display: grid; grid-template-columns: 1fr; gap: 7px; }

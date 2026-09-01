@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveMyMem, saveNotes } from './store'
 import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
-import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive } from './utils/costTrack'
+import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
 import { PLATE_MODE } from './api'
 import { FIG_PROVIDERS, fillFigProvPreset, testFigConn } from './api/figEnhance'
 import ChatPage from './components/ChatPage.vue'
@@ -13,11 +13,12 @@ import CockpitPage from './components/CockpitPage.vue'
 import DraftPad from './components/DraftPad.vue'
 import FloatPanel from './components/FloatPanel.vue'
 import ExamBar from './components/ExamBar.vue'
-import CosmosScene from './components/CosmosScene.vue'
 import PetAvatar from './components/PetAvatar.vue'
 import Data3DPage from './components/Data3DPage.vue'
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
+import { emit as evEmit } from './utils/events'
+import { stripSecrets } from './utils/stripSecrets'
 import { getErrorLog, clearErrorLog } from './utils/errorLog'
 import { APP_VERSION } from './version'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
@@ -48,6 +49,7 @@ function tabFromHash() {
 const initialTab = tabFromHash() || (store.tab && tabs.some((t) => t.k === store.tab) ? store.tab : 'ck')
 // 全局随手记（任何界面可写，悬浮球可拖动）
 const globalDraft = ref(false)
+const gFabIntent = ref('') // 本次打开意图：''=沿用记忆 / 'mini'=单击小画板 / 'overlay'=双击全屏原题勾画
 const draftFabOn = ref(localStorage.getItem('xc_draft_fab_on') !== '0')
 function saveDraftFabOn() { try { localStorage.setItem('xc_draft_fab_on', draftFabOn.value ? '1' : '0') } catch (e) {} }
 const gFab = ref(null)
@@ -79,23 +81,51 @@ onUnmounted(() => {
 function onGFabDown(e) {
   e.preventDefault()
   const startX = e.clientX, startY = e.clientY
-  const r = e.currentTarget.getBoundingClientRect()
+  const btn = e.currentTarget
+  const r = btn.getBoundingClientRect()
   const ox = startX - r.left, oy = startY - r.top
   let moved = false
+  let cur = { x: r.left, y: r.top }
+  try { btn.setPointerCapture(e.pointerId) } catch (_) {}
+  const apply = () => { btn.style.left = cur.x + 'px'; btn.style.top = cur.y + 'px'; btn.style.right = 'auto'; btn.style.bottom = 'auto' }
   const onMove = (ev) => {
     const x = ev.clientX - ox, y = ev.clientY - oy
     if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 6) moved = true
-    gFab.value = { x: Math.max(4, Math.min(window.innerWidth - 56, x)), y: Math.max(4, Math.min(window.innerHeight - 60, y)) }
-    try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (e) {}
+    // 拖动中直接改 DOM，不触发 Vue 渲染/写 localStorage，保证丝滑
+    cur = { x: Math.max(4, Math.min(window.innerWidth - 56, x)), y: Math.max(4, Math.min(window.innerHeight - 60, y)) }
+    apply()
   }
   const onUp = () => {
     window.removeEventListener('pointermove', onMove, true)
     window.removeEventListener('pointerup', onUp, true)
-    if (!moved) globalDraft.value = true
+    try { btn.releasePointerCapture(e.pointerId) } catch (_) {}
+    if (moved) {
+      gFab.value = cur
+      try { localStorage.setItem('xc_global_fab', JSON.stringify(cur)) } catch (_) {}
+    } else {
+      // 单击=小画板；双击（300ms 内第二次）= 全屏原题勾画，不挡功能界面
+      const now = Date.now()
+      if (now - gLastTap < 320) {
+        clearTimeout(gTapTimer)
+        gLastTap = 0
+        gFabIntent.value = 'overlay'
+        globalDraft.value = true
+      } else {
+        gLastTap = now
+        clearTimeout(gTapTimer)
+        gTapTimer = setTimeout(() => {
+          gLastTap = 0
+          gFabIntent.value = 'mini'
+          globalDraft.value = true
+        }, 300)
+      }
+    }
   }
   window.addEventListener('pointermove', onMove, true)
   window.addEventListener('pointerup', onUp, true)
 }
+let gLastTap = 0
+let gTapTimer = null
 store.tab = initialTab
 
 // 页签变更 → 写回 hash（深链可分享/收藏）；hash 变更 → 同步页签（浏览器返回/前进/手改地址）
@@ -117,15 +147,43 @@ document.body.setAttribute('data-theme', theme.value)
 const THEME_PRESETS = {
   dark:       { name: '深空黑', theme: 'dark', vars: { bg: '#050b16', card: '#0b1626', surface: '#12202f', text: '#eaf7ff', text2: '#a9c9de', text3: '#83a3bc', accent: '#22d3ee', accent2: 'rgba(34,211,238,.15)', red: '#fb7185', green: '#34d399', amber: '#fbbf24' } },
   'dark-blue':{ name: '深蓝夜', theme: 'dark', vars: { bg: '#060b1a', card: '#0a1428', surface: '#101d38', text: '#e8f1ff', text2: '#a8c4e8', text3: '#7f9cc4', accent: '#60a5fa', accent2: 'rgba(96,165,250,.16)', red: '#fb7185', green: '#34d399', amber: '#fbbf24' } },
-  'dark-red': { name: '暗红夜', theme: 'dark', vars: { bg: '#180a10', card: '#261219', surface: '#351a22', text: '#ffe9ee', text2: '#e0a9b6', text3: '#c0808f', accent: '#f87171', accent2: 'rgba(248,113,113,.16)', red: '#f87171', green: '#4ade80', amber: '#fbbf24' } },
+  'dark-red': { name: '暗红夜', theme: 'dark', vars: { bg: '#180a10', card: '#261219', surface: '#351a22', text: '#f5f5f7', text2: '#c2c2cc', text3: '#9898a6', accent: '#f87171', accent2: 'rgba(248,113,113,.16)', red: '#f87171', green: '#4ade80', amber: '#fbbf24' } },
   light:      { name: '米白纸', theme: 'light', vars: { bg: '#eef4fa', card: '#ffffff', surface: '#dbe6f0', text: '#000000', text2: '#1f2937', text3: '#374151', accent: '#0b5a8a', accent2: 'rgba(3,105,161,.1)', red: '#b91c1c', green: '#15803d', amber: '#b45309' } },
   'light-green': { name: '护眼绿白', theme: 'light', vars: { bg: '#e9f3ea', card: '#ffffff', surface: '#d3e8d6', text: '#122014', text2: '#2b4030', text3: '#47604d', accent: '#0e7a3d', accent2: 'rgba(14,122,61,.12)', red: '#b3261e', green: '#0e7a3d', amber: '#92600a' } },
-  'light-red':{ name: '红白公务', theme: 'light', vars: { bg: '#f7eef0', card: '#ffffff', surface: '#eed8dc', text: '#1a0b0d', text2: '#3d2328', text3: '#5c3a40', accent: '#b02a2a', accent2: 'rgba(176,42,42,.1)', red: '#b02a2a', green: '#15803d', amber: '#b45309' } },
+  'light-red':{ name: '红白公务', theme: 'light', vars: { bg: '#f7eef0', card: '#ffffff', surface: '#eed8dc', text: '#1c1c22', text2: '#3b3b45', text3: '#5d5d6a', accent: '#b02a2a', accent2: 'rgba(176,42,42,.1)', red: '#b02a2a', green: '#15803d', amber: '#b45309' } },
+  'light-blue':{ name: '晴空蓝', theme: 'light', vars: { bg: '#eef4fb', card: '#ffffff', surface: '#dce8f5', text: '#101828', text2: '#334155', text3: '#5b6b82', accent: '#0b6bcb', accent2: 'rgba(11,107,203,.1)', red: '#b91c1c', green: '#15803d', amber: '#b45309' } },
   cream:      { name: '暖黄纸', theme: 'light', vars: { bg: '#f6f1e3', card: '#fffdf6', surface: '#ece2c8', text: '#201a0c', text2: '#453a20', text3: '#655a3a', accent: '#9a6b1f', accent2: 'rgba(154,107,31,.12)', red: '#b3261e', green: '#2f7d32', amber: '#b45309' } },
-  eye:        { name: '护眼柔绿', theme: 'dark', vars: { bg: '#0d1f16', card: '#12291d', surface: '#183326', text: '#e2f5e8', text2: '#a8cbb4', text3: '#83a892', accent: '#4ade80', accent2: 'rgba(74,222,128,.16)', red: '#fb7185', green: '#4ade80', amber: '#fbbf24' } }
+  eye:        { name: '护眼柔绿', theme: 'dark', vars: { bg: '#0d1f16', card: '#12291d', surface: '#183326', text: '#e2f5e8', text2: '#a8cbb4', text3: '#83a892', accent: '#4ade80', accent2: 'rgba(74,222,128,.16)', red: '#fb7185', green: '#4ade80', amber: '#fbbf24' } },
+  'warm-dark':{ name: '暖棕夜', theme: 'dark', vars: { bg: '#1a120c', card: '#251a12', surface: '#30221a', text: '#f6efe6', text2: '#cfc0ae', text3: '#a49582', accent: '#f59e0b', accent2: 'rgba(245,158,11,.14)', red: '#fb7185', green: '#4ade80', amber: '#fbbf24' } }
 }
 const themePreset = ref(localStorage.getItem('xc_theme_preset') || 'dark')
+// ===== 主题切换平滑过渡：切主题瞬间加 theme-anim 类，380ms 后移除（系统减弱动态时 CSS 层禁用） =====
+let themeAnimTimer = null
+function flashThemeAnim() {
+  const b = document.body
+  if (!b) return
+  b.classList.add('theme-anim')
+  clearTimeout(themeAnimTimer)
+  themeAnimTimer = setTimeout(() => b.classList.remove('theme-anim'), 380)
+}
+// ===== --accent-strong：强调色加深 18%（亮色主题关键句可读 / 气泡·能量条·激活底色） =====
+function darken(hex, ratio) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
+  if (!m) return '#333333'
+  const n = parseInt(m[1], 16)
+  const r = Math.max(0, Math.round(((n >> 16) & 255) * (1 - ratio)))
+  const g = Math.max(0, Math.round(((n >> 8) & 255) * (1 - ratio)))
+  const b = Math.max(0, Math.round((n & 255) * (1 - ratio)))
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)
+}
+function syncAccentStrong() {
+  try {
+    const cur = window.getComputedStyle(document.body).getPropertyValue('--accent').trim()
+    if (/^#([0-9a-f]{6})$/i.test(cur)) document.body.style.setProperty('--accent-strong', darken(cur, 0.18))
+  } catch (e) { /* 计算失败时回退 CSS var(--accent-strong, var(--accent)) */ }
+}
 function applyThemePreset(k) {
+  flashThemeAnim()
   const p = THEME_PRESETS[k] || THEME_PRESETS.dark
   themePreset.value = k
   try { localStorage.setItem('xc_theme_preset', k) } catch (e) {}
@@ -133,23 +191,83 @@ function applyThemePreset(k) {
   document.body.setAttribute('data-theme', p.theme)
   const el = document.body
   for (const v in p.vars) { try { el.style.setProperty('--' + v, p.vars[v]) } catch (e) {} }
+  syncAccentStrong()
 }
 applyThemePreset(themePreset.value)
+// ===== 一键主题包：配色+强调色+护眼+高亮 一次到位（白天/黑夜各自多套，顶栏☀️/🌙配对切换） =====
+const THEME_PACKS = [
+  { id: 'light', name: '米白纸', theme: 'light', preset: 'light', accent: 'sea', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'light-green', name: '护眼绿白', theme: 'light', preset: 'light-green', accent: 'emerald', eye: 'green', tm: 'default', hl: 1 },
+  { id: 'light-red', name: '红白公务', theme: 'light', preset: 'light-red', accent: 'rose', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'light-blue', name: '晴空蓝', theme: 'light', preset: 'light-blue', accent: 'sky', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'cream', name: '暖黄纸', theme: 'light', preset: 'cream', accent: 'orange', eye: 'warm', tm: 'default', hl: 1 },
+  { id: 'dark', name: '深空黑', theme: 'dark', preset: 'dark', accent: 'sea', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'dark-blue', name: '深蓝夜', theme: 'dark', preset: 'dark-blue', accent: 'sky', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'dark-red', name: '暗红夜', theme: 'dark', preset: 'dark-red', accent: 'rose', eye: 'normal', tm: 'default', hl: 1 },
+  { id: 'warm-dark', name: '暖棕夜', theme: 'dark', preset: 'warm-dark', accent: 'orange', eye: 'warm', tm: 'default', hl: 1 },
+  { id: 'eye', name: '护眼柔绿', theme: 'dark', preset: 'eye', accent: 'emerald', eye: 'green', tm: 'default', hl: 1 }
+]
+// 白天 ↔ 黑夜配对（顶栏 ☀️/🌙 一键切换）
+const THEME_PACK_PAIR = { light: 'dark', 'light-green': 'eye', 'light-red': 'dark-red', 'light-blue': 'dark-blue', cream: 'warm-dark', dark: 'light', 'dark-blue': 'light-blue', 'dark-red': 'light-red', 'warm-dark': 'cream', eye: 'light-green' }
+const themePack = ref(localStorage.getItem('xc_theme_pack') || 'dark')
+function applyThemePack(id) {
+  try {
+    const p = THEME_PACKS.find((x) => x.id === id) || THEME_PACKS.find((x) => x.theme === (theme.value === 'light' ? 'light' : 'dark')) || THEME_PACKS[4]
+    themePack.value = p.id
+    try { localStorage.setItem('xc_theme_pack', p.id) } catch (e) {}
+    applyThemePreset(p.preset)
+    setAccent(p.accent)
+    setEyeMode(p.eye)
+    setThemeMode(p.tm)
+    // 高亮层级由用户在设置里自选（0/1/2），主题包不再强制覆盖，避免「丰富」一刷新/切主题就丢
+  } catch (e) { /* 主题应用失败不阻塞启动 */ }
+}
+// 启动：优先记忆的主题包（老用户无包记录则保持原主题预设行为）；延迟到挂载后应用，避免 setup 早期副作用
+const savedPack = localStorage.getItem('xc_theme_pack')
+if (savedPack && THEME_PACKS.some((x) => x.id === savedPack)) {
+  try { onMounted(() => applyThemePack(savedPack)) } catch (e) { /* 无 onMounted 场景忽略 */ }
+}
 // 3D 学习数据驾驶舱已独立为「🌌 3D数据」页签；背景 3D 可在设置里开关
 function doTheme() {
-  const isDark = themePreset.value && THEME_PRESETS[themePreset.value] ? THEME_PRESETS[themePreset.value].theme === 'dark' : true
-  applyThemePreset(isDark ? 'light' : 'dark')
+  // 顶栏 ☀️/🌙：在白天/黑夜「配对主题包」间一键切换（如 护眼绿白 ↔ 护眼柔绿）
+  const pair = THEME_PACK_PAIR[themePack.value]
+  applyThemePack(pair || (theme.value === 'light' ? 'dark' : 'light'))
 }
-// 多强调色主题
+// 多强调色主题（预设色卡 + 自定义取色）
 const accent = ref(localStorage.getItem('xc_accent') || 'sea')
+const accentCustom = ref(localStorage.getItem('xc_accent_custom') || '#22d3ee')
+if (accent.value === 'custom') applyAccentCustom(accentCustom.value)
 document.body.setAttribute('data-accent', accent.value)
 document.body.setAttribute('data-eye', store.cfg.eyeMode || 'normal')
-document.body.setAttribute('data-hl', store.cfg.hl ? '1' : '0')
+document.body.setAttribute('data-hl', String(Math.min(2, Number(store.cfg.hl) || 0)))
 document.body.setAttribute('data-tm', store.cfg.themeMode || 'default')
+function applyAccentCustom(hex) {
+  const h = /^#([0-9a-f]{6})$/i.test(hex) ? hex : '#22d3ee'
+  const r = parseInt(h.slice(1, 3), 16)
+  const g = parseInt(h.slice(3, 5), 16)
+  const b = parseInt(h.slice(5, 7), 16)
+  document.body.style.setProperty('--accent', h)
+  document.body.style.setProperty('--accent2', 'rgba(' + r + ',' + g + ',' + b + ',0.15)')
+  document.body.style.setProperty('--grad-primary', 'linear-gradient(135deg, ' + h + ', ' + h + ')')
+  syncAccentStrong()
+}
 function setAccent(a) {
   accent.value = a
   document.body.setAttribute('data-accent', a)
+  document.body.style.removeProperty('--accent')
+  document.body.style.removeProperty('--accent2')
+  document.body.style.removeProperty('--grad-primary')
   localStorage.setItem('xc_accent', a)
+  syncAccentStrong()
+}
+// 自定义强调色：点色板自选，即时生效并记忆
+function setAccentCustom(hex) {
+  accent.value = 'custom'
+  accentCustom.value = hex
+  document.body.setAttribute('data-accent', 'custom')
+  applyAccentCustom(hex)
+  syncAccentStrong()
+  try { localStorage.setItem('xc_accent', 'custom'); localStorage.setItem('xc_accent_custom', hex) } catch (e) {}
 }
 function setEyeMode(m) {
   store.cfg.eyeMode = m
@@ -157,13 +275,19 @@ function setEyeMode(m) {
   saveCfg()
 }
 function setHl(v) {
-  store.cfg.hl = !!v
-  document.body.setAttribute('data-hl', store.cfg.hl ? '1' : '0')
+  // 高亮三档：0=无 / 1=精简（默认主题包档） / 2=丰富（更强层次）
+  store.cfg.hl = Number(v) || 0
+  document.body.setAttribute('data-hl', String(store.cfg.hl))
   saveCfg()
 }
 function setThemeMode(m) {
   store.cfg.themeMode = m
   document.body.setAttribute('data-tm', m)
+  saveCfg()
+}
+// 知识图谱光效强度：0=关闭(防晃眼/省电) / 0.5=柔和 / 1=全开
+function setKgFx(v) {
+  store.cfg.kgFx = Number(v) || 0
   saveCfg()
 }
 // ===== 顶栏全局搜索 =====
@@ -217,12 +341,21 @@ function searchBlur() { setTimeout(() => { searchDrop.value = false }, 120) }
 const expType = ref('chat')
 const expShow = ref(false)
 const expBusy = ref(false)
+const expTpl = ref('full') // 错题导出模板：full 完整 / stems 只题干 / separate 题答分离
 const setShow = ref(false)
+const moreShow = ref(false) // 手机端顶栏「⋯」更多菜单
+function toggleMore() { moreShow.value = !moreShow.value }
+function moreGo(fn) { moreShow.value = false; fn() }
 // ===== AI 用量与花费（实时追踪）=====
 const costShow = ref(false)
 const costStat = computed(() => costStats())
 const costToday = computed(() => costStat.value.today)
 const costPrices = ref(getPrices())
+const costBudget = ref(getBudget())
+function costSaveBudget() {
+  costBudget.value = setBudget(costBudget.value)
+  showToast(costBudget.value > 0 ? ('✅ 今日预算已设为 ¥' + costBudget.value + '，超额将先弹确认') : 'ℹ️ 今日预算已关闭（不限制）', 'success')
+}
 const costOpen = ref(null)
 function costSavePrices() {
   savePrices(costPrices.value)
@@ -396,11 +529,12 @@ async function runExport(fmt, polish) {
   expShow.value = false
   expBusy.value = true
   if (polish) showToast('⏳ AI 正在整理笔记…', 'info')
+  const tpl = expTpl.value
   try {
     if (fmt === 'md') {
-      exportDataMd(expType.value)
+      exportDataMd(expType.value, tpl)
     } else {
-      await doExport(expType.value, fmt, polish)
+      await doExport(expType.value, fmt, polish, tpl)
     }
   } finally {
     expBusy.value = false
@@ -555,24 +689,45 @@ function doRename() {
 // ===== 背景音乐 / 萌宠浮控件：默认置顶 + 支持拖拽（位置记忆到 localStorage）=====
 const musicPos = ref(null) // {x, y}
 const petPos = ref(null)
+// 位置记忆按视口分档存储（手机拖的位置不影响桌面），兼容旧单档 key
+const vpBucket = () => vpB()
+const readPos = (k) => { try { return JSON.parse(localStorage.getItem(k + '_' + vpBucket()) || localStorage.getItem(k) || 'null') } catch (e) { return null } }
 try {
-  const mp = JSON.parse(localStorage.getItem('xc_music_pos') || 'null')
-  const pp = JSON.parse(localStorage.getItem('xc_pet_pos') || 'null')
+  const mp = readPos('xc_music_pos')
+  const pp = readPos('xc_pet_pos')
   if (mp && typeof mp.x === 'number') musicPos.value = mp
   if (pp && typeof pp.x === 'number') petPos.value = pp
-  const ppp = JSON.parse(localStorage.getItem('xc_pet_panel_pos') || 'null')
+  const ppp = readPos('xc_pet_panel_pos')
   if (ppp && typeof ppp.x === 'number') petPanelPos.value = ppp
 } catch (e) {}
 // 位置记忆夹回视口（防止窗口变小/分辨率变化后浮窗跑到屏幕外）
-function clampFloatPos() {
-  const vw = window.innerWidth, vh = window.innerHeight
-  const clamp = (pos, w, h) => {
-    if (!pos) return pos
-    return { x: Math.max(4, Math.min(vw - w - 4, pos.x || 4)), y: Math.max(4, Math.min(vh - h - 4, pos.y || 4)) }
+// 悬浮物安全区：避免落在顶部 HUD 区与底部输入/操作区（纯函数见 utils/floatClamp.js，可单测）
+import { floatSafeClamp, vpBucket as vpB, FLOAT_TOP_SAFE } from './utils/floatClamp'
+// 动态测量顶部导航真实高度（topbar + exam-bar(HUD) + tabs 三段，取最下沿），
+// 让萌宠/音乐球落点避开整个顶部导航区（而非写死的 96px，旧值会压住 .tabs 里的「积累/统计/错题/3D数据」）。
+function topNavSafe() {
+  try {
+    let bottom = 0
+    for (const sel of ['.topbar', '.exam-bar', '.tabs']) {
+      const el = document.querySelector(sel)
+      if (el) {
+        const r = el.getBoundingClientRect()
+        if (r.bottom > bottom) bottom = r.bottom
+      }
+    }
+    return bottom > 20 ? Math.ceil(bottom) + 12 : FLOAT_TOP_SAFE
+  } catch (e) {
+    return FLOAT_TOP_SAFE
   }
-  petPos.value = clamp(petPos.value, 54, 54)
-  musicPos.value = clamp(musicPos.value, 54, 54)
-  petPanelPos.value = clamp(petPanelPos.value, 358, 520)
+}
+function clampFloatPos() {
+  const ts = topNavSafe()
+  const vw = window.innerWidth, vh = window.innerHeight
+  if (petPos.value) petPos.value = floatSafeClamp(petPos.value.x, petPos.value.y, 54, 54, vw, vh, ts)
+  else petPos.value = { x: vw - 54 - 14, y: ts + 12 } // 无保存位置时给一个避开顶部导航的默认落点
+  if (musicPos.value) musicPos.value = floatSafeClamp(musicPos.value.x, musicPos.value.y, 54, 54, vw, vh, ts)
+  else musicPos.value = { x: 14, y: ts + 12 }
+  if (petPanelPos.value) petPanelPos.value = floatSafeClamp(petPanelPos.value.x, petPanelPos.value.y, 358, 520, vw, vh, ts)
 }
 window.addEventListener('resize', () => clampFloatPos())
 const petPanelPos = ref(null) // 助理小窗位置
@@ -597,7 +752,13 @@ let dragState = null
 let dragMoved = false
 function floatStyle(key) {
   const p = key === 'music' ? musicPos.value : petPos.value
-  if (!p) return {}
+  if (!p) {
+    // 无保存位置时，用顶部导航安全区算出一个不遮挡导航的默认落点（避免退回 CSS top:62px 压住 .tabs）
+    const ts = topNavSafe()
+    const w = 54
+    const x = key === 'music' ? 14 : window.innerWidth - w - 14
+    return { left: x + 'px', top: (ts + 12) + 'px', right: 'auto' }
+  }
   return { left: p.x + 'px', top: p.y + 'px', right: 'auto' }
 }
 function startFloatDrag(e, key) {
@@ -618,8 +779,8 @@ function onFloatDragMove(e) {
   if (!dragMoved && Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 6) dragMoved = true
   let x = origX + e.clientX - startX
   let y = origY + e.clientY - startY
-  x = Math.max(4, Math.min(window.innerWidth - el.offsetWidth - 4, x))
-  y = Math.max(4, Math.min(window.innerHeight - el.offsetHeight - 4, y))
+  const sp = floatSafeClamp(x, y, el.offsetWidth || 54, el.offsetHeight || 54, window.innerWidth, window.innerHeight, topNavSafe())
+  x = sp.x; y = sp.y
   if (key === 'music') musicPos.value = { x, y }
   else if (key === 'pp') petPanelPos.value = { x, y }
   else petPos.value = { x, y }
@@ -632,9 +793,10 @@ function onFloatDragUp() {
   document.removeEventListener('pointermove', onFloatDragMove)
   document.removeEventListener('pointerup', onFloatDragUp)
   try {
-    localStorage.setItem('xc_music_pos', JSON.stringify(musicPos.value))
-    localStorage.setItem('xc_pet_pos', JSON.stringify(petPos.value))
-    localStorage.setItem('xc_pet_panel_pos', JSON.stringify(petPanelPos.value))
+    const vp = vpBucket()
+    localStorage.setItem('xc_music_pos_' + vp, JSON.stringify(musicPos.value))
+    localStorage.setItem('xc_pet_pos_' + vp, JSON.stringify(petPos.value))
+    localStorage.setItem('xc_pet_panel_pos_' + vp, JSON.stringify(petPanelPos.value))
   } catch (e) {}
 }
 function floatClick(key) {
@@ -709,8 +871,8 @@ function goFunc(f) {
   if (f.k.startsWith('tab_')) { store.tab = f.k.slice(4); return }
   if (f.k === 'set') { openSet(); return }
   if (f.k === 'export') { openExp('chat'); return }
-  if (f.k === 'exam') { store.tab = 'chat'; setTimeout(() => window.dispatchEvent(new CustomEvent('xc-open-exam')), 60); return }
-  if (f.k === 'paper') { store.tab = 'chat'; setTimeout(() => window.dispatchEvent(new CustomEvent('xc-open-paper')), 60); return }
+  if (f.k === 'exam') { store.tab = 'chat'; evEmit('xc-open-exam'); return }
+  if (f.k === 'paper') { store.tab = 'chat'; evEmit('xc-open-paper'); return }
   if (f.k === 'music') { toggleMusic(); return }
   if (f.k === 'pet') { openPet(); return }
   if (f.k === '3d') { store.tab = '3d'; return }
@@ -775,8 +937,8 @@ const SET_GUIDE = [
   { id: 'set-api', t: '💬 文字模型', d: '纯文字题的 AI 大脑：选提供商、填 API Key、地址与模型名。', tips: '推荐 DeepSeek（便宜中文好）；点「🔑 如何获取 API Key」看教程；填完点底部「保存并测试」验证。' },
   { id: 'set-vision', t: '👁️ 视觉模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek 可用同一个 Key（deepseek-v4-flash-vision-exp）；不配则发图题无法识别。' },
   { id: 'set-fig', t: '🖼 图形理解增强（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
-  { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '先「试听」选喜欢的；本机语音列表可覆盖场景音色。' },
-  { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、3D背景、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
+  { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
+  { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
   { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、保存到本地文件夹、WebDAV 云同步、导入笔记、时政时间范围。', tips: '数据只存本机；换设备用导出/导入或 WebDAV。' },
   { id: 'set-account', t: '🔐 账号', d: '本地登录门：注册/登录、修改密码、退出、删除账号、重置本地账号。', tips: '账号仅存本机（无服务器）；忘记密码可「重置本地账号」重新注册；不想每次登录可关闭登录门。' },
@@ -1216,12 +1378,40 @@ function setFs() {
   saveCfg()
   applyFs()
 }
+// ===== 全局字体族选择 =====
+const FONT_FAMILIES = [
+  { id: 'default', name: '默认（微软雅黑）', stack: "'Microsoft YaHei','PingFang SC',sans-serif" },
+  { id: 'song', name: '宋体（书本感）', stack: "'SimSun','宋体',serif" },
+  { id: 'hei', name: '黑体（稳重）', stack: "'SimHei','黑体',sans-serif" },
+  { id: 'kai', name: '楷体（手写感）', stack: "'KaiTi','楷体',serif" },
+  { id: 'fang', name: '仿宋（公文感）', stack: "'FangSong','仿宋',serif" },
+  { id: 'yuan', name: '幼圆（圆润）', stack: "'YouYuan','幼圆',sans-serif" }
+]
+const fontFam = ref(store.cfg.fontFamily || 'default')
+function applyFontFamily() {
+  const f = FONT_FAMILIES.find((x) => x.id === fontFam.value) || FONT_FAMILIES[0]
+  document.body.style.fontFamily = f.stack
+  document.body.style.setProperty('--font-family', f.stack)
+}
+applyFontFamily()
+function setFontFamily() {
+  store.cfg.fontFamily = fontFam.value
+  saveCfg()
+  applyFontFamily()
+}
 // ===== 全部用户数据一键导出 / 导入（跨设备/防丢失） =====
 function exportAllData() {
   const all = {}
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)
-    if (k && k.startsWith('xc_')) { try { all[k] = localStorage.getItem(k) } catch (e) {} }
+    if (k && k.startsWith('xc_')) {
+      try {
+        let val = localStorage.getItem(k)
+        // 安全加固（批次3.2）：配置含 API Key/WebDAV 密码 → 打码后导出，结构保留、密钥不落盘
+        if (k === 'xc_cfg') { try { val = JSON.stringify(stripSecrets(JSON.parse(val || '{}'))) } catch (e) {} }
+        all[k] = val
+      } catch (e) {}
+    }
   }
   const blob = new Blob([JSON.stringify({ app: 'xingce', v: 2, t: Date.now(), data: all }, null, 2)], { type: 'application/json' })
   const a = document.createElement('a')
@@ -1230,7 +1420,7 @@ function exportAllData() {
   a.download = '行测助手-全部数据备份-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json'
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 4000)
-  showToast('✅ 已导出全部数据（含设置/错题/对话/出题集/草稿/宠物等）', 'success')
+  showToast('✅ 已导出全部数据（API Key 等敏感字段已打码，导入后需重新填写）', 'success')
 }
 function importAllData(ev) {
   const f = ev.target.files && ev.target.files[0]
@@ -1492,9 +1682,8 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
-  <CosmosScene v-if="store.cfg.view3d && store.tab !== 'kb' && store.tab !== '3d'" :active-tab="store.tab" />
   <div v-if="wallStyle" class="bg-layer" :style="wallStyle"></div>
-<div class="app" :class="{ 'is-2d': !store.cfg.view3d, 'has-wall': wallStyle }">
+<div class="app is-2d" :class="{ 'has-wall': wallStyle }">
     <header class="topbar">
       <div class="brand">
         <span class="brand-logo">🧠</span>
@@ -1560,7 +1749,7 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <div style="display: flex; align-items: center; gap: 6px">
+      <div class="top-acts">
         <div class="status-pill">
           <div class="dot" :class="stDot"></div>
           <span>{{ stStat }}</span>
@@ -1577,6 +1766,26 @@ onUnmounted(() => {
         <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="doTheme()">
           {{ theme === 'light' ? '🌙' : '☀️' }}
         </button>
+      </div>
+      <!-- 手机端「⋯」更多菜单 -->
+      <div class="top-more">
+        <button class="btn top-more-btn" :class="{ on: moreShow }" title="更多" @click.stop="toggleMore()">⋯</button>
+        <div v-if="moreShow" class="top-more-menu" @click.self="moreShow = false">
+          <div class="top-mm-srch">
+            <input v-model="sq" placeholder="🔍 搜错题 / 对话 / 板块…" class="srch-in" @focus="focusDrop()" @blur="searchBlur()" />
+            <div v-if="searchDrop && sq.trim()" class="top-mm-res">
+              <div v-for="p in searchResults.plate" :key="'p' + p" class="top-mm-it" @mousedown.prevent="moreGo(() => goPlate(p))">🏛️ {{ p }}</div>
+              <div v-for="f in searchResults.func" :key="'f' + f.k" class="top-mm-it" @mousedown.prevent="moreGo(() => goFunc(f))">{{ f.t }}</div>
+              <div v-if="!searchResults.plate.length && !searchResults.func.length" class="sd-empty">无匹配结果</div>
+            </div>
+          </div>
+          <div class="top-mm-row"><span class="status-pill"><span class="dot" :class="stDot"></span><span>{{ stStat }}</span></span></div>
+          <button class="top-mm-it" @click="moreGo(() => costShow = true)">💰 用量与花费 {{ fmtCost(costToday) }}</button>
+          <button class="top-mm-it" @click="moreGo(() => store.tab = '3d')">🌌 3D数据</button>
+          <button class="top-mm-it" @click="moreGo(() => openExp('chat'))">📤 导出</button>
+          <button class="top-mm-it" @click="moreGo(() => openSet())">⚙️ 设置</button>
+          <button class="top-mm-it" @click="moreGo(() => doTheme())">{{ theme === 'light' ? '🌙 深色' : '☀️ 浅色' }}</button>
+        </div>
       </div>
     </header>
     <ExamBar />
@@ -1595,7 +1804,7 @@ onUnmounted(() => {
     <div class="pg" :class="{ on: store.tab === '3d' }"><Data3DPage /></div>
           <div class="pg" :class="{ on: store.tab === 'ths' }"><FloatPanel /></div>
     <!-- 设置弹窗 -->
-    <div class="ov" :class="{ show: setShow }" @click.self="setShow = false">
+    <div class="ov set-ov" :class="{ show: setShow }" @click.self="setShow = false">
       <div class="pnl">
         <div class="pnl-top">
           <button class="pnl-top-b" title="返回上一层（也可按 Esc / 浏览器返回）" @click="setShow = false">← 返回</button>
@@ -1629,7 +1838,7 @@ onUnmounted(() => {
         </div>
         <div class="fld">
           <label>API Key</label>
-          <input v-model="store.cfg.text.key" placeholder="sk-..." type="text" />
+          <input v-model="store.cfg.text.key" placeholder="sk-..." type="password" />
         </div>
         <div class="fld">
           <label>API 地址</label>
@@ -1681,7 +1890,7 @@ onUnmounted(() => {
           <label>API Key</label>
           <input
             v-model="store.cfg.vision.key"
-            type="text"
+            type="password"
             placeholder="粘贴视觉模型的 Key（DeepSeek 用 DeepSeek Key）"
           />
         </div>
@@ -1712,8 +1921,12 @@ onUnmounted(() => {
         <div class="fld">
           <label>
             <input v-model="store.cfg.ttsOn" type="checkbox" />
-            🔊 自动朗读 AI 回复
+            🔊 自动朗读 AI 回复（默认关 · 打开才会在回复后自动朗读，关=不耗 TTS 费用）
           </label>
+        </div>
+        <div class="vis-tip">
+          💰 <b>省钱提示</b>：朗读引擎在下方「🗣️ 音色市场」里选——<b>Edge 免费神经语音（当前默认）</b>与<b>系统语音（完全免费）</b>不花钱；
+          智谱超拟人 / CosyVoice 为收费真人音色（按次计费）。重复朗读同一段内容会命中<b>本地音频缓存</b>，不重复合成。
         </div>
         <details class="guide">
           <summary>🔑 如何获取 API Key（点开看详细教程）</summary>
@@ -1754,7 +1967,7 @@ onUnmounted(() => {
         </div>
         <div class="fld">
           <label>API Key（Ollama 本地可随便填如 ollama；硅基流动/智谱/通义填各自 Key）</label>
-          <input v-model="store.cfg.fig.key" placeholder="sk-...（Ollama 本地填 ollama 即可）" type="text" />
+          <input v-model="store.cfg.fig.key" placeholder="sk-...（Ollama 本地填 ollama 即可）" type="password" />
         </div>
         <div class="fld">
           <label>API 地址（Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1 · Jan: http://localhost:1337/v1）</label>
@@ -2029,14 +2242,22 @@ onUnmounted(() => {
 <div id="set-look" class="sec-t">🎨 主题与外观</div>
         <div class="sec-desc">主题、强调色、护眼、字体、壁纸、随手记、备考冲刺、导出偏好统一管理。</div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">主题/文字配色/强调色/护眼/壁纸/随手记/字号 统一在此管理；顶栏 ☀️/🌙 可在「米白纸 / 深空黑」间快速切换白天黑夜。</div>
-        <div class="sec-t">🎨 主题预设（iPad 笔记风 · 一键切换）</div>
+        <div class="sec-t">🎨 一键主题包（配色+强调色+护眼+高亮 一次到位）</div>
+        <div class="tp-grp-t">☀️ 白天主题</div>
         <div class="theme-grid">
-          <button v-for="(p, k) in THEME_PRESETS" :key="k" class="theme-card" :class="{ on: themePreset === k }" @click="applyThemePreset(k)">
-            <span class="th-swatch" :style="{ background: p.vars.bg }"></span>
+          <button v-for="p in THEME_PACKS.filter((x) => x.theme === 'light')" :key="p.id" class="theme-card" :class="{ on: themePack === p.id }" @click="applyThemePack(p.id)">
+            <span class="th-swatch" :style="{ background: THEME_PRESETS[p.preset].vars.bg }"></span>
             <span class="th-name">{{ p.name }}</span>
           </button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-top: 4px">红白蓝三款高对比夜间 + 米白/绿白/红白/暖黄/柔绿等白天护眼主题，点选即时生效并记忆；文字对比均按高可读性校准。</div>
+        <div class="tp-grp-t">🌙 黑夜主题</div>
+        <div class="theme-grid">
+          <button v-for="p in THEME_PACKS.filter((x) => x.theme === 'dark')" :key="p.id" class="theme-card" :class="{ on: themePack === p.id }" @click="applyThemePack(p.id)">
+            <span class="th-swatch" :style="{ background: THEME_PRESETS[p.preset].vars.bg }"></span>
+            <span class="th-name">{{ p.name }}</span>
+          </button>
+        </div>
+        <div style="font-size: 11px; color: var(--text3); margin-top: 4px">每套主题包已配好「底色+强调色+护眼+高亮」，一键应用；顶栏 ☀️/🌙 在白天/黑夜配对主题间切换。下方为进阶自定义。</div>
 
         <div class="fld">
           <label>强调色（更多参考色）</label>
@@ -2052,6 +2273,8 @@ onUnmounted(() => {
             <span class="sw sw-pink" :class="{ on: accent === 'pink' }" title="樱花粉" @click="setAccent('pink')"></span>
             <span class="sw sw-violet" :class="{ on: accent === 'violet' }" title="紫罗兰" @click="setAccent('violet')"></span>
             <span class="sw sw-indigo" :class="{ on: accent === 'indigo' }" title="靛蓝" @click="setAccent('indigo')"></span>
+            <span class="sw sw-custom" :class="{ on: accent === 'custom' }" :style="accent === 'custom' ? { background: accentCustom } : {}" title="自定义（自选任意色）" @click="setAccent('custom')"></span>
+            <input type="color" :value="accentCustom" style="width: 24px; height: 24px; border: 1px solid var(--glass-border); border-radius: 50%; background: transparent; cursor: pointer; padding: 0; margin-left: 4px" title="点此自选强调色" @input="setAccentCustom($event.target.value)" />
           </div>
 
 
@@ -2070,17 +2293,21 @@ onUnmounted(() => {
               <option value="warm">暖黄纸张（护眼暖色）</option>
             </select>
           </div>
-          <div class="fld">
-            <label>
-              <input v-model="store.cfg.hl" type="checkbox" @change="setHl(store.cfg.hl)" />
-              高亮模式（标题/答案/重点加亮，白天黑夜各自独立配色）
-            </label>
-          </div>
-          <div class="fld">
-            <label>
-              <input v-model="store.cfg.view3d" type="checkbox" @change="saveCfg()" />
-              3D 全景背景（开启后对话/看板等显示 3D 星空，可点顶栏 ◉ 快速切换）
-            </label>
+        <div class="fld">
+          <label>知识图谱光效（白天晃眼可调低或关闭）</label>
+          <select :value="Number(store.cfg.kgFx) || 0" @change="setKgFx($event.target.value)">
+            <option :value="0">关闭（最护眼 · 省电）</option>
+            <option :value="0.5">柔和（推荐白天）</option>
+            <option :value="1">全开（晚上炫丽）</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>高亮层级（标题/答案/重点的强调程度，白天黑夜各自独立配色）</label>
+            <select :value="Number(store.cfg.hl) || 0" @change="setHl($event.target.value)">
+              <option :value="0">无（最素净）</option>
+              <option :value="1">精简（关键处着色，推荐）</option>
+              <option :value="2">丰富（多层次强调，更醒目）</option>
+            </select>
           </div>
         <div class="sec-t">📝 随手记 / 草稿纸</div>
         <div class="fld">
@@ -2104,6 +2331,12 @@ onUnmounted(() => {
         </details>
 
 
+        </div>
+        <div class="fld">
+          <label>字体（全局，含聊天/看板/知识库）</label>
+          <select v-model="fontFam" @change="setFontFamily()">
+            <option v-for="f in FONT_FAMILIES" :key="f.id" :value="f.id">{{ f.name }}</option>
+          </select>
         </div>
         <div class="fld">
           <label>聊天字号</label>
@@ -2580,6 +2813,12 @@ onUnmounted(() => {
         <div class="cost-tok">
           <span>🧮 累计 token：输入 <b>{{ fmtTok(costStat.totalInT) }}</b> + 输出 <b>{{ fmtTok(costStat.totalOutT) }}</b><template v-if="costStat.totalReasonT"> + 思考 <b>{{ fmtTok(costStat.totalReasonT) }}</b></template> = <b>{{ fmtTok(costStat.totalT) }}</b></span>
         </div>
+        <div class="cost-budget" style="display:flex;align-items:center;gap:8px;margin:6px 2px 8px;flex-wrap:wrap">
+          <span style="font-size:12.5px">🛑 今日预算：</span>
+          <input v-model.number="costBudget" type="number" step="0.5" min="0" placeholder="0=不限制" style="width:96px;padding:5px 8px;border-radius:6px;border:1px solid var(--glass-border);background:var(--surface);color:var(--text);font-size:12.5px" title="今日 AI 花费超过该金额（元）后，每次调用先弹确认才继续；0 表示不限制" />
+          <span style="font-size:11.5px;color:var(--text3)">元/日 · 今日已用 <b style="color:var(--accent)">{{ fmtCost(costStat.today) }}</b><template v-if="costBudget > 0 && costStat.today >= costBudget"> · <b style="color:#fb7185">已超预算，后续调用需确认</b></template></span>
+          <button class="btn btn-pri" style="font-size:12px" @click="costSaveBudget()">💾 保存预算</button>
+        </div>
         <div style="font-size: 11px; color: var(--text3); line-height: 1.6; margin: 6px 2px 8px">
           📌 每次调用 <b>实时记一笔</b>：功能 / 模型 / 图文类型 / 输入·输出·思考 token（接口有 usage 用精确值并标「精确」，否则按文本估算）/ 耗时 / 费用明细。金额按下方计价表估算，仅供心里有底，以服务商账单为准；<b>本地免费服务（Ollama/LM Studio/Jan）计 ¥0</b>。
         </div>
@@ -2664,6 +2903,12 @@ onUnmounted(() => {
         <div class="fld">
           <label>内容：{{ { chat: '💬 对话记录', wrong: '📋 错题集', review: '📖 单题复盘', kb: '📚 知识库积累' }[expType] }}</label>
         </div>
+        <div v-if="expType === 'wrong'" class="sec-t">📐 错题打印模板（决定答案/解析是否随题导出）</div>
+        <div v-if="expType === 'wrong'" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+          <button class="btn btn-gh" :class="{ on: expTpl === 'full' }" @click="expTpl = 'full'">完整（含答案/错因）</button>
+          <button class="btn btn-gh" :class="{ on: expTpl === 'stems' }" title="只导出题干，不含任何答案与解析，适合纯重做自测" @click="expTpl = 'stems'">只题干</button>
+          <button class="btn btn-gh" :class="{ on: expTpl === 'separate' }" title="题干在前，答案与解析集中到末尾（打印重做友好）" @click="expTpl = 'separate'">题答分离</button>
+        </div>
         <div class="sec-t">✨ 让 AI 整理后导出（推荐：梳理考点/错因/秒杀规律）</div>
         <div class="exp-choices">
           <button class="btn btn-pri" @click="runExport('docx', true)">AI整理 → Word</button>
@@ -2681,8 +2926,8 @@ onUnmounted(() => {
     <div id="toast" ref="toastEl" class="toast"></div>
     <!-- 全局随手记：任何界面可写的悬浮手写板（做题界面自动隐藏，由做题草稿球接管） -->
     <Teleport to="body">
-      <button v-if="draftFabOn" class="draft-fab gfab" :style="gFabStyle" :title="'📝 随手记：任何界面可写笔记（可拖动，设置里可关闭）'" @pointerdown="onGFabDown">✏️</button>
-      <DraftPad v-if="globalDraft" draft-key="global" title="📝 全局随手记" @close="globalDraft = false" />
+      <button v-if="draftFabOn && !globalDraft" class="draft-fab gfab" :style="gFabStyle" :title="'✏️ 随手记：单击=小画板 · 双击=全屏勾画原题（可拖动，设置里可关闭）'" @pointerdown="onGFabDown">✏️</button>
+      <DraftPad v-if="globalDraft" :initial-mode="gFabIntent" draft-key="global" title="📝 全局随手记" @close="globalDraft = false; gFabIntent = ''" />
     </Teleport>
   </div>
     <!-- 首次使用引导向导 -->
@@ -2709,7 +2954,7 @@ onUnmounted(() => {
               <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; fillProv('text')">{{ p[1] }}</button>
             </div>
             <a class="ob-link" href="https://platform.deepseek.com/" target="_blank" rel="noopener">🔗 去 DeepSeek 创建 Key（选其它提供商则用对应平台）</a>
-            <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="text" @keydown.enter="testConn()" />
+            <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="password" @keydown.enter="testConn()" />
             <div class="ob-note">Key 只存在本机浏览器，不会上传。填好后点「测试」。</div>
             <div class="pnl-btns">
               <button class="btn btn-gh" @click="obStep = 2">跳过 ▶</button>
@@ -2726,7 +2971,7 @@ onUnmounted(() => {
             <div class="ob-prov">
               <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; fillProv('vision')">{{ p[1] }}</button>
             </div>
-            <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="text" @keydown.enter="testConn()" />
+            <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="password" @keydown.enter="testConn()" />
             <div class="ob-note">不配视觉模型也能用文字提问，只是发图/截图题无法识别。</div>
             <div class="pnl-btns">
               <button class="btn btn-gh" @click="obStep = 3">跳过 ▶</button>
@@ -2796,8 +3041,8 @@ onUnmounted(() => {
     </div>
 
 
-    <!-- 背景音乐浮动控件（二级：点击播放/暂停 · ▴ 展开控制面板） -->
-    <div class="music-float" :class="{ on: musicOn, hide: store.tab === 'chat' }" :style="floatStyle('music')" title="背景音乐" @pointerdown="startFloatDrag($event, 'music')">
+    <!-- 背景音乐浮动控件（只在「看板」界面显示，其余界面隐藏避免干扰） -->
+    <div v-if="store.tab === 'ck'" class="music-float" :class="{ on: musicOn }" :style="floatStyle('music')" title="背景音乐（仅看板界面显示）" @pointerdown="startFloatDrag($event, 'music')">
       <span class="mf-ic" @click.stop="floatClick('music')">{{ musicOn ? '🎵' : '🔇' }}</span>
       <span class="mf-name" @click.stop="floatClick('music')">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
       <button class="mf-more" :class="{ open: musicPanel }" :title="musicPanel ? '收起控制面板' : '展开控制面板（上/下一曲·暂停播放·关闭打开）'" @click.stop="toggleMusicPanel()" @pointerdown.stop>{{ musicPanel ? '▾' : '▴' }}</button>

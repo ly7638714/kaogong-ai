@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { on as evOn, off as evOff } from '../utils/events'
 import { store } from '../store'
 import { startAmbient, stopAmbient } from '../utils/ambient'
 
@@ -61,11 +62,12 @@ function refreshTasks() {
 onMounted(() => {
   timer = setInterval(tick, 1000)
   refreshTasks()
-  window.addEventListener('xc-task-change', refreshTasks)
+  evOn('xc-task-change', refreshTasks)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   stopAmbient()
+  evOff('xc-task-change', refreshTasks)
 })
 </script>
 

@@ -1,5 +1,6 @@
 /* global indexedDB */
 import { store } from '../store'
+import { stripSecrets } from './stripSecrets'
 
 let dirHandle = null
 let dirName = ''
@@ -52,9 +53,10 @@ export async function saveAllDataToFolder() {
   const h = await getDir()
   if (!h) throw new Error('请先「选择保存文件夹」')
   const data = {
-    app: '行测AI问答助手',
+    app: '行测名师AI小助理',
     ts: Date.now(),
-    cfg: store.cfg,
+    // 批次3补课：本地文件夹备份同样剔除 API Key / 密码（与 WebDAV/导出JSON 三路一致）
+    cfg: stripSecrets(store.cfg),
     msgs: store.msgs,
     wqs: store.wqs,
     myMem: store.myMem,

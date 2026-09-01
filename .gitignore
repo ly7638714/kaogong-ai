@@ -1,6 +1,8 @@
 node_modules/
 dist/
+dist-verify/
 *.local
 *.log
 .env
 .env.local
+*.timestamp-*.mjs

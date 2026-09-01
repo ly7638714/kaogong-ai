@@ -3,13 +3,13 @@
 function extractOptions(text) {
   const opts = []
   const lines = String(text).split('\n')
-  const lineRe = /^\s*([A-D])[.、．:：]\s*(.*)$/
+  const lineRe = /^\s*[*_`]*\s*([A-D])[.、．:：]\s*(.*)$/
   for (let i = 0; i < lines.length && opts.length < 4; i++) {
     const m = lines[i].match(lineRe)
     if (!m) continue
     const k = m[1]
     if (opts.some((o) => o.k === k)) continue
-    let t = m[2].trim()
+    let t = m[2].trim().replace(/(\*\*|__|\*|_|`)+\s*$/, '').replace(/^\s*(\*\*|__|\*|_|`)+/, '')
     // 跨行合并选项内容（直到下一个选项/标题/答案标记）
     // 代码块(```svg)原样保留（图推选项内嵌 SVG 不能压平），普通文字才折叠空白
     let j = i + 1
@@ -66,6 +66,15 @@ function extractOptions(text) {
   return opts.sort((a, b) => a.k.localeCompare(b.k))
 }
 
+// 判断是否「真·题目」而非解析/复盘长文：避免把带 A-D 选项的讲解误判成可点作答卡片
+export function looksLikeQuiz(text) {
+  const t = String(text || '')
+  if (!t || t.length > 900) return false
+  // 讲解/复盘/解析特征词 → 不是新题
+  if (/(第[一二三四五六七八九十\d]+步|四步|五步|陷阱提示|秒杀规律|高效复盘指引|错因自查|巩固动作|干扰项分析|为什么错|符合定义|逐项核对|【解析|解析：|正确答案[:：]|考点结构|套路|破题法)/.test(t)) return false
+  return true
+}
+
 export function parseQuiz(text) {
   if (!text || typeof text !== 'string') return null
   let opts = extractOptions(text)
@@ -76,10 +85,10 @@ export function parseQuiz(text) {
 
   // 正确答案：优先【正确答案】X 标记，其次"答案：X/正确答案：X"
   let answer = null
-  const marker = String(text).match(/【正确答案】\s*([A-D])/i)
+  const marker = String(text).replace(/<[^>]+>/g, '').match(/【正确答案】\s*([A-D])/i)
   if (marker) answer = marker[1].toUpperCase()
   if (!answer) {
-    const ans = String(text).match(/(?:正确答案|答案|正确选项)\s*[:：]?\s*([A-D])/i)
+    const ans = String(text).replace(/<[^>]+>/g, '').match(/(?:正确答案|答案|正确选项)\s*[:：]?\s*([A-D])/i)
     if (ans) answer = ans[1].toUpperCase()
   }
   if (!answer) return null

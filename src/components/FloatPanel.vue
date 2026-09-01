@@ -1,8 +1,14 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { store, saveMyMem, saveWqs, saveNotes } from '../store'
+import { MEMORY } from '../kb/cards-index'
+import { YUFEN_CHENGYU, YUFEN_SHICI } from '../ku/yufeiLexicon'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { store, saveMyMem, saveWqs, saveNotes, addWrong } from '../store'
 import { chatOnce, activeCfg } from '../api'
 import { showToast } from '../utils/toast'
+import { on as evOn, off as evOff } from '../utils/events'
+import { srsReviewedToday, srsMasteredCount } from '../utils/srsStats'
+import { useAi } from '../utils/useAi'
+const { run: aiRun } = useAi()
 
 // ===== 内置常识库（按领域分类，可筛选/搜索）=====
 const CHANGSHI = [
@@ -163,29 +169,22 @@ const CHENGYU = [
   { t: '炙手可热', cat: '高频易错', yishi: '手一挨近就感到热，比喻气焰很盛、权势很大（多含贬义），不是“热门”。', jy: '权势熏天', fy: '平易近人', lj: '当年炙手可热的权臣终被清算。', ly: '唐·杜甫《丽人行》', yf: '易错点：不能用来形容“热门职业/专业”。', p: '★★★★★', gm: '该行业一度炙手可热，如今趋于理性。' },
   { t: '万人空巷', cat: '高频易错', yishi: '家家户户的人都从巷子里出来，形容庆祝、欢迎等盛况，不是“没人”。', jy: '门庭若市', fy: '门可罗雀', lj: '夺冠之夜，全城万人空巷。', ly: '宋·苏轼《八月十七日复登望海楼》', yf: '易错点：表示“人多”，非“冷清”。', p: '★★★★☆', gm: '元宵灯会万人空巷，热闹非凡。' },
   { t: '空穴来风', cat: '高频易错', yishi: '有了洞穴才有风进来，比喻消息和传说不是完全没有根据的。', jy: '事出有因', fy: '无稽之谈/捕风捉影', lj: '传言并非空穴来风，需核实。', ly: '战国·宋玉《风赋》', yf: '易错点：现多误用为“毫无根据”，考试常考原义。', p: '★★★★★', gm: '网传消息并非空穴来风，官方已回应。' },
-
   { t: '差强人意', cat: '高频易错', yishi: '大体上还能使人满意（"差"读 chā，轻微），不是"不能令人满意"。', jy: '大体满意', fy: '大失所望', lj: '这次的方案虽然不完美，但还算差强人意。', ly: '《后汉书·吴汉传》', yf: '多作褒义/中性，与"差强人意≠不满意"是常考陷阱；近5年逻辑填空高频。', p: '★★★★★', gm: '各部门整改虽有瑕疵，但总体差强人意，群众满意度稳步提升。' },
   { t: '不负众望', cat: '高频易错', yishi: '不辜负大家的期望，指成功、做得好。', jy: '不孚众望（反）', fy: '不孚众望', lj: '他果然不负众望，带队夺冠。', ly: '常用成语', yf: '"不负众望(成功)" vs "不孚众望(失信/失败)"是必考点。', p: '★★★★★', gm: '中国队不负众望，夺得该项目金牌。' },
-  { t: '首当其冲', cat: '高频易错', yishi: '最先受到攻击或遭遇灾难，不是"首先"。', jy: '打头阵', fy: '退避三舍', lj: '灾区最先受冲击的就是首当其冲的村庄。', ly: '《汉书·五行志》', yf: '"首当其冲≠首先/带头"是经典陷阱。', p: '★★★★★', gm: '暴雨来袭，地势低洼的社区首当其冲。' },
   { t: '不刊之论', cat: '高频易错', yishi: '不可更改的正确言论（"刊"=删改），不是"不能刊登"。', jy: '不易之论', fy: '不经之谈', lj: '这篇文章堪称不刊之论。', ly: '《答李翊书》', yf: '"不刊之论"指言论正确，非不能发表。', p: '★★★★☆', gm: '该论断被学界奉为不刊之论。' },
   { t: '文不加点', cat: '高频易错', yishi: '文章一气呵成，无需修改（"点"=涂改），不是"不加标点"。', jy: '一气呵成', fy: '文思枯竭', lj: '他才思敏捷，下笔文不加点。', ly: '《鹦鹉赋序》', yf: '形容才思敏捷，非标点问题。', p: '★★★★☆', gm: '他即席发言文不加点，条理清晰。' },
-  { t: '炙手可热', cat: '高频易错', yishi: '比喻气焰很盛、权势很大，常含贬义；不是"热门抢手"。', jy: '气焰熏天', fy: '门可罗雀', lj: '他当时炙手可热，人人避之。', ly: '《两京诗》', yf: '褒贬色彩是关键：不能用于"产品炙手可热(抢手)"。', p: '★★★★☆', gm: '当年他权倾一时、炙手可热，如今门庭冷落。' },
   { t: '明日黄花', cat: '高频易错', yishi: '过时的事物，不是"未来/明天"的事物。', jy: '昨日黄花', fy: '方兴未艾', lj: '这个话题已成明日黄花。', ly: '苏轼诗', yf: '指已过时，勿当"未来可期"。', p: '★★★★☆', gm: '这些旧经验已成明日黄花，必须与时俱进。' },
-  { t: '万人空巷', cat: '高频易错', yishi: '家家户户的人都从巷子里出来，形容盛况空前，不是"巷子空无一人"。', jy: '盛况空前', fy: '门可罗雀', lj: '演唱会当晚万人空巷。', ly: '《水调歌头》', yf: '指人多而非人少。', p: '★★★★☆', gm: '航天员凯旋当天，全城万人空巷。' },
   { t: '望其项背', cat: '高频易错', yishi: '能够望见别人的颈项和背脊，表示赶得上（多用于否定：难以望其项背）。', jy: '望尘莫及（反义用法）', fy: '望尘莫及', lj: '他的水平令人难以望其项背。', ly: '常用成语', yf: '常与"难以/不能"连用；"望其项背≠望尘莫及"方向相反。', p: '★★★★★', gm: '其核心技术实力令同行难以望其项背。' },
   { t: '登堂入室', cat: '高频易错', yishi: '比喻学问或技能由浅入深，达到很高水平，不是"进入屋子"。', jy: '升堂入室', fy: '浅尝辄止', lj: '他钻研多年，终于登堂入室。', ly: '《论语》', yf: '形容水平高，非字面进屋。', p: '★★★☆☆', gm: '他深耕古籍数十载，终于登堂入室。' },
-  { t: '举一反三', cat: '高频', yishi: '从一件事类推而知许多事，善于学习。', jy: '触类旁通', fy: '囫囵吞枣', lj: '学习要举一反三。', ly: '《论语》', yf: '逻辑填空常与"触类旁通"并列考查。', p: '★★★★★', gm: '要求各地举一反三、以点带面抓好整改。' },
-  { t: '耳濡目染', cat: '高频', yishi: '经常听到看到，无形中受到影响。', jy: '潜移默化', fy: '充耳不闻', lj: '从小耳濡目染，他热爱书法。', ly: '《朱熹集注》', yf: '强调"听+看"的环境影响。', p: '★★★★★', gm: '青少年在良好家风的耳濡目染中成长。' },
   { t: '趋之若鹜', cat: '高频', yishi: '像鸭子一样成群跑过去，比喻许多人争着去（多含贬义）。', jy: '蜂拥而至', fy: '避之不及', lj: '大家对新风口趋之若鹜。', ly: '《明史》', yf: '贬义色彩，勿用于褒义。', p: '★★★★☆', gm: '一些人不辨真伪盲目跟风、趋之若鹜，值得警惕。' },
   { t: '叹为观止', cat: '高频', yishi: '赞叹所看到的事物好到了极点。', jy: '拍案叫绝', fy: '不屑一顾', lj: '这场表演令人叹为观止。', ly: '《左传》', yf: '褒义，用于赞美。', p: '★★★★☆', gm: '非遗展演技艺之精妙令人叹为观止。' },
-  { t: '相得益彰', cat: '高频', yishi: '互相配合、补充，更能显出各自的长处。', jy: '相辅相成', fy: '相形见绌', lj: '两者结合相得益彰。', ly: '《史记》', yf: '强调"互相成就"。', p: '★★★★★', gm: '传统技艺与现代创意相得益彰。' },
   { t: '得不偿失', cat: '高频', yishi: '所得抵不上所失。', jy: '因小失大', fy: '一本万利', lj: '这样熬夜做题得不偿失。', ly: '常用成语', yf: '强调得失比较。', p: '★★★★☆', gm: '以牺牲环境换短期增长，得不偿失。' },
   { t: '水到渠成', cat: '高频', yishi: '水流到之处自然成渠，比喻条件成熟事情自然成功。', jy: '瓜熟蒂落', fy: '功亏一篑', lj: '基础打牢，成功自然水到渠成。', ly: '《答李翊书》', yf: '强调"水到"（条件）。', p: '★★★★★', gm: '基础打得牢，成果自然水到渠成。' },
   { t: '曲高和寡', cat: '高频', yishi: '言论或作品不通俗，能理解的人很少。', jy: '阳春白雪', fy: '雅俗共赏', lj: '这部学术著作曲高和寡。', ly: '宋玉《对楚王问》', yf: '含"高处不胜寒"之意。', p: '★★★☆☆', gm: '部分学术成果曲高和寡，需加强科普转化。' },
   { t: '饮鸩止渴', cat: '高频', yishi: '喝毒酒解渴，比喻用错误办法解决眼前困难而不顾后果。', jy: '杀鸡取卵', fy: '高瞻远瞩', lj: '靠刷题海战术提分是饮鸩止渴。', ly: '《后汉书》', yf: '强调"方法有害"。', p: '★★★★★', gm: '借新债还旧债无异于饮鸩止渴。' },
-  { t: '未雨绸缪', cat: '高频', yishi: '趁着天没下雨先修缮房屋，比喻事先做好准备。', jy: '防患未然', fy: '临渴掘井', lj: '考前一个月就该未雨绸缪。', ly: '《诗经》', yf: '强调"提前准备"。', p: '★★★★★', gm: '防汛备汛未雨绸缪，全力守护群众安全。' },
+  { t: '未雨绸缪', cat: '高频', yishi: '趁着天没下雨先修缮房屋，比喻事先做好准备。', jy: '防患未然', fy: '临渴掘井', lj: '考前一个月就该未雨绸缪。', ly: '《诗经》', yf: '强调"提前准备"。', p: '★★★★★', gm: '防汛备汛未雨绸缪，全力守护群众安全。' }
 ]
-// ===== 高频实词库（逻辑填空常考辨析）=====
+
 const SHICI = [
   { t: '昭示', cat: '易混', yishi: '明白地表示或宣布。', jy: '揭示/宣告', fy: '掩盖', lj: '大会昭示了改革方向。', yf: '“昭示(明白宣示)” vs “暗示(含蓄示意)”。', p: '★★★★☆' },
   { t: '蕴含', cat: '高频', yishi: '包含、内含（多指抽象意义）。', jy: '蕴藏/包含', fy: '显露', lj: '故事蕴含深刻哲理。', yf: '常考“蕴含哲理/深意”。', p: '★★★★☆' },
@@ -231,6 +230,9 @@ const SZCATS = ['理论会议', '政策经济', '科技民生', '贵州地方']
 
 // ===== 状态 =====
 const cat = ref('常识')
+// 批次7·S6：技能矩阵记忆词条接入积累池（常识12条+政治10条）
+const skillMemCS = MEMORY.filter((m) => m.plate === '常识判断').map((m) => ({ t: m.t, cat: '常识' }))
+const skillMemZZ = MEMORY.filter((m) => m.plate === '政治理论').map((m) => ({ t: m.t, cat: '政治理论' }))
 const cur = ref('')
 const curRegion = ref('全部') // 时政地区筛选：全部/国内/贵州
 const fCat = ref('全部') // 领域/类型筛选
@@ -256,14 +258,14 @@ function pool(c) {
   let list = []
   if (c === '时政') {
     const mine = myMem.value.filter((x) => x.type === '时政').map((x) => ({ t: x.text, date: '', region: '我的', cat: '我的' }))
-    list = shizhengAvailable().concat(mine)
+    list = shizhengAvailable().concat(skillMemZZ).concat(mine)
   } else if (c === '成语') {
-    list = CHENGYU.concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
+    list = CHENGYU.concat(YUFEN_CHENGYU).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
   } else if (c === '实词') {
-    list = SHICI.concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
+    list = SHICI.concat(YUFEN_SHICI).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
   } else {
     const mine = myMem.value.filter((x) => x.type === '常识').map((x) => ({ t: x.text, cat: '我的' }))
-    list = CHANGSHI.concat(mine)
+    list = CHANGSHI.concat(skillMemCS).concat(mine)
   }
   if (fCat.value && fCat.value !== '全部') list = list.filter((x) => x.cat === fCat.value)
   const k = kw.value.trim().toLowerCase()
@@ -326,6 +328,62 @@ function favorite() {
   showToast('✅ 已加入我的记忆库', 'success')
 }
 
+// ===== 积累 UI v2：学习路径引导 + 今日概览 + 学习统计 =====
+const guideShow = ref(true)
+try { if (localStorage.getItem('xc_acc_guide') === '0') guideShow.value = false } catch (e) {}
+const moreShow = ref(false) // 「更多功能」折叠
+function closeGuide() {
+  guideShow.value = false
+  try { localStorage.setItem('xc_acc_guide', '0') } catch (e) {}
+}
+// 今日学习统计（跨分类，localStorage 按日期存）
+const DAILY_KEY = 'xc_acc_daily'
+const DAILY_GOAL = 10
+function loadDaily() {
+  try { return JSON.parse(localStorage.getItem(DAILY_KEY) || '{}') || {} } catch (e) { return {} }
+}
+const daily = ref(loadDaily())
+function saveDaily() {
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify(daily.value)) } catch (e) {}
+}
+const todayReviewed = computed(() => {
+  const d = daily.value[todayKey()] || {}
+  return { ok: d.ok || 0, no: d.no || 0, total: (d.ok || 0) + (d.no || 0) }
+})
+const todayGoalPct = computed(() => Math.min(100, Math.round((todayReviewed.value.total / DAILY_GOAL) * 100)))
+function catKeyOf(c, t) { return c + '|' + t }
+// 指定分类待复习条数（分类切换角标）
+function dueOfCat(c) {
+  const today = todayKey()
+  return pool(c).filter((x) => {
+    const s = srs.value[catKeyOf(c, x.t)]
+    return !s || s.due <= today
+  }).length
+}
+// 全分类今日待复习（概览大数字）
+const dueCountAll = computed(() => ['常识', '时政', '成语', '实词'].reduce((n, c) => n + dueOfCat(c), 0))
+// 艾宾浩斯阶段库存（1d/2d/4d/7d/15d/30d 各多少条在排队）
+const srsStages = computed(() => {
+  const stages = [0, 0, 0, 0, 0, 0]
+  Object.values(srs.value).forEach((s) => {
+    const lvl = Math.min(Math.max(0, (s.lvl || 0) - 1), 5)
+    stages[lvl]++
+  })
+  return stages
+})
+// 一键开始学习：有待复习 → 进复习模式；否则随机学新
+function startStudy() {
+  if (dueCountAll.value > 0) {
+    reviewMode.value = true
+    pick(cat.value)
+    showToast('🔁 进入复习：优先抽今日到期条目（共 ' + dueCountAll.value + ' 条）', 'info')
+  } else {
+    reviewMode.value = false
+    pick(cat.value)
+    showToast('🎲 今日无到期，开始学新知识', 'info')
+  }
+}
+
 // ===== 常识 AI 出题交互 =====
 const quiz = ref(null) // {q, opts:[], ans, type}
 const picked = ref('') // 用户选的选项
@@ -347,7 +405,7 @@ async function askQuiz(kind) {
   picked.value = ''
   mark.value = null
   seeExplain.value = ''
-  const topic = cur.value || (cat.value === '常识' ? '常识知识点' : '时政时政知识点')
+  const topic = cur.value || (cat.value === '常识' ? '常识知识点' : '时政知识点')
   let prompt
   if (kind === 'quiz')
     prompt =
@@ -389,7 +447,7 @@ function choose(i) {
   // 答错 → 存错题集
   if (!right) {
     const q = '【常识出题自测】' + quiz.value.q + ' | 知识点源：' + (cur.value || '').slice(0, 60)
-    store.wqs.unshift({
+    addWrong({
       id: Date.now(),
       subject: '常识判断',
       question: q,
@@ -398,7 +456,6 @@ function choose(i) {
       time: new Date().toLocaleString()
     })
     saveWqs()
-    showToast('❌ 已加入错题集（常识判断）', 'error')
   }
 }
 async function askFollow() {
@@ -464,9 +521,15 @@ function remember(ok) {
     s.lvl = 0
     s.due = addDays(todayKey(), 1)
   }
-  s.last = new Date().toLocaleString()
+  s.last = todayKey() // 统一存 YYYY-MM-DD，与 accStats.reviewedToday 的 todayKey() 一致
   srs.value[k] = s
   saveSrs()
+  // 今日学习统计（概览卡实时更新）
+  const dk = todayKey()
+  const d = daily.value[dk] || { ok: 0, no: 0 }
+  d[ok ? 'ok' : 'no'] = (d[ok ? 'ok' : 'no'] || 0) + 1
+  daily.value[dk] = d
+  saveDaily()
   showToast(ok ? '✅ 记住了 · ' + s.due + ' 再复习' : '❌ 没记住 · 明天再复习', ok ? 'success' : 'error')
   next()
 }
@@ -485,7 +548,7 @@ function closeNote() {
 }
 function copyNote(n) {
   if (!n) return
-  const md = '---\ntags: [' + (n.tags || []).join(', ') + ']\nsource: 行测AI问答助手\n---\n\n# ' + n.title + '\n\n' + String(n.body || '').trim()
+  const md = '---\ntags: [' + (n.tags || []).join(', ') + ']\nsource: 行测名师AI小助理\n---\n\n# ' + n.title + '\n\n' + String(n.body || '').trim()
   const done = () => showToast('已复制为 Obsidian 格式', 'success')
   const fail = () => showToast('复制失败', 'error')
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -511,7 +574,7 @@ function delNote(i) {
   if (noteView.value) noteView.value = null
 }
 
-const CY_CATS = ['高频易错', '高频']
+const CY_CATS = ['易混', '高频易错', '高频']
 const SC_CATS = ['易混', '高频']
 const curCats = computed(() => {
   if (cat.value === '时政') return SZCATS
@@ -519,6 +582,50 @@ const curCats = computed(() => {
   if (cat.value === '实词') return SC_CATS
   return CATS
 })
+
+// ===== 词库来源引导（雨菲800词 + 易混词B5 融合后的可发现性）=====
+// 基线池：不套 fCat/kw 过滤，仅用于统计各分类条数，让用户直观看到新增规模
+function basePool(c) {
+  if (c === '成语') return CHENGYU.concat(YUFEN_CHENGYU).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
+  if (c === '实词') return SHICI.concat(YUFEN_SHICI).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
+  return pool(c)
+}
+// 来源统计：让用户直观看到三个词库各自贡献多少条（尤其易混分类）
+const srcStats = computed(() => {
+  if (!isLex.value) return null
+  const all = basePool(cat.value)
+  const by = (s) => all.filter((x) => x.src === s).length
+  return { 内置: all.filter((x) => !x.src).length, '雨菲800词': by('雨菲800词'), '半月谈': by('半月谈') }
+})
+const isLex = computed(() => cat.value === '成语' || cat.value === '实词')
+const catTotal = computed(() => (isLex.value ? basePool(cat.value).length : 0))
+// 搜索框提示随板块变化
+const searchPh = computed(() => {
+  if (cat.value === '成语') return '🔍 搜索成语…（如：相得益彰、浅尝辄止）回车随机抽一条'
+  if (cat.value === '实词') return '🔍 搜索实词…（如：遏制、演化）回车随机抽一条'
+  return '🔍 搜索常识/时政关键词…（回车/搜索按钮 随机抽一条匹配）'
+})
+// 常驻来源说明条（可关闭，关闭状态持久化）
+const srcTipOff = ref(false)
+try { srcTipOff.value = localStorage.getItem('xc_fp_srctip') === '1' } catch (e) {}
+function dismissSrcTip() {
+  srcTipOff.value = true
+  try { localStorage.setItem('xc_fp_srctip', '1') } catch (e) {}
+}
+// 词库升级首次引导（一次性；切到成语/实词时才出现）
+const lexGuide = ref(false)
+try { lexGuide.value = localStorage.getItem('xc_fp_lexguide') !== '1' } catch (e) {}
+function closeLexGuide() {
+  lexGuide.value = false
+  try { localStorage.setItem('xc_fp_lexguide', '1') } catch (e) {}
+}
+function tryYihun() {
+  closeLexGuide()
+  cat.value = '成语'
+  fCat.value = '易混'
+  pick('成语')
+  showToast('已切到「易混」：雨菲800词·半月谈 的易混对都在这里，点「📖 详解/辨析」看辨析', 'success')
+}
 // 词条详情（成语/实词）
 const detailShow = ref(false)
 const detailItem = ref(null)
@@ -533,24 +640,13 @@ function openDetail() {
 async function aiExplainDetail() {
   if (!detailItem.value) return
   aiDetail.value = '（AI 生成中…）'
-  const c = activeCfg(false)
-  if (!c || !c.key) {
-    aiDetail.value = '请先配置文字模型 API Key'
-    return
-  }
-  try {
+  const out = await aiRun(async (c) => {
     const item = detailItem.value
     const prompt =
       '请为公考逻辑填空常考词「' + item.t + '」生成一份助记卡片：①一句话秒记 ②3个搭配/例句 ③常见陷阱或易混词辨析 ④出现语境（褒贬/正式/书面）。已知：释义 ' + (item.yishi || '') + '；近义 ' + (item.jy || '') + '；反义 ' + (item.fy || '') + '。150-250字。'
-    aiDetail.value =
-      (await chatOnce(
-        c,
-        [{ role: 'system', content: '你是公考言语理解老师。' }, { role: 'user', content: prompt }],
-        900
-      )) || '（无返回）'
-  } catch (e) {
-    aiDetail.value = '生成失败：' + e.message
-  }
+    return (await chatOnce(c, [{ role: 'system', content: '你是公考言语理解老师。' }, { role: 'user', content: prompt }], 900)) || '（无返回）'
+  }, { onError: (e) => { aiDetail.value = '生成失败：' + e.message } })
+  if (out != null) aiDetail.value = out
 }
 // ===== 我的记忆库管理（独立面板）=====
 const memShow = ref(false)
@@ -604,13 +700,7 @@ async function onlineLookup(term) {
   aiCard.value = ''
   aiCardBusy.value = true
   openGmSearch(t)
-  const c = activeCfg(false)
-  if (!c || !c.key) {
-    aiCard.value = '⚠️ 未配置文字模型 API Key，无法生成 AI 知识卡（联网结果仍可查看）'
-    aiCardBusy.value = false
-    return
-  }
-  try {
+  const out = await aiRun(async (c) => {
     const kind = cat.value
     let prompt
     if (kind === '成语')
@@ -620,15 +710,9 @@ async function onlineLookup(term) {
     else if (kind === '时政')
       prompt = '请为时政/政治理论知识点「' + t + '」生成学习卡：①核心内容 ②提出背景/场合 ③常考表述 ④一句话记忆点。100-200字，只讲确定事实。'
     else prompt = '请为常识知识点「' + t + '」生成学习卡：①核心内容 ②易错点 ③记忆口诀 ④可能考法。100-200字，只讲确定事实。'
-    aiCard.value =
-      (await chatOnce(
-        c,
-        [{ role: 'system', content: '你是严谨的公考讲师。' }, { role: 'user', content: prompt }],
-        800
-      )) || '（无返回）'
-  } catch (e) {
-    aiCard.value = 'AI 知识卡生成失败：' + e.message
-  }
+    return (await chatOnce(c, [{ role: 'system', content: '你是严谨的公考讲师。' }, { role: 'user', content: prompt }], 800)) || '（无返回）'
+  }, { keyHint: '文字模型', onError: (e) => { aiCard.value = 'AI 知识卡生成失败：' + e.message } })
+  if (out != null) aiCard.value = out
   aiCardBusy.value = false
 }
 function saveAiCard() {
@@ -648,13 +732,8 @@ function saveAiCard() {
 // ===== AI 批量扩库（每板块生成10条）=====
 const genBusy = ref(false)
 async function genBatch() {
-  const c = activeCfg(false)
-  if (!c || !c.key) {
-    showToast('请先配置文字模型 API Key', 'error')
-    return
-  }
   genBusy.value = true
-  try {
+  const out = await aiRun(async (c) => {
     const kind = cat.value
     let spec
     if (kind === '成语')
@@ -664,12 +743,11 @@ async function genBatch() {
     else if (kind === '时政')
       spec = '给出10条2025-2026年重要时政/政治理论要点，严格输出JSON数组：[{"word":"要点标题","yisi":"核心内容"}]'
     else spec = '给出10条公考常识（政治/法律/科技/人文/地理/经济/生活），严格输出JSON数组：[{"word":"常识点","yisi":"内容"}]'
-    const reply = await chatOnce(
-      c,
-      [{ role: 'system', content: '你是公考知识库整理助手，严格输出JSON数组。' }, { role: 'user', content: spec }],
-      2500
-    )
-    const m = String(reply || '').match(/\[[\s\S]*\]/)
+    return await chatOnce(c, [{ role: 'system', content: '你是公考知识库整理助手，严格输出JSON数组。' }, { role: 'user', content: spec }], 2500)
+  }, { keyHint: '文字模型' })
+  if (out == null) { genBusy.value = false; return }
+  try {
+    const m = String(out || '').match(/\[[\s\S]*\]/)
     if (!m) throw new Error('AI返回格式异常')
     const arr = JSON.parse(m[0])
     let added = 0
@@ -678,11 +756,11 @@ async function genBatch() {
       if (!w) return
       const full = w + '——' + (x.yisi || x.content || '') + (x.liju ? '（例：' + x.liju + '）' : '')
       if (store.myMem.some((mm) => mm.text === full)) return
-      store.myMem.unshift({ type: kind, text: full, t: new Date().toLocaleString() })
+      store.myMem.unshift({ type: cat.value, text: full, t: new Date().toLocaleString() })
       added++
     })
     saveMyMem()
-    showToast('✅ 已生成并加入 ' + added + ' 条「' + kind + '」到记忆库', 'success')
+    showToast('✅ 已生成并加入 ' + added + ' 条「' + cat.value + '」到记忆库', 'success')
     pick(cat.value)
   } catch (e) {
     showToast('生成失败：' + e.message, 'error')
@@ -779,28 +857,16 @@ async function openVerify() {
     webSnippets.push({ text: '（联网失败：' + e.message + '，AI 将基于自身知识校验）', url: '' })
   }
   verifyWeb.value = webSnippets.slice(0, 5)
-  const c = activeCfg(false)
-  if (!c || !c.key) {
-    verifyAi.value = '⚠️ 未配置文字模型 API Key，无法 AI 校验；可查看右侧「联网结果」。'
-    verifyBusy.value = false
-    return
-  }
-  try {
+  const out = await aiRun(async (c) => {
     const refText = webSnippets.map((s) => s.text).join('\n').slice(0, 1200)
     const prompt =
       '请校验下面这条公考常识/时政知识点的准确性，输出：\n【结论】准确 / 需修正 / 无法确认\n【修正后文本】准确规范版本\n【补充】1-2句要点（如有）\n\n待校验：\n' +
       term +
       '\n\n联网参考（可能为空）：\n' +
       refText
-    verifyAi.value =
-      (await chatOnce(
-        c,
-        [{ role: 'system', content: '你是严谨的公考知识校验助手，只讲确定的事实，不确定就说无法确认。' }, { role: 'user', content: prompt }],
-        700
-      )) || '（无返回）'
-  } catch (e) {
-    verifyAi.value = 'AI 校验失败：' + e.message
-  }
+    return (await chatOnce(c, [{ role: 'system', content: '你是严谨的公考知识校验助手，只讲确定的事实，不确定就说无法确认。' }, { role: 'user', content: prompt }], 700)) || '（无返回）'
+  }, { keyHint: '文字模型', onError: (e) => { verifyAi.value = 'AI 校验失败：' + e.message } })
+  if (out != null) verifyAi.value = out
   verifyBusy.value = false
 }
 function saveVerify() {
@@ -812,37 +878,23 @@ function saveVerify() {
 }
 // ===== 学习进度统计 =====
 const accStats = computed(() => {
-  const all = CHANGSHI.concat(SHIZHENG).concat(CHENGYU).concat(SHICI).concat(store.myMem.map((x) => ({ t: x.text })))
-  const mastered = all.filter((x) => {
-    const s = srs.value[(x.cat === undefined ? '常识' : '时政') + '|' + x.t]
-    return s && s.lvl >= 2
-  }).length
-  const today = todayKey()
-  const reviewedToday = Object.values(srs.value).filter((s) => s.last && s.last.slice && s.last.slice(0, 10) === today).length
-  return { total: all.length, mastered, reviewedToday }
+  const c4 = (ty) => (['常识', '时政', '成语', '实词'].includes(ty) ? ty : '常识')
+  const all = CHANGSHI.map((t) => ({ cat: '常识', t })).concat(SHIZHENG.map((t) => ({ cat: '时政', t }))).concat(CHENGYU.map((t) => ({ cat: '成语', t }))).concat(YUFEN_CHENGYU.map((t) => ({ cat: '成语', t }))).concat(SHICI.map((t) => ({ cat: '实词', t }))).concat(YUFEN_SHICI.map((t) => ({ cat: '实词', t }))).concat(store.myMem.map((x) => ({ cat: c4(x.type), t: x.text }))).concat(skillMemCS).concat(skillMemZZ)
+  return { total: all.length, mastered: srsMasteredCount(srs.value, all), reviewedToday: srsReviewedToday(srs.value, todayKey()) }
 })
 // ===== 常识速测（AI 一次出 5 题组卷）=====
 const quizBatch = ref(null) // { qs, marks, cur, done }
 const quizBusyB = ref(false)
 async function startQuiz() {
-  const c = activeCfg(false)
-  if (!c || !c.key) {
-    showToast('请先配置文字模型 API Key', 'error')
-    return
-  }
   quizBusyB.value = true
-  try {
+  const out = await aiRun(async (c) => {
     const sys =
       '你是公考常识命题老师。请出5道常识/政治单选题，严格只输出JSON数组，不要多余文字：[{"stem":"题干","options":{"A":"..","B":"..","C":"..","D":".."},"answer":"B","analysis":"一句解析"}]'
-    const reply = await chatOnce(
-      c,
-      [
-        { role: 'system', content: sys },
-        { role: 'user', content: '范围：政治理论、法律、科技、人文历史、地理、经济、时政常识。难度贴合国考常识。' }
-      ],
-      2500
-    )
-    const m = String(reply || '').match(/\[[\s\S]*\]/)
+    return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '范围：政治理论、法律、科技、人文历史、地理、经济、时政常识。难度贴合国考常识。' }], 2500)
+  }, { keyHint: '文字模型' })
+  if (out == null) { quizBusyB.value = false; return }
+  try {
+    const m = String(out || '').match(/\[[\s\S]*\]/)
     if (!m) throw new Error('AI返回格式异常')
     const arr = JSON.parse(m[0])
     const qs = (arr || [])
@@ -880,8 +932,9 @@ function qbSaveWrong() {
   const b = quizBatch.value
   if (!b) return
   const wrongs = b.qs.filter((q, i) => b.marks[i] && !b.marks[i].ok)
+  let saved = 0, rejected = 0
   wrongs.forEach((q) => {
-    store.wqs.unshift({
+    const r = addWrong({
       id: Date.now() + Math.random(),
       subject: '常识判断',
       question: q.stem + '\n\n' + q.options.map((o) => o.k + '. ' + o.t).join('\n'),
@@ -893,10 +946,13 @@ function qbSaveWrong() {
       correctStreak: 0,
       mastery: 0,
       digested: false
-    })
+    }, { silent: true })
+    if (r && r.ok) saved++
+    else rejected++
   })
   saveWqs()
-  showToast('✅ 已存错题 ' + wrongs.length + ' 题', 'success')
+  if (rejected) showToast('✅ 已存错题 ' + saved + ' 题，' + rejected + ' 条非完整/重复未入库', 'warning')
+  else showToast('✅ 已存错题 ' + saved + ' 题', 'success')
 }
 function onSearchTerm(e) {
   const d = (e && e.detail) || {}
@@ -906,36 +962,60 @@ function onSearchTerm(e) {
 }
 onMounted(() => {
   pick('常识')
-  window.addEventListener('xc-search-term', onSearchTerm)
+  evOn('xc-search-term', onSearchTerm)
 })
+onUnmounted(() => evOff('xc-search-term', onSearchTerm))
 </script>
 <template>
   <div class="page on acc-page">
     <div class="page-inner">
       <div class="acc-head">
-        <span class="acc-title">🗂️ 常识 · 时政积累</span>
-        <span v-if="cat === '常识'" class="acc-sub">每天记一条常识 · 错了自动入库</span>
-        <span v-if="dueCount" class="acc-due">🔁 今日待复习 {{ dueCount }}</span>
-        <div class="acc-stats">📊 已掌握 <b>{{ accStats.mastered }}</b> / {{ accStats.total }} 条 · 今日复习 {{ accStats.reviewedToday }} 次</div>
-        <button class="fp-b gold" style="margin-top: 6px" @click="memShow = true">📦 我的记忆库（{{ store.myMem.length }}）</button>
-        <span v-if="!dueCount" class="acc-sub">时政/政治理论积累 · 按地区筛选</span>
+        <div class="acc-title-row">
+          <span class="acc-title">🗂️ 常识 · 时政积累</span>
+          <button class="fp-b gold" @click="memShow = true">📦 记忆库（{{ store.myMem.length }}）</button>
+        </div>
+        <!-- 从哪开始引导（可收起） -->
+        <div v-if="guideShow" class="acc-guide">
+          <div class="acc-guide-hd"><b>🧭 怎么用积累页？</b><button class="acc-guide-x" @click="closeGuide()">✕ 收起</button></div>
+          <div class="acc-guide-steps">
+            <span class="ags"><b>1</b>选分类</span><i>→</i>
+            <span class="ags"><b>2</b>逐条记忆</span><i>→</i>
+            <span class="ags"><b>3</b>记住了/没记住</span><i>→</i>
+            <span class="ags"><b>4</b>速测检验</span><i>→</i>
+            <span class="ags"><b>5</b>到期自动复习</span>
+          </div>
+          <div class="acc-guide-tip">💡 每看一条点「✅记住了」→ 按艾宾浩斯 1/2/4/7/15/30 天自动排期复习；「❌没记住」明天再复习；「🔁 复习」只抽到期条目。</div>
+        </div>
+        <!-- 今日概览卡：待复习 / 已学进度 / 艾宾浩斯排队 -->
+        <div class="acc-ov">
+          <div class="acc-ov-main">
+            <button class="acc-ov-big" @click="startStudy()">
+              <span class="aob-n">{{ dueCountAll }}</span>
+              <span class="aob-t">今日待复习</span>
+              <span class="aob-go">{{ dueCountAll > 0 ? '开始复习 →' : '无到期 · 学新 →' }}</span>
+            </button>
+            <div class="acc-ov-cols">
+              <div class="aoc"><b>{{ todayReviewed.ok }}</b><span>今日记住</span></div>
+              <div class="aoc"><b>{{ todayReviewed.total }}</b><span>今日已学</span></div>
+              <div class="aoc"><b>{{ accStats.mastered }}</b><span>已掌握</span></div>
+            </div>
+          </div>
+          <div class="acc-ov-bar"><div class="aob-fill" :style="{ width: todayGoalPct + '%' }"></div></div>
+          <div class="acc-ov-meta">
+            <span>🎯 今日 {{ todayReviewed.total }}/{{ DAILY_GOAL }} 条</span>
+            <span class="acc-ov-stages"><template v-for="(n, i) in srsStages" :key="i"><i>{{ SRS_INT[i] }}d</i><b>{{ n }}</b><em v-if="i < 5"> · </em></template><em class="aos-tip">排队复习</em></span>
+          </div>
+        </div>
       </div>
-    <div class="fp-query">
-      <input v-model="queryTerm" placeholder="输入任意 常识/时政/成语/实词，联网查 + AI 整理…" @keydown.enter="onlineQuery()" />
-      <button class="fp-b quiz" :disabled="aiCardBusy" @click="onlineQuery()">{{ aiCardBusy ? '查询中…' : '📡 联网查' }}</button>
-    </div>
-    <div class="fp-gen"><button class="fp-b quiz" :disabled="genBusy" @click="genBatch()">{{ genBusy ? '生成中…' : '🤖 生成 10 条扩库' }}</button><span class="fp-gen-tip">AI 批量生成该板块新知识点加入记忆库</span></div>
-    <div class="fp-gen"><button class="fp-b gold" @click="exportKb()">📤 导出积累</button><span class="fp-gen-tip">导出我的记忆库（Word/PDF/Markdown）</span></div>
     <div class="fp-cat">
-      <button class="fp-c" :class="{ on: cat === '常识' }" @click="switchCat('常识')">常识</button>
-      <button class="fp-c" :class="{ on: cat === '时政' }" @click="switchCat('时政')">时政·政治</button>
-      <button class="fp-c" :class="{ on: cat === '成语' }" @click="switchCat('成语')">成语</button>
-      <button class="fp-c" :class="{ on: cat === '实词' }" @click="switchCat('实词')">实词</button>
+      <button class="fp-c" :class="{ on: cat === '常识' }" @click="switchCat('常识')">常识<span v-if="dueOfCat('常识')" class="fc-badge">{{ dueOfCat('常识') }}</span></button>
+      <button class="fp-c" :class="{ on: cat === '时政' }" @click="switchCat('时政')">时政·政治<span v-if="dueOfCat('时政')" class="fc-badge">{{ dueOfCat('时政') }}</span></button>
+      <button class="fp-c" :class="{ on: cat === '成语' }" @click="switchCat('成语')">成语<span v-if="dueOfCat('成语')" class="fc-badge">{{ dueOfCat('成语') }}</span></button>
+      <button class="fp-c" :class="{ on: cat === '实词' }" @click="switchCat('实词')">实词<span v-if="dueOfCat('实词')" class="fc-badge">{{ dueOfCat('实词') }}</span></button>
     </div>
-    <!-- 时政地区筛选 -->
     <!-- 搜索 + 领域/类型筛选 -->
     <div class="fp-search">
-      <input v-model="kw" placeholder="🔍 搜索常识/时政关键词…（回车/搜索按钮 随机抽一条匹配）" @keydown.enter="searchPick()" />
+      <input v-model="kw" :placeholder="searchPh" @keydown.enter="searchPick()" />
       <button class="fp-b" @click="searchPick()">搜索</button>
     </div>
     <div class="fp-reg cats">
@@ -947,23 +1027,55 @@ onMounted(() => {
       <button class="fp-c s" :class="{ on: curRegion === '国内' }" @click="setRegion('国内')">国内</button>
       <button class="fp-c s" :class="{ on: curRegion === '贵州' }" @click="setRegion('贵州')">贵州·地方</button>
     </div>
+    <!-- 更多功能（折叠收纳：联网查 / AI扩库 / 导出） -->
+    <div class="fp-more">
+      <button class="fp-more-btn" @click="moreShow = !moreShow">{{ moreShow ? '🔼 收起' : '🧰 更多功能' }}</button>
+      <div v-if="moreShow" class="fp-more-body">
+        <div class="fp-query">
+          <input v-model="queryTerm" placeholder="输入任意 常识/时政/成语/实词，联网查 + AI 整理…" @keydown.enter="onlineQuery()" />
+          <button class="fp-b quiz" :disabled="aiCardBusy" @click="onlineQuery()">{{ aiCardBusy ? '查询中…' : '📡 联网查' }}</button>
+        </div>
+        <div class="fp-gen"><button class="fp-b quiz" :disabled="genBusy" @click="genBatch()">{{ genBusy ? '生成中…' : '🤖 生成 10 条扩库' }}</button><span class="fp-gen-tip">AI 批量生成该板块新知识点加入记忆库</span></div>
+        <div class="fp-gen"><button class="fp-b gold" @click="exportKb()">📤 导出积累</button><span class="fp-gen-tip">导出我的记忆库（Word/PDF/Markdown）</span></div>
+      </div>
+    </div>
+    <!-- 词条来源说明条（常驻，可关闭；讲清雨菲800词 / 半月谈 角标含义） -->
+    <div v-if="isLex && !srcTipOff" class="fp-srctip">
+      <span>📚 词条来源：<b class="st-b yf">🟣 雨菲800词</b> 与 <b class="st-b bt">🟠 半月谈</b> 已并入易混词辨析；带角标的即来自对应词库。<template v-if="srcStats">（本类共 {{ catTotal }} 条：内置 {{ srcStats.内置 }} · 雨菲 {{ srcStats['雨菲800词'] }} · 半月谈 {{ srcStats['半月谈'] }}）</template></span>
+      <button class="st-x" @click="dismissSrcTip()">✕</button>
+    </div>
+    <!-- 首次进入引导（一次性，切到成语/实词才出现；教用户怎么用易混辨析） -->
+    <div v-if="isLex && lexGuide" class="fp-lexguide">
+      <div class="lg-card">
+        <div class="lg-h">🎓 易混词辨析 · 新词库上线</div>
+        <p>本次为你接入两大词库，已自动并入「易混」分类：</p>
+        <ul>
+          <li><b class="st-b yf">🟣 雨菲800词</b>：公考高频实词/成语主书（原《雨菲言语·27言语带背800词》），高频常考词。</li>
+          <li><b class="st-b bt">🟠 半月谈</b>：易混词专项（原《言语理解易混词B5》），带双向辨析，专攻克易混点。</li>
+        </ul>
+        <p class="lg-how">👉 用法：点下方 <b>「📖 详解/辨析」</b> 看 <b>逻辑填空用法</b>（含易混对象）；切到 <b>「易混」</b> 分类可集中刷易混对。</p>
+        <div class="lg-btns">
+          <button class="btn btn-gh" @click="closeLexGuide()">稍后看</button>
+          <button class="btn btn-pri" @click="tryYihun()">⚡ 一键去刷易混词</button>
+        </div>
+      </div>
+    </div>
     <!-- 正文 -->
     <template v-if="!quiz && !quizBatch">
-      <div class="fp-body">{{ cur }}</div>
+      <div v-if="reviewMode" class="fp-modebar">🔁 复习模式 · 本分类到期 {{ dueCount }} 条<button class="fp-modebar-x" @click="reviewMode = false; next()">退出</button></div>
+      <div class="fp-body">{{ cur }}<span v-if="curDetail && curDetail.src" class="src-badge" :class="curDetail.src === '雨菲800词' ? 'yf' : 'bt'">{{ curDetail.src === '雨菲800词' ? '🟣 雨菲800词' : '🟠 半月谈' }}</span></div>
       <div v-if="(cat === '成语' || cat === '实词') && curDetail" class="fp-body sub">{{ curDetail.yishi }}</div>
-      <div class="fp-foot">
-        <button v-if="cat === '成语' || cat === '实词'" class="fp-b quiz" @click="openDetail()">📖 详解/辨析</button>
-        <button v-if="cat === '常识' || cat === '时政'" class="fp-b quiz" @click="openVerify()">🔍 联网核实</button>
-      </div>
-      <div class="fp-foot">
-        <button class="fp-b" :class="{ on: reviewMode }" @click="reviewMode = !reviewMode; next()">🔁 复习{{ reviewMode ? '中' : '' }}<span v-if="dueCount"> {{ dueCount }}</span></button>
-        <button class="fp-b" @click="next()">🎲 换一条</button>
-        <button class="fp-b gold" @click="favorite()">⭐ 收藏</button>
-      </div>
       <div class="fp-foot srs-foot">
-        <button class="fp-b ok" @click="remember(true)">✅ 记住了</button>
-        <button class="fp-b no" @click="remember(false)">❌ 没记住</button>
-        <span class="fp-srs-tip">艾宾浩斯：1/2/4/7/15/30 天后复习</span>
+        <button class="fp-b ok big" @click="remember(true)">✅ 记住了</button>
+        <button class="fp-b no big" @click="remember(false)">❌ 没记住</button>
+        <span class="fp-srs-tip">艾宾浩斯 1/2/4/7/15/30 天</span>
+      </div>
+      <div class="fp-foot">
+        <button class="fp-b" @click="next()">🎲 换一条</button>
+        <button class="fp-b" :class="{ on: reviewMode }" @click="reviewMode = !reviewMode; next()">🔁 复习<span v-if="dueCount"> {{ dueCount }}</span></button>
+        <button class="fp-b gold" @click="favorite()">⭐ 收藏</button>
+        <button v-if="cat === '成语' || cat === '实词'" class="fp-b quiz" @click="openDetail()">📖 详解</button>
+        <button v-if="cat === '常识' || cat === '时政'" class="fp-b quiz" @click="openVerify()">🔍 核实</button>
       </div>
       <div v-if="cat === '常识'" class="fp-foot">
         <button class="fp-b quiz" :disabled="quizBusyB" @click="startQuiz()">{{ quizBusyB ? '生成中…' : '📝 常识速测' }}</button>
@@ -1053,13 +1165,13 @@ onMounted(() => {
     <!-- 词条详解（成语/实词） -->
     <div v-if="detailShow && detailItem" class="ov show" @click.self="detailShow = false">
       <div class="pnl idiom-pnl">
-        <h3>📖 {{ detailItem.t }} <span class="id-tag">{{ detailItem.cat }}</span></h3>
+        <h3>📖 {{ detailItem.t }} <span class="id-tag">{{ detailItem.cat }}</span><span v-if="detailItem.src" class="src-badge" :class="detailItem.src === '雨菲800词' ? 'yf' : 'bt'">{{ detailItem.src === '雨菲800词' ? '🟣 雨菲800词' : '🟠 半月谈' }}</span></h3>
         <div class="id-row"><b>释义</b><span>{{ detailItem.yishi || '—' }}</span></div>
-        <div class="id-row"><b>近义</b><span>{{ detailItem.jy || '—' }}</span></div>
-        <div class="id-row"><b>反义</b><span>{{ detailItem.fy || '—' }}</span></div>
-        <div class="id-row"><b>例句</b><span>{{ detailItem.lj || '—' }}</span></div>
+        <div v-if="detailItem.jy" class="id-row"><b>近义</b><span>{{ detailItem.jy }}</span></div>
+        <div v-if="detailItem.fy" class="id-row"><b>反义</b><span>{{ detailItem.fy }}</span></div>
+        <div v-if="detailItem.lj" class="id-row"><b>例句</b><span>{{ detailItem.lj }}</span></div>
         <div v-if="detailItem.ly" class="id-row"><b>来源</b><span>{{ detailItem.ly }}</span></div>
-        <div v-if="detailItem.yf" class="id-row"><b>逻辑填空用法</b><span>{{ detailItem.yf }}</span></div>
+        <div v-if="detailItem.yf" class="id-row bi"><b>🧠 易混辨析</b><span class="bi-body">{{ detailItem.yf }}</span></div>
         <div v-if="detailItem.p" class="id-row"><b>真题频次</b><span>{{ detailItem.p }}</span></div>
         <div v-if="detailItem.gm" class="id-row gm"><b>官媒例句</b><span>{{ detailItem.gm }}</span></div>
         <div class="pnl-btns">
@@ -1225,6 +1337,74 @@ onMounted(() => {
 .acc-page {
   padding: 10px 12px;
 }
+.acc-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* ===== 积累 UI v2：引导 / 今日概览 / 角标 / 更多折叠 ===== */
+.acc-guide {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(59, 130, 246, 0.12));
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 14px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+}
+.acc-guide-hd { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--hud-cyan); margin-bottom: 6px; }
+.acc-guide-x { background: none; border: none; color: var(--text3); font-size: 11px; cursor: pointer; font-family: inherit; }
+.acc-guide-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.ags { display: inline-flex; align-items: center; gap: 4px; }
+.ags b { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #fff; font-size: 10.5px; padding: 0 4px; }
+.acc-guide-steps i { color: var(--text3); font-style: normal; }
+.acc-guide-tip { font-size: 11px; color: var(--text2); line-height: 1.6; border-top: 1px dashed var(--glass-border); padding-top: 6px; }
+.acc-ov {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--glass-bg);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.acc-ov-main { display: flex; align-items: center; gap: 12px; }
+.acc-ov-big {
+  flex: 0 0 auto;
+  width: 92px;
+  height: 74px;
+  border-radius: 12px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.18), rgba(59, 130, 246, 0.18));
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  font-family: inherit;
+}
+.acc-ov-big:active { transform: scale(0.97); }
+.aob-n { font-size: 24px; font-weight: 900; color: var(--hud-cyan); line-height: 1; }
+.aob-t { font-size: 10.5px; color: var(--text2); }
+.aob-go { font-size: 10px; color: var(--text3); }
+.acc-ov-cols { flex: 1; display: flex; gap: 4px; }
+.aoc { flex: 1; text-align: center; border-left: 1px solid var(--glass-border); }
+.aoc:first-child { border-left: none; }
+.aoc b { display: block; font-size: 17px; color: var(--text); }
+.aoc span { font-size: 10.5px; color: var(--text3); }
+.acc-ov-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); margin: 8px 0 6px; overflow: hidden; }
+.aob-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #22d3ee, #3b82f6); transition: width 0.4s; }
+.acc-ov-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text3); flex-wrap: wrap; }
+.acc-ov-stages { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.acc-ov-stages i { font-style: normal; color: var(--text3); }
+.acc-ov-stages b { color: var(--text2); font-weight: 700; margin-right: 2px; }
+.acc-ov-stages em { font-style: normal; color: var(--glass-border); }
+.aos-tip { opacity: 0.7; margin-left: 4px; }
+.fc-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; border-radius: 8px; background: var(--hud-cyan); color: #fff; font-size: 9.5px; font-weight: 800; padding: 0 4px; margin-left: 4px; vertical-align: middle; }
+.fp-modebar { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--hud-cyan); background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.25); border-radius: 10px; padding: 5px 10px; margin-bottom: 8px; }
+.fp-modebar-x { background: none; border: none; color: var(--text3); font-size: 11px; cursor: pointer; font-family: inherit; }
+.fp-more { margin-bottom: 8px; }
+.fp-more-btn { width: 100%; padding: 5px 10px; border-radius: 10px; border: 1px dashed var(--glass-border); background: transparent; color: var(--text3); font-size: 11.5px; cursor: pointer; font-family: inherit; }
+.fp-more-body { margin-top: 6px; border: 1px solid var(--glass-border); border-radius: 12px; padding: 8px 10px; background: var(--glass-bg); }
+.fp-foot .fp-b.ok.big, .fp-foot .fp-b.no.big { flex: 1; padding: 10px 12px; font-size: 13px; }
+/* 词条详解：易混辨析区块（多组词相互辨析）高亮 */
+.id-row.bi { background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
+.id-row.bi b { color: var(--hud-cyan); }
+.id-row.bi .bi-body { display: block; margin-top: 4px; line-height: 1.7; }
 .acc-head {
   margin-bottom: 10px;
 }
@@ -1421,4 +1601,65 @@ onMounted(() => {
   font-family: inherit;
   outline: none;
 }
+/* ===== 词条来源说明条 + 首次引导 + 来源角标（雨菲800词 / 半月谈）===== */
+.fp-srctip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text2);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin: 8px 0 4px;
+}
+.fp-srctip .st-x {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.st-b { font-weight: 700; }
+.st-b.yf { color: #b794f6; }
+.st-b.bt { color: #f6ad55; }
+/* 来源角标（词条旁 / 详情标题旁） */
+.src-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.src-badge.yf { color: #b794f6; background: rgba(183, 148, 246, 0.16); border: 1px solid rgba(183, 148, 246, 0.4); }
+.src-badge.bt { color: #f6ad55; background: rgba(246, 173, 85, 0.16); border: 1px solid rgba(246, 173, 85, 0.4); }
+/* 首次引导卡片 */
+.fp-lexguide {
+  margin: 10px 0 4px;
+}
+.lg-card {
+  background: linear-gradient(135deg, rgba(56,189,248,0.12), rgba(183,148,246,0.12));
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.lg-card .lg-h {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.lg-card p { font-size: 12px; line-height: 1.6; color: var(--text2); margin: 6px 0; }
+.lg-card ul { margin: 6px 0; padding-left: 18px; }
+.lg-card li { font-size: 12px; line-height: 1.7; color: var(--text2); }
+.lg-card .lg-how { color: var(--text); }
+.lg-btns { display: flex; gap: 8px; margin-top: 12px; }
+.lg-btns .btn { flex: 1; }
 </style>

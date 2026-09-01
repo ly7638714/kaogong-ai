@@ -7,7 +7,7 @@ globalThis.localStorage = {
   clear: () => { for (const k of Object.keys(__mem)) delete __mem[k] }
 }
 import { describe, it, expect, beforeEach } from 'vitest'
-import { recordCost, costState, costStats, clearCost, calcCost, estimateTokens, getPrices, savePrices, DEF_PRICES, beginCost, endCost, costLive } from '../utils/costTrack'
+import { recordCost, costState, costStats, clearCost, calcCost, estimateTokens, getPrices, savePrices, DEF_PRICES, beginCost, endCost, costLive, getBudget, setBudget, todaySpend, budgetBlocked } from '../utils/costTrack'
 
 describe('AI 用量与花费追踪 costTrack', () => {
   beforeEach(() => {
@@ -94,3 +94,28 @@ describe('AI 用量与花费追踪 costTrack', () => {
     expect(p.ttsPer1k).toBe(0.002)
   })
 })
+
+
+// 批次3.4 今日预算熔断
+describe('costTrack 今日预算熔断（批次3.4）', () => {
+  it('getBudget/setBudget 存取与归一', () => {
+    expect(setBudget(5)).toBe(5)
+    expect(getBudget()).toBe(5)
+    setBudget(0)
+    expect(getBudget()).toBe(0)
+  })
+  it('todaySpend 反映今日记录', () => {
+    costState.list = []
+    recordCost({ feature: 'chat', provider: 'ds', model: 'deepseek-chat', kind: 'text', inTokens: 100000, outTokens: 100000, t: Date.now() })
+    expect(todaySpend()).toBeGreaterThan(0)
+  })
+  it('budgetBlocked 超预算为 true、未超为 false、预算 0 不拦截', () => {
+    costState.list = []
+    setBudget(0)
+    expect(budgetBlocked()).toBe(false)
+    setBudget(0.000001)
+    recordCost({ feature: 'chat', provider: 'ds', model: 'deepseek-chat', kind: 'text', inTokens: 100000, outTokens: 100000, t: Date.now() })
+    expect(budgetBlocked()).toBe(true)
+  })
+})
+

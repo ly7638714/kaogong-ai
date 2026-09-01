@@ -8,9 +8,10 @@
   - 萌宠：火箭旁的小宠物，点开可与用户对话（AI 萌宠聊天）
 -->
 <script setup>
-import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch, nextTick, reactive } from 'vue'
 import { store } from '../store'
 import { detectBanKuai, activeCfg, chatStream } from '../api'
+import { masteryOfPlate, MASTERY_PLATES } from '../utils/mastery'
 import { createScene, PLATE_META } from '../scene/starSystem'
 import { pet, petStage, petLevel, petMood, petStats, patPet, feedPet, petSpeak, petMuted, bubble } from '../utils/pet'
 import { todaySeconds, totalSeconds, fmtMin, studyTick } from '../utils/study'
@@ -65,6 +66,13 @@ function classify(text) {
   const bk = detectBanKuai(text)
   return KEY_ALIAS[bk] || KEY_ALIAS[text] || null
 }
+// 批次5-P5-1 统计缓存：带失效键，computeStats 全量扫描只在数据变化时执行
+const statCache = reactive({ key: '', data: null })
+function statsOf() {
+  const key = store.msgs.length + ':' + store.wqs.length + ':' + store.wqs.reduce((n, q) => n + (q.reviewed ? 1 : 0), 0)
+  if (statCache.key !== key) { statCache.key = key; statCache.data = computeStats() }
+  return statCache.data
+}
 // 统计六大板块数据
 function computeStats() {
   const cnt = { luoji: 0, zhanggong: 0, ziliao: 0, shuliang: 0, changshi: 0, zhengzhi: 0 }
@@ -81,7 +89,9 @@ function computeStats() {
     const m = store.msgs[i]
     const c = m && m.content
     const txt = typeof c === 'string' ? c : (c && c.text) || ''
-    const k = classify(txt)
+    // 批次5-P5-1 消息内容不可变：detectBanKuai 结果首算即缓存，避免每帧重复文本分类
+    if (txt && !m._bk) { try { m._bk = detectBanKuai(txt) } catch (e) {} }
+    const k = KEY_ALIAS[m._bk] || KEY_ALIAS[txt] || null
     if (k) {
       practice[k] = (practice[k] || 0) + 1
       last[k] = last[k] || Date.now()
@@ -91,7 +101,7 @@ function computeStats() {
 }
 // 数据 → 行星量表
 function computeTargets() {
-  const { cnt, last } = computeStats()
+  const { cnt, last } = statsOf()
   const now = Date.now()
   return PLATE_META.map((p) => ({
     level: cnt[p.key],
@@ -101,18 +111,16 @@ function computeTargets() {
 }
 // 某板块的评估详情（掌握度/错题/训练量/最近错题/建议）
 function computeDetailFor(key) {
-  const { cnt, practice, last } = computeStats()
+  const { cnt, practice, last } = statsOf()
   const meta = PLATE_META.find((p) => p.key === key)
   if (!meta) return null
   const now = Date.now()
   const wrong = cnt[key] || 0
   const pr = practice[key] || 0
   const active = !!(last[key] && now - last[key] < 7 * 86400000)
-  let mastery = 0
-  if (wrong > 0 || pr > 0) {
-    if (wrong === 0) mastery = Math.min(98, Math.round(40 + Math.min(55, pr * 2)))
-    else mastery = Math.max(3, Math.round(55 - Math.min(50, wrong * 6) + Math.min(25, pr * 1.2)))
-  }
+  // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达/看板同口径；按中文板块名+子板块分组）
+  const _mp = MASTERY_PLATES.find((x) => x.key === meta.name) || { plates: [meta.name] }
+  let mastery = masteryOfPlate(meta.name, store.wqs, { plates: _mp.plates })
   let lastAt = '暂无记录'
   if (last[key]) {
     const mins = Math.round((now - last[key]) / 60000)
@@ -178,7 +186,7 @@ const overview = computed(() => {
 const petFloatStyle = computed(() => (petFloatPos.value ? { left: petFloatPos.value.x + 'px', top: petFloatPos.value.y + 'px' } : {}))
 // 薄弱板块：错题数最多的板块（智能提醒）
 const weakPanel = computed(() => {
-  const { cnt } = computeStats()
+  const { cnt } = statsOf()
   let best = null
   for (const k in cnt) {
     if (cnt[k] > 0 && (!best || cnt[k] > best.cnt)) best = { key: k, cnt: cnt[k] }
@@ -347,13 +355,23 @@ function onPetFloatClick() {
 
 // 允许外部暂停/恢复渲染（active=false 时停掉 RAF，避免 GPU 空转——防止臃肿坍塌）
 const props = defineProps({ active: { type: Boolean, default: true }, activeTab: { type: String, default: 'ck' } })
-function renderStep() {
-  if (props.active) {
-    try {
-      engine.render(computeTargets())
-    } catch (e) {}
+// 批次5-P5-1 rAF 门控：页面隐藏时暂停渲染循环，恢复可见再续（避免后台空转烧 GPU）
+function onVis() {
+  if (document.hidden) {
+    if (raf) { cancelAnimationFrame(raf); raf = 0 }
+  } else if (!raf) {
+    raf = requestAnimationFrame(renderStep)
   }
-  raf = requestAnimationFrame(renderStep)
+}
+function renderStep() {
+  if (!document.hidden) {
+    if (props.active) {
+      try {
+        engine.render(computeTargets())
+      } catch (e) {}
+    }
+    raf = requestAnimationFrame(renderStep)
+  }
 }
 onMounted(() => {
   try {
@@ -378,6 +396,7 @@ onMounted(() => {
       hoverKey.value = null
     })
     raf = requestAnimationFrame(renderStep)
+    document.addEventListener('visibilitychange', onVis)
     // 3D 页悬浮萌宠：每隔一段时间自动冒泡说话
     petSpeakTimer = setInterval(() => {
       if (props.activeTab === '3d' && !flightInfo.value.active && !petBusy.value) petSpeak()
@@ -395,6 +414,7 @@ onMounted(() => {
       ro.observe(el.value)
     }
     dispose = () => {
+      document.removeEventListener('visibilitychange', onVis)
       if (petSpeakTimer) {
         clearInterval(petSpeakTimer)
         petSpeakTimer = null

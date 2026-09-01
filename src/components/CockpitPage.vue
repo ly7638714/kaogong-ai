@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { store } from '../store'
 import { detectBanKuai, PLATE_MODE } from '../api'
 import { showToast } from '../utils/toast'
+import { safeGet, KEYS } from '../utils/storage'
+import { masteryOfPlate } from '../utils/mastery'
 import { todaySeconds, totalSeconds, fmtMin, studyTick } from '../utils/study'
 
 // 今日练习：统计今天(按日期)的 user 提问数（chat 记录无 time，用日期近似——用 store 计数即可，标注"累计"更稳）
@@ -146,10 +148,24 @@ function weakPlate() {
 function genTasks() {
   const wp = weakPlate()
   const pending = store.wqs.filter((q) => !q.digested).length
+  // 批次8·目标分拆解联动：找出"还差最多分"的板块 → 生成专项补强任务（建议题量按缺口 x2 封顶 10）
+  const goal = store.cfg.goalScore || 70
+  const gb = cpMastery.value.items
+    .filter((x) => x.v != null)
+    .map((x) => {
+      const need = Math.round(((goal * x.weight) / 100) * 10) / 10
+      const cur = Math.round(((x.v * x.weight) / 100) * 10) / 10
+      return { label: x.label, gap: Math.max(0, Math.round((need - cur) * 10) / 10) }
+    })
+    .sort((a, b) => b.gap - a.gap)[0]
+  const goalTasks = gb && gb.gap > 0
+    ? [{ k: 'goal', label: '专项补强【' + gb.label + '】（还差 ' + gb.gap + ' 分）· 刷 ' + Math.min(10, 2 + Math.ceil(gb.gap * 2)) + ' 题（对话页）', done: false }]
+    : []
   tasks.value = [
     { k: 'practice', label: wp ? '刷 5 道「' + wp + '」并开考场计时（对话页）' : '刷 5 道题并开考场计时（对话页）', done: false },
     { k: 'redo', label: '复盘/二刷 ' + Math.min(3, pending || 1) + ' 道错题（错题页）', done: false },
-    { k: 'accum', label: '积累 2 条常识/时政（积累页）', done: false }
+    { k: 'accum', label: '积累 2 条常识/时政（积累页）', done: false },
+    ...goalTasks
   ]
   saveTasks()
 }
@@ -176,11 +192,11 @@ function toggleTask(i) {
 }
 function goTask(t) {
   if (t.k === 'practice') {
+    // 批次6-6A 竞态修复：先写 pendingAsk，目标页 onMounted 立即消费（不依赖 setTimeout 赌时序）
+    store.pendingAsk = '请出一道' + (weakPlate() || '判断推理') + '仿真题，并输出选项和【正确答案】'
     store.tab = 'chat'
-    setTimeout(() => window.dispatchEvent(new CustomEvent('xc-ask', { detail: '请出一道' + (weakPlate() || '判断推理') + '仿真题，并输出选项和【正确答案】' })), 60)
   } else if (t.k === 'redo') {
     store.tab = 'wq'
-    setTimeout(() => window.dispatchEvent(new CustomEvent('xc-focus-wrong')), 60)
   } else {
     store.tab = 'ths'
     showToast('💡 积累页已打开：选 常识/时政/成语/实词 → 看一条 → 点「记住了」按艾宾浩斯排期复习', 'info')
@@ -208,7 +224,7 @@ const CP_PLATES = [
   { key: '政治理论', label: '政治', weight: 5, subs: ['政治理论'] }
 ]
 const cpCol = ref([])
-try { cpCol.value = JSON.parse(localStorage.getItem('xc_quiz_col') || '[]') || [] } catch (e) {}
+cpCol.value = safeGet(KEYS.QUIZ_COL, [])
 const cpMastery = computed(() => {
   const items = CP_PLATES.map((p) => {
     const col = cpCol.value.filter((x) => p.subs.includes(x.subject))
@@ -218,12 +234,9 @@ const cpMastery = computed(() => {
     const rev = wq.filter((q) => q.reviewed || q.digested).length
     const attempts = done + wq.length
     const rate = done ? Math.round((ok / done) * 100) : null
+    // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达/CosmosScene 同口径）；无数据保持 null（看板显示"—"）
     let v = null
-    if (attempts > 0) {
-      const revBonus = wq.length ? Math.round((rev / wq.length) * 30) : 0
-      const wqPen = Math.max(0, 100 - wq.length * 6)
-      v = Math.max(0, Math.min(100, Math.round((rate != null ? rate : 0) * 0.55 + revBonus + wqPen * 0.15)))
-    }
+    if (attempts > 0) v = masteryOfPlate(p.key, store.wqs, { plates: p.subs })
     // 近 7 天活跃
     let active = false
     col.forEach((x) => { if (x.at && Date.now() - x.at < 7 * 86400000) active = true })
@@ -266,7 +279,6 @@ function trainPlate(key) {
 function seeWrong(key) {
   goto('wq')
   showToast('📋 已打开错题本' + (key ? '（' + key + '）' : '') + '，优先复盘', 'info')
-  setTimeout(() => window.dispatchEvent(new CustomEvent('xc-focus-wrong')), 60)
 }
 // ===== 励志语录（数据感知：打卡/倒计时越久越激励） =====
 const QUOTES = [

@@ -6,7 +6,7 @@ import prettier from 'eslint-config-prettier'
 export default [
   {
     // 忽略构建产物与依赖
-    ignores: ['dist/**', 'node_modules/**', 'public/**']
+    ignores: ['dist/**', 'dist-verify/**', 'node_modules/**', 'public/**']
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/recommended'],

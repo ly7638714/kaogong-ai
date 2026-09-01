@@ -392,11 +392,11 @@ export function buildWrongAnalysis(wq) {
   if (!wq) return ''
   if (!(wq.q || wq.stem || wq.text) && !(wq.answer || wq.ans || wq.correct) && !(wq.explain || wq.analysis)) return ''
   const plate = wq.plate || wq.subject || '行测'
-  const qtext = String(wq.q || wq.stem || wq.text || '').replace(/<[^>]+>/g, ' ').replace(/s+/g, ' ').slice(0, 300)
+  const qtext = String(wq.q || wq.stem || wq.text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 300)
   const your = wq.your || wq.answerUser || ''
   const correct = wq.answer || wq.ans || wq.correct || ''
   const reason = String(wq.reason || wq.errType || '').trim()
-  const explain = String(wq.explain || wq.analysis || '').replace(/<[^>]+>/g, ' ').replace(/s+/g, ' ').slice(0, 500)
+  const explain = String(wq.explain || wq.analysis || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 500)
   let s = '我来帮你复盘这道' + plate + '错题。'
   if (qtext) s += '题目是：' + qtext + '。'
   if (your) s += '你当时选了' + String(your) + '。'

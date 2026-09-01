@@ -5,6 +5,12 @@
 import { reactive } from 'vue'
 import { store } from '../store'
 import { recordCost, getTtsPrice, getCloneFee, beginCost } from './costTrack'
+import { ttsCacheKey, ttsCacheGet, ttsCacheSet } from './ttsCache'
+import { cleanSpeechText, chunkForTts } from './tts/clean'
+import { smoothWavBytes } from './tts/wav'
+// 批次6B拆分：纯函数移至 tts/ 子模块，此处回导出保持既有 import 路径兼容
+export { symbolsToChinese, cleanSpeechText, chunkText, chunkForTts } from './tts/clean'
+export { smoothWavBytes } from './tts/wav'
 
 // ============ 引擎元信息 ============
 export const TTS_ENGINES = [
@@ -22,108 +28,6 @@ function setStatus(state, msg) {
   ttsStatus.at = Date.now()
 }
 
-// ============ 文本清洗：去掉 Markdown / 代码 / SVG / LaTeX / emoji，只留适合朗读的正文 ============
-// 符号智能朗读：把箭头/数学符号/斜杠等按语境转成中文，避免读成“代码/英文”（去 AI 味关键一步）
-export function symbolsToChinese(text) {
-  let t = String(text || '')
-  // 先处理带数字的复合符号（避免与后面简单替换冲突）
-  t = t.replace(/(\d+(?:\.\d+)?)%/g, '百分之$1')
-  t = t.replace(/(\d+(?:\.\d+)?)\s*[~～]\s*(\d+(?:\.\d+)?)/g, '$1到$2')
-  t = t.replace(/(\d+(?:\.\d+)?)\s*[-－]\s*(\d+(?:\.\d+)?)/g, '$1到$2')
-  // 斜杠：数字/单位 → 每（公里/小时）；其余 → 或
-  t = t.replace(/([\u4e00-\u9fa5A-Za-z]+)\/([\u4e00-\u9fa5A-Za-z]+)/g, (m, a, b) => {
-    const unit = /^(公里|千米|米|厘米|毫米|小时|分钟|秒|天|月|年|次|人|个|元|克|千克|升|毫升|度|Hz|hz|km|m|s|h|min|day|月|年|次|人|元)$/i
-    return (unit.test(a) && unit.test(b)) ? a + '每' + b : a + '或' + b
-  })
-  t = t.replace(/(\d+)\/(\d+)/g, (m, a, b) => a + '分之' + b)
-  // 数学符号
-  const MAP = {
-    '→': '推出', '⇒': '推出', '⟹': '推出', '⟶': '推出', '➜': '推出',
-    '←': '得到', '⇐': '得到', '⟵': '得到',
-    '↔': '相互推出', '⇔': '等价于', '⟺': '等价于',
-    '≤': '小于等于', '≥': '大于等于', '≠': '不等于', '≈': '约等于', '≡': '恒等于',
-    '×': '乘', '÷': '除以', '±': '正负', '∓': '负正', '∞': '无穷大',
-    '√': '根号', 'π': '派', 'Σ': '求和', '∑': '求和', '△': '三角形', '∠': '角',
-    '°': '度', '‰': '千分之', 'µ': '微',
-    '＝': '等于', '=': '等于', '＋': '加', '+': '加', '－': '减', '−': '减',
-    '&': '和', '＠': '艾特', '@': '艾特', '％': '百分之',
-    '^': '次方', '·': '、', '•': '、',
-    'Ⅰ': '一', 'Ⅱ': '二', 'Ⅲ': '三', 'Ⅳ': '四', 'Ⅴ': '五',
-    '（': '（', '）': '）'
-  }
-  for (const k of Object.keys(MAP)) {
-    if (t.includes(k)) t = t.split(k).join(MAP[k])
-  }
-  // 单独的 %（未被数字替换）→ 百分号
-  t = t.replace(/%/g, '百分号')
-  // 清理重复空格
-  return t.replace(/\s{2,}/g, ' ').trim()
-}
-export function cleanSpeechText(text) {
-  return symbolsToChinese(String(text || '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/~~~[\s\S]*?~~~/g, ' ')
-    .replace(/`[^`]*`/g, ' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\$\$[\s\S]*?\$\$/g, ' ')
-    .replace(/\$[^$]*\$/g, ' ')
-    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/[#*_~>`|]/g, ' ')
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, ' ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/\s+/g, ' ')
-    .trim())
-}
-
-// ============ 长文分块：按句子边界切，避免一次请求超长 ============
-export function chunkText(text, maxLen = 420) {
-  const t = cleanSpeechText(text)
-  if (!t) return []
-  if (t.length <= maxLen) return [t]
-  const parts = []
-  let cur = ''
-  // 按中文/英文句号、感叹、问号、分号、换行切
-  const segs = String(t).split(/(?<=[。！？!?；;\n])/)
-  for (const s of segs) {
-    if (!s) continue
-    if ((cur + s).length > maxLen && cur) {
-      parts.push(cur.trim())
-      cur = s
-    } else {
-      cur += s
-    }
-  }
-  if (cur.trim()) parts.push(cur.trim())
-  // 若仍有超长单句（无标点），硬切为多个独立分块
-  return parts.flatMap((p) => {
-    if (p.length <= maxLen) return [p]
-    const m = String(p).match(new RegExp('.{1,' + maxLen + '}', 'g')) || []
-    return m.map((s) => s.trim()).filter(Boolean)
-  })
-}
-
-// 分块朗读：首块更小（让第一段音频更快返回、开口更快），其余块保持 maxLen
-export function chunkForTts(text, maxLen, firstLen) {
-  let chunks = chunkText(text, maxLen)
-  if (chunks.length > 1 && firstLen > 0 && chunks[0].length > firstLen) {
-    const first = chunks[0]
-    let cut = -1
-    // 尽量在句号/逗号等自然停顿附近切，避免把话从中间掐断
-    for (let i = Math.min(first.length, firstLen); i > Math.max(6, firstLen - 24); i--) {
-      if ('。！？!?；;，,、'.includes(first[i])) { cut = i + 1; break }
-    }
-    if (cut < 0) cut = Math.min(first.length, firstLen)
-    const head = first.slice(0, cut)
-    const rest = first.slice(cut)
-    chunks = [head, ...(chunkText(rest, maxLen) || []).filter(Boolean), ...chunks.slice(1)]
-  }
-  return chunks
-}
-// 滑动窗口顺序合成：最多 W 个请求在途（避免一次性打满全部请求被限流、个别慢导致停顿），
-// 结果严格按分块顺序 onChunk 投递（gapless 播放器依赖顺序），第一块立即发出 → 开口更快、衔接更顺
 export async function slideSynthesize(chunks, worker, onChunk, W = 4) {
   const results = []
   let nextReq = 0
@@ -197,115 +101,6 @@ export function playBytes(bytes, mime) {
 // 智谱 GLM-TTS 的 WAV 结构特殊：data 块前有 AIGC/LIST 元数据块（data 块标记是 AIGC 不是 data），
 // 且每段音频开头都有“嘟嘟 叮叮”纯音提示音。这里统一：①按块解析出真正的 data；②去掉开头纯音与静音；
 // ③去掉结尾静音；④淡入淡出；⑤重建为标准 WAV（丢弃元数据）。
-export function smoothWavBytes(input) {
-  try {
-    const u8 = input instanceof Uint8Array ? input : new Uint8Array(input)
-    if (u8.length < 64) return input
-    const ascii = (o, n) => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(u8[o + i]); return s }
-    if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return input
-    // 逐块解析，找到 data 块（跳过 AIGC/LIST 等元数据）
-    let dataOff = -1, dataLen = 0, rate = 0, ch = 1, bits = 16
-    let i = 12
-    while (i + 8 <= u8.length) {
-      const cid = ascii(i, 4)
-      const size = u8[i + 4] | (u8[i + 5] << 8) | (u8[i + 6] << 16) | (u8[i + 7] << 24)
-      if (cid === 'fmt ') {
-        // fmt 数据区从 i+8 起：声道数 data+2、采样率 data+4、位深 data+14
-        ch = u8[i + 10] | (u8[i + 11] << 8)
-        rate = u8[i + 12] | (u8[i + 13] << 8) | (u8[i + 14] << 16) | (u8[i + 15] << 24)
-        bits = u8[i + 22] | (u8[i + 23] << 8)
-        i += 8 + size + (size & 1)
-      } else if (cid === 'data') {
-        dataOff = i + 8; dataLen = size
-        break
-      } else {
-        i += 8 + size + (size & 1)
-      }
-      if (i >= u8.length) break
-    }
-    if (dataOff < 0 || dataLen < 8) return input
-    if (dataOff + dataLen > u8.length) return input
-    const bytesPer = bits / 8
-    if (bytesPer < 1 || !ch || !rate) return input
-    const blockAlign = ch * bytesPer
-    const frames = Math.floor(dataLen / blockAlign)
-    if (frames < 32) return input
-    const read = (fi, ci) => {
-      const o = dataOff + fi * blockAlign + ci * bytesPer
-      if (bytesPer === 2) { const v = u8[o] | (u8[o + 1] << 8); return v >= 0x8000 ? v - 0x10000 : v }
-      const v = u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16) | (u8[o + 3] << 24)
-      return v >= 0x80000000 ? v - 0x100000000 : v
-    }
-    // 每 10ms 窗口的 RMS 与过零率
-    const winSize = Math.max(1, Math.floor(rate / 100))
-    const winInfo = (w) => {
-      const s0 = w * winSize, s1 = Math.min(s0 + winSize, frames)
-      let rms = 0, zc = 0
-      for (let f = s0; f < s1; f++) {
-        let peak = 0
-        for (let c = 0; c < ch; c++) { const v = Math.abs(read(f, c)); if (v > peak) peak = v }
-        rms += peak * peak
-        if (f > s0) { const a = read(f - 1, 0), b = read(f, 0); if ((a < 0) !== (b < 0)) zc++ }
-      }
-      const n = s1 - s0
-      return { rms: Math.sqrt(rms / n), zcr: zc / n }
-    }
-    const rmsThresh = Math.max(90, 0.012 * 32767)
-    const zcrTone = 0.055
-    const maxWin = Math.floor(rate * 4 / winSize) // 最多扫 4s 的开头提示音/静音（智谱 GLM 开头提示音可达 ~2s）
-    // 开头：跳过 静音 或 纯音(嘟嘟) —— 直到遇到语音样（高过零率）
-    let start = 0
-    for (let w = 0; w < maxWin && w < Math.ceil(frames / winSize); w++) {
-      const info = winInfo(w)
-      if (info.rms < rmsThresh) { start = w * winSize + winSize; continue } // 静音
-      if (info.zcr < zcrTone) { start = w * winSize + winSize; continue } // 纯音（嘟嘟/叮叮）
-      break // 语音开始
-    }
-    // 结尾：去掉末尾静音（最多 500ms）
-    let end = frames
-    const endWin = Math.min(Math.ceil(frames / winSize), Math.floor(rate * 0.5 / winSize))
-    for (let w = Math.ceil(frames / winSize) - 1; w >= Math.ceil(frames / winSize) - endWin; w--) {
-      if (w < 0) break
-      const info = winInfo(w)
-      if (info.rms < rmsThresh) { end = w * winSize; continue }
-      break
-    }
-    if (end - start < 32) return input
-    const newFrames = end - start
-    const newDataLen = newFrames * blockAlign
-    // 重建标准 WAV（丢弃 AIGC/LIST 元数据，浏览器播放更稳）
-    const ab = new ArrayBuffer(44 + newDataLen)
-    const out = new Uint8Array(ab)
-    const ws = (o, s) => { for (let k = 0; k < s.length; k++) out[o + k] = s.charCodeAt(k) }
-    ws(0, 'RIFF'); ws(8, 'WAVE'); ws(12, 'fmt '); ws(36, 'data')
-    const dv = new DataView(ab)
-    dv.setUint32(4, 36 + newDataLen, true)
-    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true)
-    dv.setUint32(24, rate, true); dv.setUint32(28, rate * blockAlign, true)
-    dv.setUint16(32, blockAlign, true); dv.setUint16(34, bits, true)
-    dv.setUint32(40, newDataLen, true)
-    const fadeFrames = Math.max(1, Math.floor(rate * 0.006))
-    for (let fi = 0; fi < newFrames; fi++) {
-      let f = 1
-      if (fi < fadeFrames) f = fi / fadeFrames
-      else if (fi > newFrames - fadeFrames - 1) f = (newFrames - 1 - fi) / fadeFrames
-      const o = 44 + fi * blockAlign
-      for (let c = 0; c < ch; c++) {
-        const v = read(start + fi, c)
-        const nv = Math.round(v * Math.max(0, Math.min(1, f)))
-        if (bytesPer === 2) { out[o + c * 2] = nv & 0xff; out[o + c * 2 + 1] = (nv >> 8) & 0xff }
-        else { out[o + c * 4] = nv & 0xff; out[o + c * 4 + 1] = (nv >> 8) & 0xff; out[o + c * 4 + 2] = (nv >> 16) & 0xff; out[o + c * 4 + 3] = (nv >> 24) & 0xff }
-      }
-    }
-    return ab
-  } catch (e) {
-    return input
-  }
-}
-
-// ============ 流式播放器：分块边到边播（解决“文字出来半天才发音”的滞后）============
-// speakPro 合成长文时分块请求；第一块音频一到就立刻开始播放，后续块在播放中续入队列，
-// 用户听到的“开口时间”= 第一块合成时间，而不是整段合成完的时间。
 const _sp = { q: [], playing: false, audio: null, url: '', endCb: null, errCb: null }
 export function spClean() {
   if (_sp.url) { try { URL.revokeObjectURL(_sp.url) } catch (e) {} _sp.url = '' }
@@ -1037,7 +832,17 @@ export async function speakPro(text, opts = {}) {
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
+      // 音频缓存：同一文本+音色+语速只合成一次，命中直接播放（Edge 免费，缓存省网络+避免重复解析；glm 用户若切回，缓存同样省次）
+      const ck = ttsCacheKey('edge', opts.voice || store.cfg.ttsEdgeVoice, opts.rate, opts.pitch, t)
+      const hit = await ttsCacheGet(ck)
+      if (hit && hit.bytes) {
+        const played = await playBytes(hit.bytes, hit.mime)
+        setStatus(played ? 'done' : 'error', played ? '🔁 已从缓存播放（未重复合成）' : '❌ 播放失败（浏览器拦截自动播放）')
+        if (played && opts.onEnd) opts.onEnd()
+        return { ok: played, cached: true }
+      }
       const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
+      if (r.ok && r.bytes) ttsCacheSet(ck, r.bytes, r.mime)
       return finishSpeak(r, opts)
     }
     if (mode === 'sys') {

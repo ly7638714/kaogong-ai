@@ -1,3 +1,4 @@
+import { qualityMatrixText } from './qualityMatrix'
 // 智能训练：板块映射 + 出题/变式/诊断 系统提示词
 import { SYS } from '../kb'
 import { buildProfessorPrompt, SUB_PROFILE } from './professor'
@@ -70,6 +71,8 @@ export function buildQuizSys(opts = {}) {
   const difficulty = opts.difficulty || 'mid'
   const variant = opts.variant || ''
   const prof = buildProfessorPrompt(plate, difficulty, variant)
+  let qmText = ''
+  try { qmText = qualityMatrixText(plate, variant) } catch (e) {}
   return (
     QUIZ_SYS +
     '\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n【本次任务·模拟出题（命题专家模式）】\n' +
@@ -78,7 +81,7 @@ export function buildQuizSys(opts = {}) {
     '只输出题目本体：题干（含【问法】单独一行，真题提问方式）+ 4 个选项（A. … B. … C. … D. …）+ 单独一行【正确答案】X。\n' +
     '绝不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。\n' +
     '图推/几何/立体/统计图题必须在题干【图形】区输出标准 SVG 代码块（```svg …```）承载真实图形，紧接一行【问法】。\n' +
-    '若本题为逻辑判断·真假话：在末尾单独追加【验证数据】一行 JSON（{"exprs":[...],"trueCount":n,"opts":[...],"ans":"X"}），供程序真值表硬校验，必须与题目完全一致。'
+    '若本题为逻辑判断·真假话：在末尾单独追加【验证数据】一行 JSON（{"exprs":[...],"trueCount":n,"opts":[...],"ans":"X"}），供程序真值表硬校验，必须与题目完全一致。' + (qmText ? '\n\n' + qmText : '')
   )
 }
 

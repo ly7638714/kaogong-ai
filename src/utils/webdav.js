@@ -1,6 +1,7 @@
 /* global btoa */
 // ===== WebDAV 云同步（坚果云/Nextcloud 等通用协议）=====
 import { store } from '../store'
+import { stripSecrets } from './stripSecrets'
 
 function b64(s) {
   return btoa(unescape(encodeURIComponent(s)))
@@ -14,10 +15,11 @@ export async function webdavUpload() {
   const w = store.cfg.webdav || {}
   if (!w.url || !w.url.trim()) throw new Error('请先填写 WebDAV 地址')
   const data = {
-    app: '行测AI问答助手',
+    app: '行测名师AI小助理',
     version: 1,
     ts: Date.now(),
-    cfg: store.cfg,
+    // 安全加固（批次3.2）：备份剔除 API Key / WebDAV 密码等敏感字段（打码保留结构）
+    cfg: stripSecrets(store.cfg),
     msgs: store.msgs,
     wqs: store.wqs,
     myMem: store.myMem,

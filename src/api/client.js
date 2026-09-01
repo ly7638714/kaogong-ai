@@ -1,11 +1,32 @@
 /* global AbortSignal */
 // 底层 API 调用：双模型路由、鉴权头、流式/单次对话、AI 整理
 import { store } from '../store'
-import { recordCost, beginCost } from '../utils/costTrack'
+import { recordCost, beginCost, getBudget, todaySpend } from '../utils/costTrack'
 
 // 花费标注：调用方可在发起 AI 请求前 setCostCtx('pet'|'exam'|...) 标注功能归属（下一条记录消费后自动清空）
 let costCtx = ''
 export function setCostCtx(name) { costCtx = name || '' }
+// 批次3.3 全局限流闸：出题并发 worker + 单题 prefetch 共享上限，避免瞬时并发把 API 打爆
+const MAX_INFLIGHT = 4
+let _inflight = 0
+export async function withGlobalThrottle(fn) {
+  while (_inflight >= MAX_INFLIGHT) { await new Promise((r) => setTimeout(r, 160)) }
+  _inflight++
+  try { return await fn() } finally { _inflight-- }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// 批次3.4 今日预算熔断：超过预算 → 弹确认才继续（confirm 不可用时放行，避免误伤）
+function assertBudget() {
+  const b = getBudget()
+  if (!(b > 0)) return
+  const today = todaySpend()
+  if (today >= b) {
+    const ok = typeof confirm === 'function' && confirm('⚠️ 今日 AI 花费 ¥' + today.toFixed(2) + ' 已超过预算 ¥' + b + '，继续将额外扣费。是否仍要继续？')
+    if (!ok) { const e = new Error('已按今日预算 ¥' + b + ' 熔断，本次调用已停止'); e.name = 'BudgetError'; throw e }
+  }
+}
+// 429/5xx 是否可退避重试
+const isRetryableStatus = (st) => st === 429 || (st >= 500 && st < 600)
 export function supportsVision(c) {
   c = c || store.cfg.vision
   const m = (c.model || '').toLowerCase()
@@ -47,6 +68,10 @@ export function activeCfg(hasImg) {
 }
 
 export async function chatStream(messages, c, onDelta, signal, timeoutMs = 120000) {
+  return withGlobalThrottle(() => chatStreamInner(messages, c, onDelta, signal, timeoutMs))
+}
+async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000) {
+  assertBudget()
   // 推理/思考模型（deepseek-reasoner、deepseek-v4 系列、kimi 等）不支持 temperature，
   // 且「思考过程 + 图片 + 正文」会大量占用 max_tokens：必须给足输出上限并去掉 temperature，
   // 否则思考没写完 max_tokens 就耗尽，正式回答(content)为空（表现为"只出思考过程"）。
@@ -75,7 +100,13 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   const _feat = costCtx || (_hasImg || c === store.cfg.vision ? 'vision' : 'chat')
     try { beginCost({ feature: _feat, provider: c.prov, model: c.model, kind: _hasImg ? 'img' : 'text' }) } catch (e) {}
   try {
-    _resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: _sig })
+    // 批次3.3 429/5xx 退避重试（最多 2 次，1200ms/3500ms 递增）
+    for (let _attempt = 0; ; _attempt++) {
+      _resp = await fetch(c.url, { method: 'POST', headers: hds(c), body: JSON.stringify(body), signal: _sig })
+      if (_resp.ok || _attempt >= 2 || !isRetryableStatus(_resp.status)) break
+      try { await _resp.body && _resp.body.cancel && _resp.body.cancel() } catch (_) {}
+      await sleep(_attempt === 0 ? 1200 : 3500)
+    }
   } catch (e) {
     clearTimeout(_timer)
     if (_onAbort) signal.removeEventListener('abort', _onAbort)
@@ -102,9 +133,20 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
   let full = ''
   let think = ''
   let finish = ''
+  // 批次3.3 流式空闲超时：chunk 间隔 > 60s 视为断流，主动断开（每收到数据重置）
+  let _idleTimer = null
+  let _idleFired = false
+  const armIdle = () => {
+    if (_idleTimer) clearTimeout(_idleTimer)
+    _idleTimer = setTimeout(() => { _idleFired = true; try { _ctrl.abort() } catch (_) {} }, 60000)
+  }
+  armIdle()
+  try {
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
+    if (_idleTimer) clearTimeout(_idleTimer)
+    armIdle()
     buf += dec.decode(value, { stream: true })
     const lines = buf.split('\n')
     buf = lines.pop()
@@ -131,6 +173,11 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
       }
     }
   }
+  } finally {
+    if (_idleTimer) clearTimeout(_idleTimer)
+  }
+  // 批次3.3 空闲断流：流式中途长时间无数据 → 报明确错误而非永久悬挂
+  if (_idleFired && !full && !think) throw new Error('流式连接空闲超时（60 秒无数据），请重试')
   // 核心修复：思考过程(reasoning_content)只是"实时推理"，绝不能当正式回答发给用户。
   if (!full) {
     if (think)
@@ -148,6 +195,7 @@ export async function chatStream(messages, c, onDelta, signal, timeoutMs = 12000
 }
 
 export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000, signal) {
+  assertBudget()
   const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
   const body = {
     model: c.model,
@@ -182,6 +230,13 @@ export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000
         const bodyTxt = await resp.text().catch(() => '')
         let em = ''
         try { const e = JSON.parse(bodyTxt); em = (e.error && (e.error.message || e.error.code)) || '' } catch (e) {}
+        // 批次3.3 429/5xx 退避重试
+        if (isRetryableStatus(resp.status) && attempt < 1) {
+          clearTimeout(timer)
+          if (onAbort) signal.removeEventListener('abort', onAbort)
+          await sleep(attempt === 0 ? 1200 : 3500)
+          continue
+        }
         throw new Error('HTTP ' + resp.status + ' @' + c.url + (em ? ' · ' + String(em).slice(0, 160) : (bodyTxt ? ' · ' + bodyTxt.slice(0, 160) : '')))
       }
       const d = await resp.json()

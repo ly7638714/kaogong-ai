@@ -18,8 +18,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: '行测 AI 问答助手',
-        short_name: '行测AI',
+        name: '行测名师AI小助理',
+        short_name: '行测名师AI',
         description: '行测全题型智能答疑 · 命题人视角',
         theme_color: '#0f172a',
         background_color: '#0f172a',

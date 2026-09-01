@@ -1,12 +1,27 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { store, saveWqs } from '../store'
+
+import { ref, reactive, computed, onUnmounted } from 'vue'
+import { store, saveWqs, addWrong, dedupeWrongs } from '../store'
 import { showToast } from '../utils/toast'
+import { useAi } from '../utils/useAi'
+import { emit as evEmit } from '../utils/events'
+const { run: aiRun } = useAi()
+import { safeGet, safeSet, KEYS } from '../utils/storage'
 import { exportObsidianMd, copyObsidianWrong, exportAnkiCsv } from '../utils/export'
-import { activeCfg, chatOnce, supportsVision } from '../api'
+import { chatOnce, supportsVision } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
+import { renderMd } from '../utils/renderMd'
+const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
+import { GENERIC_REASONS, SUBJ_REASONS } from '../data/wrongReasons'
+import WrongVault from './WrongVault.vue'
+import WrongList from './WrongList.vue'
+import WrongDetail from './WrongDetail.vue'
+import WrongRedo from './WrongRedo.vue'
+import WrongFocus from './WrongFocus.vue'
+import WrongCards from './WrongCards.vue'
+import WrongReason from './WrongReason.vue'
 
 const cur = ref(-1),
   show = ref(false)
@@ -17,19 +32,19 @@ const vaultOpen = ref(false)
 const qcPapers = ref([])
 const qcQuiz = ref([])
 function loadVault() {
-  try { qcPapers.value = JSON.parse(localStorage.getItem('xc_papers') || '[]') || [] } catch (e) {}
-  try { qcQuiz.value = JSON.parse(localStorage.getItem('xc_quiz_col') || '[]') || [] } catch (e) {}
+  qcPapers.value = safeGet(KEYS.PAPERS, [])
+  qcQuiz.value = safeGet(KEYS.QUIZ_COL, [])
 }
 loadVault()
-function saveVaultPapers() { try { localStorage.setItem('xc_papers', JSON.stringify(qcPapers.value)) } catch (e) {} }
-function saveVaultQuiz() { try { localStorage.setItem('xc_quiz_col', JSON.stringify(qcQuiz.value)) } catch (e) {} }
-function redoPaper(p) { window.dispatchEvent(new CustomEvent('xc-open-paper-data', { detail: p })) }
+function saveVaultPapers() { safeSet(KEYS.PAPERS, qcPapers.value) }
+function saveVaultQuiz() { safeSet(KEYS.QUIZ_COL, qcQuiz.value) }
+function redoPaper(p) { evEmit('xc-open-paper-data', p) }
 function redoQuizCol(c) {
   const p = {
     id: Date.now() + Math.random(), name: '二刷 · ' + c.subject, ts: Date.now(),
     questions: [{ subject: c.subject, difficulty: c.difficulty, variant: c.variant, stem: c.stem, options: (c.options || []).map((o) => ({ ...o })), answer: c.answer, explain: c.explain || '', designer: c.designer || '', picked: null, correct: null, timeout: false, err: false }]
   }
-  window.dispatchEvent(new CustomEvent('xc-open-paper-data', { detail: p }))
+  evEmit('xc-open-paper-data', p)
 }
 function downloadText(t, n) {
   const a = document.createElement('a')
@@ -60,155 +75,7 @@ function exportQuizMd() {
 }
 function delVaultPaper(i) { qcPapers.value.splice(i, 1); saveVaultPapers() }
 function delVaultQuiz(i) { qcQuiz.value.splice(i, 1); saveVaultQuiz() }
-// 通用错因（无对应板块预设时兜底）
-const GENERIC_REASONS = [
-  '知识点遗忘',
-  '粗心/看错',
-  '题干没读全',
-  '时间不够·蒙的',
-  '陷阱题·想当然',
-  '方法记混/用错'
-]
-// 各板块贴合题型的预设错因
-const SUBJ_REASONS = {
-  判断推理: [
-    '忽略论点/论据区分',
-    '没锁定结论主语',
-    '偷换概念没发现',
-    '加强/削弱的力度判断失误',
-    '搭桥项识别错误',
-    '因果倒置陷阱',
-    '前提/假设方向搞反',
-    '选项夸大或偷换范围',
-    '因果无关项当相关项',
-    '没区分充分/必要条件',
-    '类比不当滥用',
-    '绝对化表述没识别',
-    '三段论结构错乱',
-    '没抓到题干核心结论'
-  ],
-  言语理解: [
-    '主旨句定位偏差',
-    '看到原文原话就选(偏离作者意图)',
-    '选项无中生有',
-    '意图/主旨混为一谈',
-    '没抓转折/递进关系词',
-    '过度推理',
-    '偷换概念(关键词置换)',
-    '一叶障目只看细节',
-    '没抓文段首尾句',
-    '选项绝对化没排除',
-    '并列结构漏读一项',
-    '指代对象指错',
-    '原文片段当成分论点',
-    '没区分观点与例子'
-  ],
-  资料分析: [
-    '基期/现期混淆',
-    '增长率/增长量用反',
-    '看错单位(万亿/亿)',
-    '同比/环比搞错',
-    '选项精度陷阱',
-    '估算误差大',
-    '比重/平均数算错',
-    '基期比重变化判断错',
-    '增长率比较踩坑',
-    '混合增长率不会用',
-    '增长量比较口诀忘',
-    '百分点/百分数混用',
-    '材料定位错行/列',
-    '计算粗心(进位/小数点)'
-  ],
-  数量关系: [
-    '设未知数不巧妙',
-    '整除/奇偶特性没用',
-    '没注意单位换算',
-    '方程列对算错',
-    '和差倍比用反',
-    '时间不够主动放弃',
-    '排列组合未分类讨论',
-    '概率(分步/分类)混',
-    '工程问题效率设错',
-    '行程相遇/追及公式记混',
-    '容斥文氏图画错',
-    '特值法没找对设的值',
-    '利润/折扣关系混乱',
-    '单调区间/最值求错'
-  ],
-  常识判断: [
-    '知识点记忆模糊',
-    '犹豫选错(二选一)',
-    '时政记忆过期',
-    '靠蒙无把握',
-    '选项绝对化没排除',
-    '朝代/人物对应错',
-    '法律条文记忆混',
-    '科技常识张冠李戴',
-    '地理国情记混',
-    '历史事件时间线乱',
-    '经济常识概念混淆',
-    '天干地支/节气应用错',
-    '生活常识想当然',
-    '多选漏选/错选'
-  ],
-  政治理论: [
-    '概念混淆(五位一体/四个全面)',
-    '表述细节记混',
-    '时政关键词记忆不清',
-    '理论对应关系错误',
-    '新提法/新表述记忆错',
-    '核心要义概括不准',
-    '重大会议主题/时间记错',
-    '政策要点遗漏',
-    '指导思想关联错',
-    '两步走/远景目标记混',
-    '党的领导相关内容选错',
-    '常规定语/修饰记混'
-  ],
-  定义判断: [
-    '核心要件漏看',
-    '偷换概念(定义外延)',
-    '没抓住属概念',
-    '选项不符合要件',
-    '替换关键词陷阱',
-    '包含于 vs 组成混淆',
-    '肯定/否定式定义记反',
-    '要件限定词漏读(如"直接/主要")',
-    '多要件缺一判断错',
-    '例子套用不当',
-    '选项代入时方向搞反',
-    '主体/客体错位'
-  ],
-  类比推理: [
-    '逻辑关系等级判断错(并列/包含)',
-    '没找词性一致性',
-    '二级辨析不过关',
-    '经验常识缺失',
-    '包容/组成混淆',
-    '交叉/并列混淆',
-    '近义/反义混',
-    '功能/属性判断错',
-    '形容对应错位',
-    '种属/组成搞混',
-    '一一对应(dedicated)找错',
-    '选项对仗/字数没看',
-    '因果关系倒置'
-  ],
-  图形推理: [
-    '特征图记忆不全',
-    '对称/一笔画判断错',
-    '线条数/点数数错',
-    '没注意位置/旋转规律',
-    '黑白块运算规则漏看',
-    '图形叠加/去同存异反应慢',
-    '立体展开图折叠错',
-    '笔画数没数清',
-    '封闭空间数算错',
-    '属性(曲直/开闭)忽略',
-    '图形重组/拼接判断错',
-    '整体与部分关系漏看'
-  ]
-}
+// 注：GENERIC_REASONS / SUBJ_REASONS 已外置至 data/wrongReasons.js（批次6B R4 零风险项）
 // 当前错题板块的预设错因
 function reasonsFor(subject) {
   return SUBJ_REASONS[subject] || GENERIC_REASONS
@@ -237,15 +104,47 @@ const stats = computed(() => {
     r = store.wqs.filter((q) => q.reviewed).length
   return { t, rev: r, pend: t - r }
 })
-const shown = computed(() =>
-  store.wqs.filter((q) => {
+// ===== 列表可定位：关键词搜索 / 排序 / 分页 / 序号 / 跳转 =====
+const kw = ref('')
+const sortBy = ref('time') // time=最新优先 | wrong=错得多优先 | mastery=掌握低优先
+const PAGE = 20
+const pageN = ref(1)
+const filtered = computed(() => {
+  let list = store.wqs.filter((q) => {
     if (fSubj.value && (q.subject || '未分类') !== fSubj.value) return false
     if (fRev.value === 'rev' && !q.reviewed) return false
     if (fRev.value === 'pend' && q.reviewed) return false
     if (fReason.value && !(q.reasons || []).includes(fReason.value)) return false
+    const k = kw.value.trim().toLowerCase()
+    if (k) {
+      const hay = [q.question || q.q || q.stem || '', q.answer || '', q.explain || q.analysis || '', (q.reasons || []).join(' '), q.method || '', q.note || ''].join(' ').toLowerCase()
+      if (!hay.includes(k)) return false
+    }
     return true
   })
-)
+  if (sortBy.value === 'wrong') list = list.slice().sort((a, b) => (b.wrongCount || 1) - (a.wrongCount || 1))
+  else if (sortBy.value === 'mastery') list = list.slice().sort((a, b) => masteryOf(a) - masteryOf(b))
+  else list = list.slice().sort((a, b) => (b.at || 0) - (a.at || 0))
+  return list
+})
+const shown = computed(() => filtered.value.slice(0, pageN.value * PAGE))
+const shownTotal = computed(() => filtered.value.length)
+function loadMore() { pageN.value++ }
+const jumpN = ref('')
+function jumpTo() {
+  const n = parseInt(jumpN.value, 10)
+  if (!n || n < 1 || n > filtered.value.length) { showToast('请输入 1-' + filtered.value.length + ' 之间的序号', 'info'); return }
+  openRaw(store.wqs.indexOf(filtered.value[n - 1]))
+  jumpN.value = ''
+}
+function resetFilters() { fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
+// 一键去重：完全相同的错题只保留一道
+function dedupeNow() {
+  const n = dedupeWrongs()
+  pageN.value = 1
+  if (n > 0) showToast('🧹 已合并完全相同的错题，删除 ' + n + ' 条重复', 'success')
+  else showToast('✅ 错题集没有完全相同的重复题', 'info')
+}
 
 function openIdx(i) {
   openRaw(store.wqs.indexOf(shown.value[i]))
@@ -290,6 +189,7 @@ function closeRedo() {
     redoTimer = null
   }
 }
+onUnmounted(() => { if (redoTimer) clearInterval(redoTimer) })
 function fmtT(s) {
   const m = Math.floor(s / 60)
   const ss = s % 60
@@ -425,6 +325,29 @@ function toggleReason(r) {
     frm.value.sel.push(r)
   }
 }
+function removeReason(r) {
+  const i = frm.value.sel.indexOf(r)
+  if (i >= 0) frm.value.sel.splice(i, 1)
+  const j = userReasons.value.indexOf(r)
+  if (j >= 0) { userReasons.value.splice(j, 1); persistReasons() }
+  showToast('已删除错因「' + r + '」（本题已移除，其他题若标记过同名字符串不再显示于自定义池）', 'info')
+}
+// 弹窗（复用 reasonModal）：mode='reasons'（AI 新因替换询问）| mode='rename'（改错因名）
+const reasonModal = ref(null)
+function renameReason(r) {
+  reasonModal.value = { mode: 'rename', r, resolve: (neu) => {
+    const v = String(neu || '').trim()
+    if (!v || v === r) { reasonModal.value = null; return }
+    const i = frm.value.sel.indexOf(r)
+    if (i >= 0) frm.value.sel[i] = v
+    const j = userReasons.value.indexOf(r)
+    if (j >= 0) { userReasons.value[j] = v; persistReasons() }
+    reasonModal.value = null
+    showToast('已改名：' + r + ' → ' + v, 'success')
+  } }
+}
+const renameInput = ref('')
+function openRename(r) { renameInput.value = r; renameReason(r) }
 // 用户自定义错因（持久化到 localStorage，跨板块复用）
 const userReasons = ref([])
 const customReason = ref('')
@@ -437,13 +360,66 @@ function persistReasons() {
     localStorage.setItem('xc_wq_reasons', JSON.stringify(userReasons.value))
   } catch (e) {}
 }
-// 当前错题板块可选的错因：板块预设 + 用户自定义合集
-const curReasons = computed(() => {
+// 当前错题板块可选的错因：预设候选 + 已勾选 + 收纳盒（历史积累）
+const reasonBoxOpen = ref(false)
+const presetReasons = computed(() => {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
-  const base = q ? reasonsFor(q.subject) : GENERIC_REASONS
-  // 预设 + 用户自定义 + 当前已勾选(含 AI 返回的错因)，确保都能在 chips 显示/选择
-  return [...new Set([...base, ...userReasons.value, ...frm.value.sel])]
+  return (q ? reasonsFor(q.subject) : GENERIC_REASONS).slice()
 })
+// 收纳盒：用户自定义池里「非预设且未勾选」的历史错因，默认折叠，可展开删改
+const boxReasons = computed(() => userReasons.value.filter((r) => !presetReasons.value.includes(r) && !frm.value.sel.includes(r)))
+const presetBoxOpen = ref(false)
+// 顶部始终显示：本题已勾选的全部错因（预设勾选无删改；自定义/AI 勾选带 ✎✕）
+const checkedAllReasons = computed(() => frm.value.sel.slice())
+// ===== AI 引导找错因（科学决策：引导用户自己发现错因，而非直接给答案）=====
+const aiGuideBusy = ref(false)
+const guideText = ref('')
+async function askAiGuide() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q || aiGuideBusy.value) return
+  const ctx = origCtx()
+  const myAnswer = String(q.your || q.answerUser || '').trim()
+  const rightAns = String(q.answer || q.ans || q.correct || '').trim()
+  const analysis = String(q.explain || q.analysis || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 600)
+  aiGuideBusy.value = true
+  guideText.value = ''
+  const out = await aiRun(async (c) => {
+    const sys = '你是行测资深讲师。请**引导**考生自己发现错因，而不是直接给结论：围绕"我错在哪一步、我当时是怎么想的、正确的判断标准是什么"提出 2-3 个层层递进的问题，让考生自己回答后自然得出错因。'
+    const userContent = `板块：${q.subject || '未分类'}\n题干：${(ctx.text || '').slice(0, 500)}\n我的作答：${myAnswer || '（未记录）'}\n正确答案：${rightAns || '（未知）'}\n正确解析：${analysis || '（无）'}\n\n请只输出引导问题（200 字内），不要给答案，不要说"你可以这样归纳"。`
+    return String((await chatOnce(c, [{ role: 'user', content: sys + '\n' + userContent }], 500, 30000)) || '').trim() || '（AI 未返回，请重试）'
+  }, { onError: (e) => { guideText.value = 'AI 引导失败：' + (e && e.message) } })
+  if (out != null) guideText.value = out
+  aiGuideBusy.value = false
+}
+// ===== AI 规范化自定义错因：把口语化表述改写成专业化、可指导下次避免 =====
+const aiPolishBusy = ref(false)
+async function aiPolishReason() {
+  const raw = customReason.value.trim()
+  if (!raw) { showToast('先在输入框写下你的原因，再点「✨ 规范化」', 'info'); return }
+  if (aiPolishBusy.value) return
+  aiPolishBusy.value = true
+  const reply = await aiRun(async (c) => {
+    const sys = '你是行测错因整理专家。把考生口语化的错因改写成专业、具体、可指导下次避免的表述（1-2 条），只输出 JSON 数组，如 ["…", "…"]，不要多余文字。'
+    return await chatOnce(c, [{ role: 'user', content: sys + '\n\n我的原话：' + raw }], 400, 30000)
+  }, { keyHint: '文字模型' })
+  if (reply == null) { aiPolishBusy.value = false; return }
+  try {
+    let arr = null
+    try { arr = JSON.parse(String(reply || '').trim()) } catch (e) { const m = String(reply || '').match(/\[[\s\S]*\]/); if (m) { try { arr = JSON.parse(m[0]) } catch (_) {} } }
+    const list = Array.isArray(arr) ? arr.map((x) => String(x).trim()).filter(Boolean) : []
+    if (!list.length) { showToast('规范化失败：' + String(reply || '').slice(0, 60), 'error'); return }
+    list.forEach((v) => {
+      if (!frm.value.sel.includes(v)) frm.value.sel.push(v)
+      if (!userReasons.value.includes(v)) { userReasons.value.push(v); persistReasons() }
+    })
+    customReason.value = ''
+    showToast('✨ 已规范化并加入错因：' + list.join('；'), 'success')
+  } catch (e) {
+    showToast('规范化失败：' + (e && e.message), 'error')
+  } finally {
+    aiPolishBusy.value = false
+  }
+}
 function addCustomReason() {
   const r = customReason.value.trim()
   if (!r) {
@@ -457,6 +433,273 @@ function addCustomReason() {
   if (!frm.value.sel.includes(r)) frm.value.sel.push(r)
   customReason.value = ''
 }
+// ===== 深度复盘增强 =====
+// ① 复盘完整性自检：还缺哪些关键项（帮助彻底吃透）
+const reviewGaps = computed(() => {
+  if (cur.value < 0) return []
+  const f = frm.value
+  const gaps = []
+  if (!String(f.answer || '').trim()) gaps.push('正确答案')
+  if (!(f.sel || []).length) gaps.push('错因')
+  if (!String(f.method || '').trim()) gaps.push('秒杀规律')
+  if (!String(f.note || '').trim()) gaps.push('笔记')
+  return gaps
+})
+// ② 同类错题联动：同板块且共享任一错因的其他错题，一键连看吃透
+const relatedQs = computed(() => {
+  if (cur.value < 0) return []
+  const q = store.wqs[cur.value]
+  if (!q || !q.subject) return []
+  const mine = (q.reasons || []).filter(Boolean)
+  return store.wqs
+    .map((x, i) => ({ x, i, share: mine.filter((r) => (x.reasons || []).includes(r)).length }))
+    .filter(({ x, i }) => i !== cur.value && x.subject === q.subject)
+    .sort((a, b) => b.share - a.share)
+    .slice(0, 6)
+})
+function openRelated(i) {
+  openRaw(i)
+}
+// ③ 变式训练：优先从「当前用户错题集」挑同类题（同板块·共享错因，最多3道）；错题集没有 → AI 按此题出新变式（累计最多3道）
+// ===== 变式训练·答题卡模式：选题量(1-3) → 逐题作答(可改) → 提交答题卡统一批改 → 全错时原题×变式横向复盘 =====
+const vtShow = ref(false)
+const vtBusy = ref(false)
+const vtMode = ref('pick') // pick(选题量) | do(答题卡作答) | result(批改)
+const vtCount = ref(3)
+const vtQueue = ref([])
+const vtIdx = ref(0)
+const vtPick = ref('')
+const vtAnswers = ref({}) // 题号 -> 作答（选项字母；无选项题用 对/错）
+const vtScore = ref(0)
+const vtOpen = ref({}) // 批改结果里展开的解析题号
+const vtQ = computed(() => vtQueue.value[vtIdx.value] || null)
+const vtMax = computed(() => Math.min(3, Math.max(1, vtQueue.value.length || 3)))
+const vtAllWrong = computed(() => vtMode.value === 'result' && vtQueue.value.length > 0 && vtScore.value === 0)
+const origStem = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  return q ? String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 260) : ''
+})
+function wrongToVt(wq) {
+  const choices = extractChoices(wq.question || '')
+  return {
+    stem: String(wq.question || wq.q || wq.stem || '').replace(/<[^>]+>/g, ' ').trim(),
+    options: choices,
+    answer: (choices.length >= 2 ? answerLetter(wq.answer || '') : String(wq.answer || '').trim().toUpperCase()) || 'A',
+    explain: String(wq.explain || wq.analysis || '') + (wq.method ? '\n⚡ 秒杀：' + wq.method : ''),
+    source: 'lib', subject: wq.subject || '未分类'
+  }
+}
+function startVariant() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q || vtBusy.value) return
+  const lib = relatedQs.value.slice(0, 3).map((r) => wrongToVt(r.x))
+  vtQueue.value = lib
+  vtMode.value = 'pick'
+  vtCount.value = Math.min(3, Math.max(1, lib.length || 3))
+  vtAnswers.value = {}
+  vtScore.value = 0
+  vtOpen.value = {}
+  vtIdx.value = 0
+  vtPick.value = ''
+  vtShow.value = true
+}
+function vtStartDo() {
+  const n = vtCount.value
+  if (vtQueue.value.length) {
+    vtQueue.value = vtQueue.value.slice(0, n)
+    vtMode.value = 'do'
+    vtIdx.value = 0
+    vtPick.value = ''
+    vtAnswers.value = {}
+  } else {
+    // 错题集无同类 → AI 按题量生成
+    vtBusy.value = true
+    vtMode.value = 'do'
+    vtQueue.value = []
+    vtIdx.value = 0
+    vtPick.value = ''
+    vtAnswers.value = {}
+    generateAiVariants(n)
+  }
+}
+async function generateAiVariants(n) {
+  try {
+    for (let i = 0; i < n; i++) {
+      const item = await vtAskAi()
+      if (item) vtQueue.value.push(item)
+      else break
+    }
+    if (!vtQueue.value.length) { vtClose(); return }
+    vtIdx.value = 0
+    vtPick.value = ''
+    showToast('🤖 已生成 ' + vtQueue.value.length + ' 道 AI 变式，开始作答', 'success')
+  } finally {
+    vtBusy.value = false
+  }
+}
+async function vtAskAi() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q) return null
+  const reply = await aiRun(async (c) => {
+    const sys = '你是行测命题老师。请基于原题出一道【考点题型完全相同、题干素材全新】的变式检验题，严格只输出 JSON：{"stem":"题干（含完整 A/B/C/D 四个选项）","answer":"正确选项字母（A-D）","explain":"解题思路 + 考点 + 干扰项陷阱，200 字内"}。注意：JSON 字符串内禁止使用英文双引号，需要强调的词请用中文引号「」或『』，四个选项用换行分隔。'
+    const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 700)
+    return await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + stem + '\n【原答案】' + (q.answer || '') }], 900, 30000)
+  }, { keyHint: '文字模型' })
+  if (reply == null) return null
+  let obj = null
+  const rawTxt = String(reply || '').replace(/```json|```/g, '').trim()
+  try { obj = JSON.parse(rawTxt) } catch (e) {}
+  if (!obj) { const m = rawTxt.match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]) } catch (e) {} } }
+  if (!obj) {
+    const stem2 = (rawTxt.match(/"stem"\s*:\s*"([\s\S]*?)"\s*,\s*"answer"/) || [])[1]
+    const answer = (rawTxt.match(/"answer"\s*:\s*"([^"]*)"/) || [])[1]
+    const explain = (rawTxt.match(/"explain"\s*:\s*"([\s\S]*?)"\s*}$/) || [])[1]
+    if (stem2 && answer) obj = { stem: stem2.replace(/""/g, '"'), answer, explain: explain || '' }
+  }
+  if (!obj || String(obj.stem || '').length <= 20) { showToast('变式生成失败：' + String(reply || '').slice(0, 50), 'error'); return null }
+  return {
+    stem: String(obj.stem).replace(/<[^>]+>/g, ' ').trim(),
+    answer: String(obj.answer || '').trim().toUpperCase(),
+    explain: String(obj.explain || ''),
+    source: 'ai', subject: (q.subject || '未分类'),
+    options: extractChoices(String(obj.stem))
+  }
+}
+function vtChoose(k) {
+  if (!vtQ.value || vtMode.value !== 'do') return
+  vtPick.value = k
+  vtAnswers.value[vtIdx.value] = k
+}
+function vtNav(delta) {
+  const ni = vtIdx.value + delta
+  if (ni < 0 || ni >= vtQueue.value.length) return
+  vtIdx.value = ni
+  vtPick.value = vtAnswers.value[ni] || ''
+}
+function vtGo(i) {
+  if (i < 0 || i >= vtQueue.value.length) return
+  vtIdx.value = i
+  vtPick.value = vtAnswers.value[i] || ''
+}
+function vtResultOf(i) {
+  const q = vtQueue.value[i]
+  const a = vtAnswers.value[i]
+  if (!q || !a) return 'no'
+  if ((q.options || []).length >= 2) return a === q.answer ? 'ok' : 'no'
+  return a === '对' ? 'ok' : 'no'
+}
+function vtSubmit() {
+  const unanswered = vtQueue.value.filter((_, i) => !vtAnswers.value[i]).length
+  if (unanswered) { showToast('还有 ' + unanswered + ' 题未作答，请全部做完再提交答题卡', 'info'); return }
+  vtScore.value = vtQueue.value.reduce((s, _q, i) => s + (vtResultOf(i) === 'ok' ? 1 : 0), 0)
+  vtMode.value = 'result'
+}
+function vtToggleOpen(i) { vtOpen.value[i] = !vtOpen.value[i] }
+function vtClose() {
+  vtShow.value = false
+  vtQueue.value = []
+  vtBusy.value = false
+  vtAnswers.value = {}
+  vtScore.value = 0
+  vtOpen.value = {}
+  vtMode.value = 'pick'
+}
+// 答错的 AI 变式 → 一键加入错题集（错题集来源的同类题已在错题本，无需重复）
+function vtAddWrong(i) {
+  const q = vtQueue.value[i]
+  if (!q) return
+  if (q.source !== 'ai') { showToast('这是来自错题集的同类题，已在错题本中', 'info'); return }
+  const base = cur.value >= 0 ? store.wqs[cur.value] : null
+  addWrong({
+    id: Date.now(),
+    time: new Date().toLocaleString(),
+    subject: q.subject || (base && base.subject) || '未分类',
+    question: q.stem,
+    answer: q.answer,
+    explain: q.explain,
+    your: vtAnswers.value[i] || '',
+    wrongCount: 1,
+    reviewed: false,
+    imgs: []
+  })
+  saveWqs()
+}
+// ===== 第 6 步 · 回到原题深度巩固：分板块「核心骨架」记忆要点（记骨架不记答案） =====
+const CORE_TEMPLATES = {
+  '逻辑判断': { tag: '推理骨架', points: ['骨架：先锁定「论点 → 论据 → 论证方式」三者，再谈削弱/加强', '力度排序：否定论点 > 拆桥 > 否定论据 > 另有他因；加强 = 建立因果/排除他因', '陷阱：偷换概念 / 过度推断 / 因果倒置 / 诉诸无知', '记忆锚点：先画论证骨架图，再逐项对照力度'] },
+  '图形推理': { tag: '特征→规律', points: ['骨架：先看图形特征定大类（位置/样式/属性/数量），再细化规律', '位置=平移/旋转/翻转；样式=叠加/去同存异/黑白运算；属性=对称/曲直/开闭；数量=点线面/笔画/素', '规律必须验证到最后一张图，避免局部化', '记忆锚点：特征词 → 考点映射表'] },
+  '定义判断': { tag: '要件匹配', points: ['骨架：圈出定义的关键要件（主体/客体/方式/目的/条件）', '逐项对照要件，全部满足才选，缺一个即排除', '陷阱：「不属于/不符合」反向选；把"未提及"当"不符合"', '记忆锚点：要件清单对照法'] },
+  '类比推理': { tag: '词间关系', points: ['骨架：先定一级关系（语义/逻辑/语法/对应），再二级辨析（程度/褒贬/主体/场所）', '语义=近义/反义/象征；逻辑=因果/并列/包含/交叉；对应=功能/材料/场所/来源', '陷阱：二级关系没辨析、词性不对应', '记忆锚点：一关系二辨析'] },
+  '言语理解': { tag: '行文脉络/语义关系', points: ['逻辑填空：先看逻辑关系词（转折/递进/并列/解释）再选词，注意成语/实词固定搭配与积累', '片段阅读：先划行文脉络（背景/问题/对策/结论）找主旨句，警惕程度超越/偷换主体/无中生有', '陷阱：凭语感先入为主、同义替换没抓住主体与范围', '记忆锚点：逻辑填空记语义关系+搭配，片段阅读记脉络+主旨句'] },
+  '资料分析': { tag: '考点→公式→速算', points: ['骨架：提问词定考点（基期/增长量/增长率/比重/平均/倍数）→ 锁定时间指标单位 → 套公式', '公式骨架：基期=B/(1+r)；增量=B×r/(1+r)；比重=A/B；平均=总量/个数', '速算：|r|≤5% 化除为乘、r≈1/n 份数、截位直除', '陷阱：时间/单位/基数/方向四类', '记忆锚点：先判题型再找数，先看选项差距再速算'] },
+  '数量关系': { tag: '题型→秒杀', points: ['骨架：读题先识别题型（工程/行程/经济/排列组合/浓度/容斥）', '秒杀优先：整除/倍数/赋值/代入排除，凑整思维', '方程：设未知数列等量关系，鸡兔同笼假设法', '记忆锚点：15秒识别不了就跳过，先做必拿题'] },
+  '常识判断': { tag: '领域+易错', points: ['骨架：定位领域（政治/法律/科技/人文/地理/经济/时政）', '法律=主体/时间/程度核对；时政=高频规范表述', '陷阱：张冠李戴 / 绝对化 / 时间错位', '记忆锚点：四要素核对（对象/时间/数量/程度）'] },
+  '政治理论': { tag: '规范表述', points: ['骨架：识别时政语境与高频规范表述', '注意固定提法与官方表述，不凭字面推', '记忆锚点：语境提示词+固定搭配'] }
+}
+const coreCard = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q) return null
+  const tpl = CORE_TEMPLATES[q.subject || ''] || { tag: '核心骨架', points: ['骨架：按「题型 → 结构/公式 → 陷阱」拆解本题', '结合解析提炼一句话记忆锚点', '把同板块错题放一起横向对比巩固'] }
+  return { subject: q.subject || '未分类', tag: tpl.tag, points: tpl.points }
+})
+const coreOrigMd = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  return q ? String(q.question || q.q || q.stem || '') : ''
+})
+const coreAiBusy = ref(false)
+const coreAiText = ref('')
+async function askCoreDeep() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q || coreAiBusy.value) return
+  const tpl = CORE_TEMPLATES[q.subject || ''] || CORE_TEMPLATES['常识判断']
+  coreAiBusy.value = true
+  coreAiText.value = ''
+  const out = await aiRun(async (c) => {
+    const sys = '你是行测名师。请针对这道题做「骨架式深度巩固」——帮用户记住题目的骨架与核心知识点（不是记答案）。输出：1)【考点】一句话点明；2)【骨架/结构】分步拆解；3)【' + (q.subject || '该板块') + '记忆核心要点】2-3 条结合本题的针对性要点；4)【一句话记忆锚点】。'
+    const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 600)
+    return String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【题目】' + stem + '\n\n板块要点参考：' + tpl.points.join('；') }], 700, 30000)) || '').trim() || '（AI 未返回，请重试）'
+  }, { onError: (e) => { coreAiText.value = 'AI 剖析失败：' + (e && e.message) } })
+  if (out != null) coreAiText.value = out
+  coreAiBusy.value = false
+}
+// 全错 → AI 深度横向比较复盘（原题 × 各变式）
+const vtCmpBusy = ref(false)
+const vtCmpText = ref('')
+async function vtDeepCompare() {
+  const base = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!base || vtCmpBusy.value) return
+  vtCmpBusy.value = true
+  vtCmpText.value = ''
+  const out = await aiRun(async (c) => {
+    const orig = String(base.question || '').replace(/<[^>]+>/g, ' ').slice(0, 420)
+    const vars = vtQueue.value.map((q, i) => '变式' + (i + 1) + '：' + String(q.stem).slice(0, 300)).join('\n')
+    const sys = '你是行测名师。用户原题和变式题全部做错，请做「横向比较复盘」帮其突破瓶颈：1) 一句话点出这组题共同的考点与命题套路；2) 用对比方式指出原题与每道变式的共同点与差异点（改了什么参数/换了什么素材/陷阱如何迁移）；3) 给出一条能贯穿所有题的「核心突破口」口诀。'
+    return String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + orig + '\n\n' + vars }], 700, 30000)) || '').trim() || '（AI 未返回，请重试）'
+  }, { onError: (e) => { vtCmpText.value = '对比失败：' + (e && e.message) } })
+  if (out != null) vtCmpText.value = out
+  vtCmpBusy.value = false
+}
+// 卷面化：题干与选项拆分（错题详情像卷子一样展示：题干问法 + 每选项独占一行）
+function splitPaper(text) {
+  const t = String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const opts = extractChoices(t)
+  if (!opts.length) return { stem: t, opts: [] }
+  let stem = t
+  for (const o of opts) {
+    const m = stem.indexOf(o.k + '.')
+    const m2 = stem.indexOf(o.k + '．')
+    const m3 = stem.indexOf(o.k + '、')
+    const idx = [m, m2, m3].filter((x) => x >= 0).sort((a, b) => a - b)[0]
+    if (idx >= 0 && idx < stem.length - 2) { stem = stem.slice(0, idx).trim(); break }
+  }
+  stem = stem.replace(/\s+([A-D])[.、．]\s*$/, '').trim()
+  return { stem: stem || t, opts }
+}
+const paperView = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q) return { stem: '', opts: [] }
+  return splitPaper(q.question || q.q || q.stem || '')
+})
 function save() {
   if (cur.value < 0) return
   const q = store.wqs[cur.value]
@@ -467,7 +710,8 @@ function save() {
   q.reviewed = !!(q.answer || q.method || q.note)
   q.reviewedAt = Date.now()
   saveWqs()
-  showToast('✅ 已保存复盘', 'success')
+  if (q.reviewed) petAddPoints(5) // 批次8·萌宠成长绑定：完成复盘+5成长值
+  showToast('✅ 已保存复盘' + (q.reviewed ? '（萌宠 +5 成长）' : ''), 'success')
 }
 function del() {
   if (cur.value < 0) return
@@ -538,13 +782,11 @@ async function askAiReasons() {
   if (aiBusy.value) return
   const ctx = origCtx()
   const rawImgs = ctx.imgs || []
-  const c = activeCfg(rawImgs.length > 0)
-  if (!c || !c.key) {
-    showToast('请先在设置配置模型 API Key', 'error')
-    return
-  }
-  const withImg = rawImgs.length > 0 && supportsVision(c)
+  // 先用 useAi 取配置（未配 Key 时返回 null 并 toast）；busy 在此之后再置位，避免与 aiRun 的 busy 互斥
+  const c = await aiRun(async (cc) => cc, { cfgKey: rawImgs.length > 0 })
+  if (c == null) return
   aiBusy.value = true
+  const withImg = rawImgs.length > 0 && supportsVision(c)
   try {
     // 找对应 AI 回答作上下文
     let aiReply = ''
@@ -557,16 +799,22 @@ async function askAiReasons() {
         }
       }
     }
-    const sys = `你是行测资深讲师，帮助考生复盘错题、归纳成因。你要结合提供的题干、原题图片与我的解答过程，给出准确的错因归纳。`
+    const sys = `你是行测资深讲师，帮助考生复盘错题、归纳成因。你要结合题干、我的作答、正确答案与解析，**具体指出我错在哪一步**，拒绝泛泛而谈（不要只写"审题不清/方法不对/粗心"这类空话，要说清"你把哪个关键词误读成什么""你在第几步把哪个数据/方向用反了"）。`
+    const myAnswer = String(q.your || q.answerUser || '').trim()
+    const rightAns = String(q.answer || q.ans || q.correct || '').trim()
+    const analysis = String(q.explain || q.analysis || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 700)
     const userContent = `我在复盘一道错题，请你帮我引导归纳错误原因，并**按以下 JSON 输出**（严格只输出 JSON，不要多余文字）：
 {
   "answer": "如果题干能看出正确答案就填（如 D、主旨句等），看不出填空字符串",
-  "reasons": ["错因1", "错因2"],  // 从 读懂题目/读题/选项比较/方法/计算/粗心/时间 等角度归纳，最多3条
+  "reasons": ["错因1", "错因2"],  // 结合我的作答与正确答案，最多3条，每条具体到"错在哪一步/哪个点"，能直接指导我下次避免
   "method": "一句话秒杀/下次看到这类题先想什么",
   "note": "简要的解析与下次提醒"
 }
 板块：${q.subject || '未分类'}
 我的提问：${ctx.text || ''}
+我的作答（我选/填的）：${myAnswer || '（未记录）'}
+正确答案：${rightAns || '（未知）'}
+正确解析：${analysis || '（无）'}
 AI 当时的解答：${aiReply || '（无）'}`
     let messages
     if (withImg) {
@@ -577,7 +825,7 @@ AI 当时的解答：${aiReply || '（无）'}`
     } else {
       messages = [{ role: 'user', content: (sys + '\n' + userContent) + (rawImgs.length ? '\n（提示：我未提供原图，请基于题干文字判断，并提醒我如需更精准可重新存错题）' : '') }]
     }
-    const reply = await chatOnce(c, messages, 900)
+    const reply = await chatOnce(c, messages, 900, 45000)
     // 解析结构化结果：先整体 parse，失败则抠出第一个 {...} JSON 对象
     let obj = null
     if (reply) {
@@ -599,8 +847,8 @@ AI 当时的解答：${aiReply || '（无）'}`
       }
     }
     if (obj) {
-      fillStruct(obj)
-      showToast('已智能填入：答案/错因/秒杀/笔记', 'success')
+      applyAiReasons(obj, () => fillAnswerMethodNote(obj))
+      showToast('已智能填入：答案/错因/秒杀/笔记' + (reasonModal.value ? '（错因待你确认）' : ''), 'success')
     } else if (reply) {
       frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + '🤖 小助手引导（可编辑）：\n' + reply
       showToast('已写入复盘笔记', 'success')
@@ -614,20 +862,36 @@ AI 当时的解答：${aiReply || '（无）'}`
   }
 }
 // 智能分字段回填
-function fillStruct(o) {
-  if (o.answer && !frm.value.answer) frm.value.answer = String(o.answer)
-  if (Array.isArray(o.reasons)) {
-    o.reasons.forEach((r) => {
-      if (!r) return
-      const v = String(r).trim()
-      if (!v) return
-      if (!frm.value.sel.includes(v)) frm.value.sel.push(v)
-      if (!userReasons.value.includes(v)) {
-        userReasons.value.push(v)
-        persistReasons()
-      }
+// 应用 AI 返回的 reasons：若当前题已有旧错因且有新错因，先弹窗询问用户「替换 / 合并 / 取消」
+function applyAiReasons(o, fillOthers) {
+  const newReasons = Array.isArray(o.reasons)
+    ? o.reasons.map((r) => String(r || '').trim()).filter(Boolean).slice(0, 3)
+    : []
+  const oldReasons = frm.value.sel.slice()
+  const commit = (selArr) => {
+    frm.value.sel = selArr
+    newReasons.forEach((r) => {
+      if (!userReasons.value.includes(r)) { userReasons.value.push(r); persistReasons() }
     })
   }
+  if (oldReasons.length && newReasons.length) {
+    reasonModal.value = {
+      mode: 'reasons', old: oldReasons, neu: newReasons,
+      resolve: (mode) => {
+        if (mode === 'replace') commit(newReasons.slice())
+        else if (mode === 'merge') commit([...oldReasons, ...newReasons.filter((r) => !oldReasons.includes(r))])
+        // cancel → 不改错因
+        reasonModal.value = null
+      }
+    }
+  } else if (newReasons.length) {
+    commit([...oldReasons, ...newReasons.filter((r) => !oldReasons.includes(r))])
+  }
+  if (fillOthers) fillOthers()
+}
+// 只回填 answer/method/note（错因走 applyAiReasons 的询问流程）
+function fillAnswerMethodNote(o) {
+  if (o.answer && !frm.value.answer) frm.value.answer = String(o.answer)
   if (o.method && !frm.value.method) frm.value.method = String(o.method)
   if (o.note) frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + String(o.note)
 }
@@ -648,7 +912,35 @@ function parseByField(txt) {
   }
   return out.answer || out.reasons.length || out.method || out.note ? out : null
 }
+
+
+// R4：把全部状态/方法/常量聚合成一个 reactive ctx，注入 7 个子组件
+// 子组件用 toRefs(props.ctx) 暴露状态、直接解构暴露方法/常量，模板逐字搬入，避免双向绑定错位。
+const wrongCtx = reactive({
+  PAGE, addCustomReason, aiBusy, aiGuideBusy, aiPolishBusy, aiPolishReason,
+  ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
+  cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, closeImg,
+  closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
+  cur, customReason, dedupeNow, del, delVaultPaper, delVaultQuiz,
+  downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSubj,
+  fmtT, focusList, focusRedo, focusShow, frm, gotoChat,
+  guideText, imgView, jumpN, jumpTo, kw, loadMore,
+  masteryOf, md, openCards, openIdx, openRedo, openRelated,
+  openRename, origStem, pageN, paperView, presetBoxOpen, presetReasons,
+  qcPapers, qcQuiz, reasonBoxOpen, reasonList, reasonModal, redo,
+  redoAnswer, redoChoices, redoFeedback, redoHasChoice, redoHistory, redoPaper,
+  redoPick, redoQ, redoQuizCol, redoResult, redoT, relatedQs,
+  removeReason, renameInput, rep, resetFilters, reviewGaps, save,
+  show, shown, shownTotal, sortBy, startVariant, stats,
+  store, subjList, submitByChoice, submitRedo, todayFocus, toggleReason,
+  vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
+  vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,
+  vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
+  vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow,
+  vtStartDo, vtSubmit, vtToggleOpen
+})
 </script>
+
 <template>
   <div class="page on">
     <div class="page-inner">
@@ -659,293 +951,13 @@ function parseByField(txt) {
         <button class="btn btn-gh" @click="exportAnkiCsv()">🃏 Anki/CSV</button>
         <button class="btn btn-gh" @click="$emit('txt')">TXT</button>
       </div>
-
-      <!-- 卷库：全部历史卷子 + 出题集（查看/重做/导出/删除） -->
-      <div class="ep-block vault">
-        <div class="ep-block-hd ep-fold-hd" @click="vaultOpen = !vaultOpen">
-          <span>📚 卷库（历史卷子 {{ qcPapers.length }} · 出题集 {{ qcQuiz.length }}）</span><span class="ep-fold-ic">{{ vaultOpen ? '▾ 收起' : '▸ 展开' }}</span>
-        </div>
-        <div v-if="vaultOpen">
-          <div class="vault-sec">🗂️ 历史卷子（全部保留 · 可查看/重做/导出）</div>
-          <div v-if="!qcPapers.length" class="empty"><div class="empty-i">🗂️</div><div class="empty-t">暂无卷子</div><div class="empty-d">在「模拟组卷」出的卷子会自动存入这里</div></div>
-          <div v-else class="ep-list-scroll">
-            <div v-for="(p, i) in qcPapers" :key="p.id" class="ep-paper">
-              <button class="ep-paper-btn" :title="p.name + ' · ' + (p.questions||[]).length + ' 题'" @click="redoPaper(p)">{{ p.name }} · {{ (p.questions||[]).length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
-              <button class="btn btn-gh" style="padding: 2px 8px; font-size: 11px" @click="exportPaperMd(p)">⬇ 导出</button>
-              <button class="ep-x" @click="delVaultPaper(i)">×</button>
-            </div>
-          </div>
-          <div class="vault-sec">📚 出题集（全部保留 · 可二刷/导出）</div>
-          <div v-if="!qcQuiz.length" class="empty"><div class="empty-i">📚</div><div class="empty-t">暂无出题</div><div class="empty-d">「单题快练」出的题会自动收纳到这里</div></div>
-          <div v-else class="ep-list-scroll">
-            <div v-for="(c, i) in qcQuiz" :key="c.id" class="ep-paper">
-              <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
-              <button class="ep-paper-btn" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + c.stem.slice(0, 80)" @click="redoQuizCol(c)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ c.stem.slice(0, 24) }}…（错{{ c.wrongCount }}）</button>
-              <button class="ep-x" @click="delVaultQuiz(i)">×</button>
-            </div>
-          </div>
-          <button class="btn btn-gh" style="margin-top: 8px" @click="exportQuizMd()">⬇ 导出全部出题集（Markdown）</button>
-        </div>
-      </div>
-
-      <!-- 统计条 -->
-      <div class="wq-stats">
-        <div class="ws2">
-          <span class="ws2-n">{{ stats.t }}</span>
-          <span class="ws2-l">共错题</span>
-        </div>
-        <div class="ws2">
-          <span class="ws2-n g">{{ stats.rev }}</span>
-          <span class="ws2-l">已复盘</span>
-        </div>
-        <div class="ws2">
-          <span class="ws2-n a">{{ stats.pend }}</span>
-          <span class="ws2-l">待复盘</span>
-        </div>
-      </div>
-
-      <!-- 筛选 -->
-      <div class="wq-filters">
-        <select v-model="fSubj">
-          <option value="">全部板块</option>
-          <option v-for="s in subjList" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <select v-model="fRev">
-          <option value="all">全部状态</option>
-          <option value="rev">✅ 已复盘</option>
-          <option value="pend">⏳ 待复盘</option>
-        </select>
-        <select v-model="fReason">
-          <option value="">全部错因</option>
-          <option v-for="r in reasonList" :key="r" :value="r">{{ r }}</option>
-        </select>
-        <button
-          class="btn btn-gh"
-          style="padding: 6px 12px"
-          @click="fSubj = ''; fRev = 'all'; fReason = ''"
-        >
-          重置
-        </button>
-        <button class="btn btn-pri" style="padding: 6px 12px" @click="todayFocus()">🎯 今日优先 5 题</button>
-        <button class="btn btn-gh" style="padding: 6px 12px" @click="openCards()">🎴 抽认卡</button>
-      </div>
-
-      <div class="wl">
-        <div v-if="!store.wqs.length" class="empty">
-          <div class="empty-i">📋</div>
-          <div class="empty-t">暂无错题记录</div>
-          <div class="empty-d">做题时点 AI 回复下的「📌 存错题」即可收纳</div>
-        </div>
-        <div v-else-if="!shown.length" class="empty">
-          <div class="empty-i">🔍</div>
-          <div class="empty-t">没有符合筛选的错题</div>
-          <div class="empty-d">试试调整筛选条件</div>
-        </div>
-        <div v-for="(q, i) in shown" :key="q.id" class="wi" @click="openIdx(i)">
-          <div class="wi-top">
-            <span class="ws">{{ q.subject || '未分类' }}</span>
-            <span class="rv" :class="{ ok: q.reviewed }">{{ q.reviewed ? '✅ 已复盘' : '⏳ 待复盘' }}</span>
-            <span class="ms" :class="{ dig: q.digested }">{{ q.digested ? '✅ 已消化' : '掌握 ' + masteryOf(q) + '%' }}</span>
-          </div>
-          <div v-if="(q.imgs || []).length" class="wq-thumb">
-            <img :src="q.imgs[0]" alt="原题截图" />
-          </div>
-          <div class="wq">{{ q.question }}</div>
-          <div v-if="q.reasons && q.reasons.length" class="wr">
-            <span v-for="r in q.reasons" :key="r">{{ r }}</span>
-          </div>
-          <div class="wt">
-            {{ q.time }} · {{ q.answer ? '答案 ' + q.answer : '未填答案' }}
-            <span v-if="q.method" class="wtm">⚡ {{ q.method }}</span>
-            <span v-if="q.wrongCount && q.wrongCount > 1" class="wtm">错 {{ q.wrongCount }} 次</span>
-            <button class="redo-mini" @click.stop="cur = store.wqs.indexOf(q); openRedo()">✍️ 二刷</button>
-          </div>
-        </div>
-      </div>
+      <WrongVault :ctx="wrongCtx" />
+      <WrongList :ctx="wrongCtx" />
     </div>
-
-    <div class="ov" :class="{ show }" @click.self="show = false">
-      <div class="pnl">
-        <h3>📋 错题详情</h3>
-        <template v-if="cur >= 0 && store.wqs[cur]">
-          <div class="pnl-sub">
-            {{ store.wqs[cur].subject || '未分类' }}
-            <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
-            <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>
-            <span class="wq-goto" @click.self.stop="ankiPush()">🃏 推到 Anki</span>
-          </div>
-          <!-- 原题截图 -->
-          <div v-if="(store.wqs[cur].imgs || []).length" class="wq-imgs">
-            <img
-              v-for="(im, j) in store.wqs[cur].imgs"
-              :key="j"
-              class="wq-img"
-              :src="im"
-              alt="原题截图"
-              @click="viewImg(im)"
-            />
-          </div>
-          <div class="pnl-q">{{ store.wqs[cur].question }}</div>
-
-          <div class="rev-head" @click="rep = !rep">
-            ✍️ {{ rep ? '收起' : '开始结构化复盘' }}
-            <button type="button" class="ai-btn" :disabled="aiBusy" @click.stop="askAiReasons()">
-              {{ aiBusy ? '🤖 分析中…' : '🤖 让小助手归纳错因' }}
-            </button>
-            <span style="float: right">{{ rep ? '▲' : '▼' }}</span>
-          </div>
-          <div v-if="rep" class="rev-body">
-            <div class="fld">
-              <label>正确答案</label>
-              <input v-model="frm.answer" placeholder="如：D / 乙 / 主旨句…" />
-            </div>
-            <div class="fld">
-              <label>错因（按 {{ store.wqs[cur].subject || '板块' }} 预设 · 可多选）</label>
-              <div class="chips">
-                <span
-                  v-for="r in curReasons"
-                  :key="r"
-                  class="chip"
-                  :class="{ on: frm.sel.includes(r) }"
-                  @click="toggleReason(r)"
-                >
-                  {{ r }}
-                </span>
-              </div>
-              <div class="custom-reason">
-                <input
-                  v-model="customReason"
-                  placeholder="自定义错因，如：选项偷换概念 / 陷阱…"
-                  @keydown.enter.prevent="addCustomReason()"
-                />
-                <button type="button" class="btn btn-gh" @click="addCustomReason()">➕ 添加</button>
-              </div>
-            </div>
-            <div class="fld">
-              <label>⚡ 秒杀规律（一句话）</label>
-              <input v-model="frm.method" placeholder="下次看到这类题先想…" />
-            </div>
-            <div class="fld">
-              <label>📝 个人笔记/解析</label>
-              <textarea v-model="frm.note" rows="3" placeholder="记录命题人坑点、同类题联想…"></textarea>
-            </div>
-            <div class="pnl-btns"><button class="btn btn-pri" @click="save()">💾 保存复盘</button></div>
-          </div>
-          <div v-if="!rep && (store.wqs[cur].answer || store.wqs[cur].method || store.wqs[cur].note)" class="rev-view">
-            <div class="rv-item">✅ 答案：{{ store.wqs[cur].answer }}</div>
-            <div class="rv-item">⚡ 秒杀：{{ store.wqs[cur].method }}</div>
-            <div class="rv-item">📝 {{ store.wqs[cur].note }}</div>
-          </div>
-
-</template>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="show = false">关闭</button>
-          <button class="btn btn-gh" @click="del()">🗑 删除</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- 原题截图全屏预览 -->
-  <div v-if="imgView" class="img-view" @click.self="closeImg()">
-    <img :src="imgView" class="iv-img" />
-    <div class="iv-bar">
-      <button type="button" class="iv-btn" @click.stop.prevent="downloadImg()">💾 保存原图</button>
-      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeImg()">✕ 关闭</button>
-    </div>
-  </div>
-  <!-- 二刷重做（支持直接点选项作答） -->
-  <div v-if="redo && cur >= 0 && store.wqs[cur]" class="ov redo-ov show">
-    <div class="pnl redo-pnl">
-      <h3>✍️ {{ (redoQ.redoHistory || []).length ? '三刷' : '二刷' }}重做 <span class="redo-timer">⏱ {{ fmtT(redoT) }}</span></h3>
-      <div class="redo-subj">{{ store.wqs[cur].subject || '未分类' }}</div>
-      <div class="redo-q">{{ store.wqs[cur].question }}</div>
-      <div v-if="(store.wqs[cur].imgs || []).length" class="wq-imgs">
-        <img v-for="(im, j) in store.wqs[cur].imgs" :key="j" class="wq-img" :src="im" />
-      </div>
-      <div v-if="!redoResult" class="redo-ask">
-        <div class="redo-hint">{{ redoHasChoice ? '直接点击选项提交作答' : '先不看答案自己再解一遍（计时中）' }}</div>
-        <div v-if="redoHasChoice" class="quiz-opts">
-          <button
-            v-for="o in redoChoices"
-            :key="o.k"
-            class="quiz-opt"
-            :class="{ picked: redoPick === o.k, right: redoPick === o.k && o.k === redoAnswer, wrong: redoPick === o.k && o.k !== redoAnswer }"
-            @click="submitByChoice(o.k)"
-          >
-            <span class="qk">{{ o.k }}</span><span class="qt">{{ o.t }}</span>
-          </button>
-        </div>
-        <div v-else class="redo-btns">
-          <button class="btn btn-pri" @click="submitRedo(true)">✅ 我答对了</button>
-          <button class="btn btn-gh" @click="submitRedo(false)">❌ 还是错了</button>
-        </div>
-      </div>
-      <div v-else class="redo-result" :class="redoResult">
-        <div class="rr-t">{{ redoResult === 'ok' ? '🎉 这次答对了！' : '😥 这次答错了' }}</div>
-        <div v-if="redoHasChoice" class="rr-line">
-          你选了 {{ redoPick }} · 正确答案 {{ redoAnswer }}
-          <span class="rr-badge" :class="redoResult">{{ redoResult === 'ok' ? '✓ 正确' : '✗ 错误' }}</span>
-        </div>
-        <div v-if="redoFeedback(store.wqs[cur])" class="rr-fb" :class="redoResult">{{ redoFeedback(store.wqs[cur]) }}</div>
-        <div class="rr-line">正确答案：{{ store.wqs[cur].answer || '（未填）' }}</div>
-        <div v-if="store.wqs[cur].method" class="rr-line">⚡ 秒杀：{{ store.wqs[cur].method }}</div>
-        <div class="rr-line">当前掌握 {{ masteryOf(store.wqs[cur]) }}% · 连续答对 {{ store.wqs[cur].correctStreak || 0 }} 次 · 累计错 {{ store.wqs[cur].wrongCount || 1 }} 次</div>
-        <div v-if="redoHistory.length" class="rr-hist">
-          历次二刷：
-          <span v-for="(h, i) in redoHistory" :key="i" class="rr-h" :class="h.ok ? 'ok' : 'no'">{{ h.ok ? '✓' : '✗' }}</span>
-          （{{ redoHistory.filter((h) => h.ok).length }} 对 {{ redoHistory.filter((h) => !h.ok).length }} 错）
-        </div>
-        <div v-if="store.wqs[cur].digested" class="rr-dig">✅ 已连续答对 2 次，标记为「已消化」</div>
-      </div>
-      <div class="pnl-btns">
-        <button class="btn btn-gh" @click="closeRedo()">关闭</button>
-        <button v-if="redoResult" class="btn btn-gh" @click="show = true; closeRedo()">📝 去复盘</button>
-      </div>
-    </div>
-  </div>
-  <!-- 今日优先 5 题 -->
-  <div v-if="focusShow" class="ov show" @click.self="focusShow = false">
-    <div class="pnl">
-      <h3>🎯 今日优先复习（按 错次×3 + 久未二刷 + 未复盘 排序）</h3>
-      <div v-if="!focusList.length" class="empty-t">暂无错题</div>
-      <div v-for="(q, i) in focusList" :key="q.id" class="focus-item">
-        <span class="fi-idx">{{ i + 1 }}</span>
-        <div class="fi-body">
-          <div class="fi-subj">{{ q.subject || '未分类' }} · 错 {{ q.wrongCount || 1 }} 次 · 掌握 {{ masteryOf(q) }}%</div>
-          <div class="fi-q">{{ q.question }}</div>
-        </div>
-        <button class="btn btn-gh" @click="focusRedo(q)">✍️ 二刷</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 错题抽认卡（闪卡轮播） -->
-  <div v-if="cardShow" class="ov show" @click.self="cardShow = false">
-    <div class="pnl card-pnl">
-      <h3>🎴 错题抽认卡 <span class="card-prog">{{ cardIdx + 1 }} / {{ cardQueue.length }}</span></h3>
-      <template v-if="cardQueue[cardIdx]">
-        <div class="card-front">
-          <div class="redo-subj">{{ cardQueue[cardIdx].subject || '未分类' }}</div>
-          <div class="redo-q">{{ cardQueue[cardIdx].question }}</div>
-          <div v-if="(cardQueue[cardIdx].imgs || []).length" class="wq-imgs">
-            <img v-for="(im, j) in cardQueue[cardIdx].imgs" :key="j" class="wq-img" :src="im" />
-          </div>
-        </div>
-        <div v-if="cardFlip" class="card-back">
-          <div class="rr-line">✅ 答案：{{ cardQueue[cardIdx].answer || '未填' }}</div>
-          <div v-if="cardQueue[cardIdx].method" class="rr-line">⚡ 秒杀：{{ cardQueue[cardIdx].method }}</div>
-          <div v-if="(cardQueue[cardIdx].reasons || []).length" class="rr-line">🔍 错因：{{ cardQueue[cardIdx].reasons.join('、') }}</div>
-          <div v-if="cardQueue[cardIdx].note" class="rr-line">📝 笔记：{{ cardQueue[cardIdx].note }}</div>
-        </div>
-      </template>
-      <div class="pnl-btns">
-        <button class="btn btn-gh" @click="cardShow = false">关闭</button>
-        <button v-if="!cardFlip" class="btn btn-pri" @click="cardFlip = true">👁 翻答案</button>
-        <template v-if="cardFlip">
-          <button class="btn btn-gh" @click="cardMark(false)">❌ 没记住</button>
-          <button class="btn btn-pri" @click="cardMark(true)">✅ 记住了</button>
-        </template>
-      </div>
-    </div>
+    <WrongDetail :ctx="wrongCtx" />
+    <WrongRedo :ctx="wrongCtx" />
+    <WrongFocus :ctx="wrongCtx" />
+    <WrongCards :ctx="wrongCtx" />
+    <WrongReason :ctx="wrongCtx" />
   </div>
 </template>

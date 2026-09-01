@@ -1,0 +1,436 @@
+<script setup>
+// R3-③d：配置区子组件（从 ExamPanel.vue 的 config 阶段模板逐字搬入）
+// 父组件通过 ctx 注入全部依赖；模板保持与 ExamPanel 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
+import { ref, watch, toRefs } from 'vue'
+import { zhentiTypes } from '../data/zhenti'
+
+const props = defineProps({ ctx: { type: Object, required: true } })
+
+// 状态 ref / 计算属性（双向 / 只读）
+const {
+  srcMode, sheetMode, templateId, modules, perQ, fastGenModel, useFigGen, aiCap, genConcur,
+  mixMode, paperDir, paperDirText, paperYtN, paperYtNGroup, difficulty, singleGroup, singlePlate,
+  singleVariant, singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType,
+  autoNext, imgs, textFiles, qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit,
+  onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx,
+  selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates
+} = toRefs(props.ctx)
+
+// 常量 / 方法（函数与数组不被 reactive 解包，保持原引用）
+const {
+  TEMPLATES, SUBJECTS, SIX_GROUPS, zhentiSecs, store,
+  onTemplate, templateTotal, moduleRefSec, rmRow, addRow, saveFastGenModel, saveCfg,
+  onSingleGroup, onSinglePlate, setDirText, toggleZhentiPlate, toggleWrongSel, toggleFold,
+  openPaper, delPaper, startRedo, delQuizCol, clearQuizCol, onFiles, rmImg, rmTxt, fmt, cancel, start
+} = props.ctx
+
+// 真题题型分布（B4：规则打标 sidecar，零成本）
+const zhentiTy = ref(null)
+watch(srcMode, async (v) => {
+  if (v === 'zhenti' && !zhentiTy.value) {
+    zhentiTy.value = await zhentiTypes().catch(() => null)
+  }
+}, { immediate: true })
+</script>
+
+<template>
+  <div class="pp-config">
+    <div class="ep-src-row">
+      <button class="fp-b" :class="{ on: srcMode === 'single' }" @click="srcMode = 'single'">⚡ 单题快练</button>
+      <button class="fp-b" :class="{ on: srcMode === 'ai' }" @click="srcMode = 'ai'">🎲 AI 整卷出题</button>
+      <button class="fp-b" :class="{ on: srcMode === 'import' }" @click="srcMode = 'import'">📂 导入材料</button>
+      <button class="fp-b" :class="{ on: srcMode === 'wrong' }" @click="srcMode = 'wrong'">📚 错题集组卷</button>
+      <button class="fp-b" :class="{ on: srcMode === 'zhenti' }" @click="srcMode = 'zhenti'">📋 真题快练</button>
+      <button class="fp-b" :class="{ on: srcMode === 'morning' }" @click="srcMode = 'morning'">🌅 晨练包</button>
+      <button class="fp-b" :class="{ on: srcMode === 'weekRedo' }" @click="srcMode = 'weekRedo'">📅 每周重做</button>
+    </div>
+    <div v-if="srcMode === 'morning'" class="ep-note">🌅 每日晨练包：资料速算 5 题（真题材料）+ 常识速测 5 题 + 错题本未复盘 5 题（二刷），一键生成 15 题组合卷。</div>
+
+    <div class="ep-param" style="margin: 10px 0 2px">
+      <label>
+        <input v-model="sheetMode" type="checkbox" />
+        📋 仿真考试答题卡模式（填涂姓名/考场/准考证号 + 2B铅笔逐题填涂，交卷后统一看答案与解析）
+      </label>
+      <span class="ep-hint">关闭 = 恢复「答完即时看对错 + 萌宠错因分析」原体验（单题快练更轻快）；开启 = 先答卷再交卷，仿真真实考试</span>
+    </div>
+
+    <div v-if="srcMode === 'ai'" class="ep-block">
+      <div class="ep-block-hd">📐 卷面构成（国考/省考模板，均可自由编辑）</div>
+      <div class="ep-note">💡 全真模考：按国考/省考模板题量与时限整卷组题，考点/题型自动轮换，出完直接开考计时。</div>
+      <div class="ep-tmpl-row">
+        <select v-model="templateId" class="tb-sel" @change="onTemplate()">
+          <option v-for="t in TEMPLATES" :key="t.id" :value="t.id">{{ t.name }} · {{ templateTotal(t) }}题 / {{ t.mins }}分钟</option>
+        </select>
+        <button class="btn btn-gh" @click="onTemplate()">↻ 载入模板</button>
+      </div>
+      <div v-if="selTmpl.tag" class="ep-note">🏷️ {{ selTmpl.tag }}</div>
+      <div v-if="selTmpl.note" class="ep-note">💡 {{ selTmpl.note }}</div>
+      <div v-if="tmplJudgeNote" class="ep-note">🧩 判断推理子板块：{{ tmplJudgeNote }}（国考判断推理常为 4 子板块各 10 题）</div>
+      <div v-if="judgeSplitHint" class="ep-note">{{ judgeSplitHint }}</div>
+
+      <div class="ep-mods">
+        <div class="ep-mod-row hd"><span>板块</span><span>题数</span><span>参考时限(分)</span><span class="ep-perq">每题约</span><span></span></div>
+        <div v-for="(m, i) in modules" :key="i" class="ep-mod-row">
+          <select v-model="m.subject" class="tb-sel">
+            <option v-for="s in SUBJECTS" :key="s" :value="s">{{ s }}</option>
+          </select>
+          <input v-model.number="m.count" type="number" min="1" max="80" class="ep-inp" />
+          <input v-model.number="m.refMin" type="number" min="1" max="120" class="ep-inp" />
+          <span class="ep-perq">{{ moduleRefSec(m) }}s</span>
+          <button class="ep-x" @click="rmRow(i)">×</button>
+        </div>
+      </div>
+      <div class="ep-mod-actions">
+        <button class="btn btn-gh" @click="addRow()">➕ 加板块</button>
+        <span class="ep-total">合计 <b>{{ totalQ }}</b> 题 · 参考 <b>{{ refTotal }}</b> 分钟<template v-if="selTmpl.mins">（官方 {{ selTmpl.mins }} 分钟）</template></span>
+      </div>
+    </div>
+
+    <div class="ep-block">
+      <div class="ep-block-hd">⚙️ 出卷参数</div>
+      <div class="ep-param">
+        <label>每题限时</label>
+        <select v-model="perQ" class="tb-sel">
+          <option :value="30">30 秒</option><option :value="45">45 秒</option>
+          <option :value="60">60 秒（推荐，≤1分钟）</option>
+          <option :value="75">75 秒</option><option :value="90">90 秒</option>
+        </select>
+        <span class="ep-hint">整卷倒计时 = 题数 × 每题限时</span>
+      </div>
+      <div class="ep-param">
+        <label>出题快模型（提速）</label>
+        <input v-model="fastGenModel" class="pv-edit" style="margin-top: 6px" placeholder="留空=跟随文字模型；填 deepseek-chat 等非思考模型名，出题/预生成用它，比思考模型(v4-flash)快很多（需与文字模型同一服务商/Key）" @change="saveFastGenModel()" />
+        <span class="ep-hint">为什么：v4-flash 是思考模型，每次出题先想一大段再作答；deepseek-chat 直接作答。出题用快的、对话/解析用质量高的。</span>
+      </div>
+      <div class="ep-param">
+        <label><input v-model="useFigGen" type="checkbox" /> 🚀 出题用智谱快模型（图形增强里配置的 GLM）</label>
+        <span class="ep-hint">出题/预生成/解析/质检都用智谱 GLM（非思考、快）；智谱 Key 在「设置 → 图形增强」里填。此项优先于「出题快模型」。</span>
+      </div>
+      <div v-if="srcMode === 'ai'" class="ep-param">
+        <label>每板块题量</label>
+        <select v-model="aiCap" class="tb-sel">
+          <option :value="0">全量（严格按卷面模板题量）</option>
+          <option :value="3">抽样 3 题/板块（快测）</option>
+          <option :value="5">抽样 5 题/板块</option>
+          <option :value="10">抽样 10 题/板块</option>
+        </select>
+        <span class="ep-hint">全量=按所选国考/省考模板题量出题（如国考副省 135 题）；抽样用于快速体验，题量与模板不符</span>
+      </div>
+      <div v-if="srcMode === 'ai'" class="ep-param">
+        <label>出卷并发度</label>
+        <select v-model="genConcur" class="tb-sel">
+          <option :value="2">2 路并发（稳妥）</option>
+          <option :value="3">3 路并发（推荐）</option>
+          <option :value="4">4 路并发（最快，需 API 支持）</option>
+        </select>
+        <span class="ep-hint">并发出题请求数，越高整卷出得越快；若模型 API 频繁报限流/超时，请调低</span>
+      </div>
+      <div v-if="srcMode !== 'single'" class="ep-param">
+        <label>出卷顺序</label>
+        <select v-model="mixMode" class="tb-sel">
+          <option value="module">按板块顺序（贴近真实卷）</option>
+          <option value="mix">混合打乱</option>
+        </select>
+      </div>
+      <div v-if="srcMode === 'ai'" class="ep-param">
+        <label>问法（整卷统一）</label>
+        <select v-model="paperDir" class="tb-sel">
+          <option value="auto">AI 随机（是/非 自由）</option>
+          <option value="is">选是题（正确的是/属于/能推出）</option>
+          <option value="not">选非题（错误的是/不属于/不能推出）</option>
+          <option value="custom">自定义问法</option>
+        </select>
+        <input v-if="paperDir === 'custom'" v-model="paperDirText" class="pv-edit" style="margin-top: 6px" placeholder="输入整卷统一问法，如：最能削弱上述结论？" />
+        <span class="ep-hint">整卷每题按此问法出题；auto=AI 自由随机 是/非；自定义问法全卷统一</span>
+      </div>
+      <div v-if="srcMode === 'ai'" class="ep-param">
+        <label>一拖N 分析推理组（逻辑判断）</label>
+        <select v-model="paperYtNGroup" class="tb-sel">
+          <option :value="0">不加入（默认）</option>
+          <option :value="1">1 组</option>
+          <option :value="2">2 组</option>
+        </select>
+        <label style="margin-top: 6px">每组题数</label>
+        <select v-model="paperYtN" class="tb-sel">
+          <option :value="2">一拖2（江苏考情）</option>
+          <option :value="3">一拖3</option>
+          <option :value="4">一拖4</option>
+          <option :value="5">一拖5（国考地市/执法）</option>
+        </select>
+        <span class="ep-hint">一拖N = 1 个共用题干 + N 个分析推理小题（属分析推理综合推演，独立于削弱/加强等题型）；小题可在不违背总题干逻辑的前提下新增附加条件</span>
+      </div>
+      <div class="ep-param">
+        <label>出题难度</label>
+        <select v-model="difficulty" class="tb-sel">
+          <option value="curve">智能曲线（前易后难，30%易/50%中/20%难）</option>
+          <option value="easy">易（单一考点，直接对应）</option>
+          <option value="mid">中（一处拐弯/一个陷阱）</option>
+          <option value="hard">难（复合考点+强干扰）</option>
+          <option value="real">真题级（反套路·强干扰·陷阱叠加）</option>
+        </select>
+        <span class="ep-hint">已接入「命题专家」规范：考点先行·干扰项错因·唯一解自检</span>
+      </div>
+      <div class="ep-param">
+        <label>
+          <input v-model="store.cfg.strictGen" type="checkbox" @change="saveCfg()" />
+          出题严格质检（生成后二次验证 唯一解/恰一正确/无逻辑谬误，更稳但略慢）
+        </label>
+      </div>
+    </div>
+
+    <div v-if="srcMode === 'single'" class="ep-block">
+      <div class="ep-block-hd">⚡ 单题快练</div>
+      <div class="ep-note">💡 专项速刷 · 五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量，碎片时间快速突破。</div>
+      <div class="ep-param">
+        <label>① 六大板块</label>
+        <select v-model="singleGroup" class="tb-sel" @change="onSingleGroup()">
+          <option v-for="g in SIX_GROUPS" :key="g.key" :value="g.key">{{ g.key }}</option>
+        </select>
+      </div>
+      <div class="ep-param">
+        <label>② 细分板块</label>
+        <select v-model="singlePlate" class="tb-sel" @change="onSinglePlate()">
+          <option v-for="s in singlePlates" :key="s" :value="s">{{ s }}</option>
+        </select>
+      </div>
+      <div class="ep-param">
+        <label>③ 题型</label>
+        <select v-model="singleVariant" class="tb-sel">
+          <option value="不限">不限（自动轮换）</option>
+          <option v-for="v in singleVars" :key="v" :value="v">{{ v }}</option>
+        </select>
+        <span class="ep-hint">该细分板块下的子题型，由对应「子命题人」精准出题</span>
+      </div>
+      <div class="ep-param">
+        <label>④ 问法</label>
+        <select v-model="singleDir" class="tb-sel">
+          <option value="auto">AI 自由随机（是/非）</option>
+          <option value="is">选是题（正确的是 / 属于 / 能推出）</option>
+          <option value="not">选非题（错误的是 / 不属于 / 不能推出）</option>
+          <option value="custom">自定义问法</option>
+        </select>
+        <input v-if="singleDir === 'custom'" v-model="singleDirText" class="pv-edit" style="margin-top: 6px" placeholder="输入自定义问法，如：最能削弱上述结论？" />
+        <div v-if="dirLib.length" class="ep-chips" style="margin-top: 6px">
+          <button v-for="dir in dirLib" :key="dir" class="fp-b" @click="setDirText(dir)">{{ dir }}</button>
+        </div>
+        <span class="ep-hint">不同板块题干可自由问法（如判断推理：最能削弱 / 最不能 / 前提假设…），点上面快捷问法或自定义</span>
+      </div>
+      <div class="ep-param">
+        <label>⑤ 组量</label>
+        <select v-model="singleBatch" class="tb-sel">
+          <option :value="1">1 题（单题）</option>
+          <template v-if="singlePlate === '资料分析'">
+            <option :value="5">5 题（1篇材料·真题5题组）</option>
+            <option :value="10">10 题（2篇材料）</option>
+            <option :value="15">15 题（3篇材料）</option>
+            <option :value="20">20 题（4篇材料）</option>
+          </template>
+          <template v-else>
+            <option :value="5">5 题一组</option>
+            <option :value="10">10 题一组</option>
+            <option :value="15">15 题一组</option>
+            <option :value="20">20 题一组</option>
+          </template>
+        </select>
+        <span class="ep-hint">{{ singlePlate === '资料分析' ? '资料分析真题模式：一篇完整材料配5题（第5题为综合分析），可自定义材料形式；选 1 题则出单题' : '组内逐题作答，做完自动批改，可「再来一组」' }}</span>
+      </div>
+      <div v-if="singlePlate === '图形推理'" class="ep-param">
+        <label>⑥ 出题形式</label>
+        <select v-model="tutuFormat" class="tb-sel">
+          <option value="auto">不限（自动轮换）</option>
+          <option value="一组图">一组图（5图+问号）</option>
+          <option value="两组图">两组图（类比式）</option>
+          <option value="九宫格">九宫格（3×3）</option>
+          <option value="分组分类">分组分类（6图）</option>
+        </select>
+        <span class="ep-hint">固定某种图推出题形式；「不限」= 一组图/两组图/九宫格/分组分类 自动轮换</span>
+
+        <div class="ep-param">
+          <label>⑦ 出题方式</label>
+          <div class="ep-chips">
+            <button class="fp-b" :class="{ on: !singleLocal }" @click="singleLocal = false">🤖 AI 出题（丰富多变）</button>
+            <button class="fp-b" :class="{ on: singleLocal }" @click="singleLocal = true">🎲 本地真题生成（零额度）</button>
+          </div>
+          <span class="ep-hint">本地 = 黑白块/汉字/字母/旋转/数量/对称/叠加/分组等真题高频规律，确定性且永不裁切；AI 出题失败也会自动回退本地</span>
+        </div>
+      </div>
+      <div v-if="singlePlate === '资料分析'" class="ep-param">
+        <label>⑥ 材料类型（真题：一篇材料配5题）</label>
+        <select v-model="singleMatType" class="tb-sel">
+          <option value="auto">随机轮换（文字/表格/图形/综合）</option>
+          <option value="text">纯文字材料</option>
+          <option value="table">表格材料</option>
+          <option value="chart">图形材料（柱状/折线/饼图）</option>
+          <option value="mixed">综合混合（文字+表格+图形）</option>
+        </select>
+        <span class="ep-hint">组量选 5/10/15/20 时按真题模式出「完整材料 + 每5题一组」（第5题为综合分析题）；选 1 题则出单题。材料会尽量绘制成 SVG 表格/图表。</span>
+      </div>
+      <div class="ep-param">
+        <label>
+          <input v-model="autoNext" type="checkbox" />
+          填涂后自动下一题（答题卡模式；交卷前可改涂，连刷更流畅）
+        </label>
+      </div>
+    </div>
+
+    <div v-if="srcMode === 'import'" class="ep-block">
+      <div class="ep-block-hd">📂 题目材料（图片 / PDF / Word / txt / tex）</div>
+      <div class="ep-src-row" style="margin-top: 0">
+        <label class="btn btn-pri" style="cursor: pointer; text-align: center; margin: 0">
+          📁 添加题目材料（可多选）
+          <input type="file" accept="image/*,.pdf,.docx,.txt,.tex,.md,.markdown" multiple style="display: none" @change="onFiles" />
+        </label>
+        <button v-if="imgs.length || textFiles.length" class="btn btn-gh" @click="imgs = []; textFiles = []">🧹 清空材料</button>
+      </div>
+      <div v-if="imgs.length || textFiles.length" class="ep-note" style="color: var(--hud-cyan)">已添加：图片 {{ imgs.length }} 张 · 文本 {{ textFiles.length }} 份</div>
+      <div class="ep-param" style="margin-top: 8px">
+        <label>识别后题量上限</label>
+        <select v-model="qLimit" class="tb-sel">
+          <option :value="0">不限（按卷面裁剪）</option>
+          <option :value="10">10 题</option>
+          <option :value="20">20 题</option>
+          <option :value="50">50 题</option>
+        </select>
+        <span class="ep-hint">AI 识别整理后先按「📐 卷面构成」裁剪，再按此上限取题（整卷出题里可调整卷面）</span>
+      </div>
+      <div style="font-size: 11px; color: var(--text3); margin-top: 4px">💡 本地试卷数字化：图片/PDF/Word/txt/tex 上传 → AI 统一整理成题 → 按卷面裁剪组卷作答</div>
+      <div v-if="imgs.length" class="pp-imgs">
+        <div v-for="(im, i) in imgs" :key="'i' + i" class="pp-thumb"><img :src="im" /><button class="pp-x" @click="rmImg(i)">×</button></div>
+      </div>
+      <div v-if="textFiles.length" class="pp-txts">
+        <div v-for="(t, i) in textFiles" :key="'t' + i" class="pp-txt-item"><span>📄 {{ t.name }}（{{ t.text.length }} 字）</span><button class="pp-x" @click="rmTxt(i)">×</button></div>
+      </div>
+    </div>
+
+    <div v-if="srcMode === 'zhenti'" class="ep-block">
+      <div class="ep-block-hd">📋 真题快练</div>
+      <div class="ep-note">💡 真题库首批：国考2017-2026+贵州卷 <b>28套 {{ zhentiIdx?.papers?.reduce((n, p) => n + p.totalQ, 0) || 3583 }}题</b>（网友回忆版）。<b style="color:var(--hud-amber,#fbbf24)">当前收录不全</b>——省考专项/资料分析图表题等持续补充。真题多数无官方答案，作答后由AI判题并给解析。</div>
+      <div class="ep-param">
+        <label>选择真题卷（{{ zhentiIdx ? (zhentiIdx.papers?.length || 0) + ' 卷' : '加载中…' }}）</label>
+        <select v-model="zhentiSel" class="tb-sel">
+          <option value="">— 选择年份卷 —</option>
+          <option v-for="p in (zhentiIdx?.papers || [])" :key="p.id" :value="p.id">{{ p.title }}（{{ p.totalQ }}题）</option>
+        </select>
+      </div>
+      <div class="ep-param">
+        <label>板块选择（不选 = 全部板块）</label>
+        <div class="ep-chips">
+          <button class="fp-b" :class="{ on: !zhentiPlates.length }" @click="zhentiPlates = []">✅ 全部</button>
+          <button v-for="sp in zhentiSecs" :key="sp" class="fp-b" :class="{ on: zhentiPlates.includes(sp) }" @click="toggleZhentiPlate(sp)">{{ sp }}</button>
+        </div>
+      </div>
+      <div class="ep-param">
+        <label>练习题量</label>
+        <select v-model="zhentiLimit" class="tb-sel">
+          <option :value="0">全部</option>
+          <option :value="10">10 题</option>
+          <option :value="20">20 题</option>
+          <option :value="40">40 题</option>
+        </select>
+      </div>
+      <details class="ep-param" style="margin-top:8px">
+        <summary style="cursor:pointer">🧭 真题题型分布（规则打标 · {{ zhentiTy ? Object.values(zhentiTy.summary).reduce((a, m) => a + Object.values(m).reduce((x, y) => x + y, 0), 0) : '…' }}题）</summary>
+        <div v-if="zhentiTy" style="margin-top:6px">
+          <div v-for="(m, sec) in zhentiTy.summary" :key="sec" style="margin-bottom:6px">
+            <div style="font-size:12px;color:var(--text3);margin-bottom:2px">{{ sec }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">
+              <span v-for="(n, t) in m" :key="t" class="zt-dist-it">{{ t }} {{ n }}</span>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div v-if="srcMode === 'wrong'" class="ep-block">
+      <div class="ep-block-hd">📚 错题集组卷</div>
+      <div class="ep-note">💡 错题复盘卷：从<b>应用内错题本</b>组卷（作答后不会重复入库），可只刷未复盘的、先刷错得多的，做完自动判分。</div>
+      <div class="ep-note" style="color: var(--hud-cyan)">需要导入本地错题文件（错题截图 / 错题 PDF / 新题）？→ 用「📂 导入材料」→ 识别预览 →「📌 全部存入错题本」→ 再回此处组卷二刷。</div>
+      <div class="ep-param">
+        <label>板块选择（可多选 / 全选，自由组合）</label>
+        <div class="ep-chips">
+          <button class="fp-b" :class="{ on: !wrongSel.length }" @click="wrongSel = []">✅ 全部</button>
+          <button v-for="p in wrongPlates" :key="p" class="fp-b" :class="{ on: wrongSel.includes(p) }" @click="toggleWrongSel(p)">{{ p }}</button>
+        </div>
+        <span class="ep-hint">选一个或多个板块自由组合组卷，不选 = 全部板块</span>
+      </div>
+      <div class="ep-param">
+        <label>组卷题量</label>
+        <select v-model="wrongLimit" class="tb-sel">
+          <option :value="0">全部（按板块裁剪）</option>
+          <option :value="5">5 题</option>
+          <option :value="10">10 题</option>
+          <option :value="20">20 题</option>
+          <option :value="30">30 题</option>
+        </select>
+        <span class="ep-hint">先按卷面板块匹配裁剪，再按此上限取题</span>
+      </div>
+      <div class="ep-param">
+        <label>
+          <input v-model="onlyPend" type="checkbox" />
+          只看未复盘错题（优先攻克待复盘）
+        </label>
+      </div>
+      <div class="ep-param">
+        <label>
+          <input v-model="byWrongCount" type="checkbox" />
+          按错次优先排序（错得越多越靠前）
+        </label>
+      </div>
+      <div class="ep-note">当前错题本：共 <b>{{ store.wqs.length }}</b> 题 · 已复盘 <b>{{ store.wqs.filter((q) => q.reviewed || q.digested).length }}</b> 题</div>
+    </div>
+
+    <div v-if="papers.length" class="ep-block">
+      <div class="ep-block-hd ep-fold-hd" @click="toggleFold('papers')">
+        <span>🗂️ 历史卷子（{{ papers.length }}）</span><span class="ep-fold-ic">{{ openPapers ? '▾ 收起' : '▸ 展开' }}</span>
+      </div>
+      <div v-if="openPapers" class="ep-list-scroll">
+        <div v-for="(p, i) in papers" :key="p.id" class="ep-paper">
+          <button class="ep-paper-btn" @click="openPaper(p)">{{ p.name }} · {{ p.questions.length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
+          <button class="ep-x" @click="delPaper(i)">×</button>
+        </div>
+        <div class="ep-note">共 {{ papers.length }} 卷（全部保留，可滚动查看）</div>
+      </div>
+    </div>
+
+    <div v-if="quizCol.length" class="ep-block">
+      <div class="ep-block-hd ep-fold-hd" @click="toggleFold('quizcol')">
+        <span>📚 出题集（{{ quizCol.length }}）</span><span class="ep-fold-ic">{{ openQuizCol ? '▾ 收起' : '▸ 展开' }}</span>
+      </div>
+      <div v-if="openQuizCol">
+        <div class="ep-note">单题快练/出题自动收纳，支持二刷：先做题 → 点选项 → 再显示答案与解析</div>
+        <div class="ep-list-scroll">
+          <div v-for="(c, i) in quizCol" :key="c.id" class="ep-paper">
+            <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
+            <button class="ep-paper-btn" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + (c.stem || '').slice(0, 80) + '（累计错' + c.wrongCount + '次 · 连对' + c.correctStreak + '）'" @click="startRedo(c)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ (c.stem || '').slice(0, 22) }}…</button>
+            <button class="ep-x" @click="delQuizCol(i)">×</button>
+          </div>
+        </div>
+        <div class="ep-note">共 {{ quizCol.length }} 题（全部保留，可滚动查看）</div>
+        <button class="btn btn-gh" style="margin-top: 6px" @click="clearQuizCol()">🗑 清空出题集</button>
+      </div>
+    </div>
+
+    <div v-if="results.length" class="ep-block">
+      <div class="ep-block-hd ep-fold-hd" @click="toggleFold('results')">
+        <span>🏅 考试战绩（{{ results.length }}）</span><span class="ep-fold-ic">{{ openResults ? '▾ 收起' : '▸ 展开' }}</span>
+      </div>
+      <div v-if="openResults">
+        <div class="ep-stats">平均正确率 <b>{{ avgRate }}%</b> · 已完成 <b>{{ results.length }}</b> 卷</div>
+        <div class="ep-list-scroll">
+          <div v-for="(r, i) in results" :key="i" class="pp-item">
+            <div class="pp-info"><div class="pp-name">{{ r.name }}</div><div class="pp-meta">{{ r.n }} 题 · {{ new Date(r.ts).toLocaleString() }}</div></div>
+            <span class="pp-score" :class="r.rate >= 80 ? 'ok' : r.rate >= 60 ? 'mid' : 'no'">{{ r.score }}/{{ r.n }} · {{ r.rate }}%</span>
+            <span class="pp-meta">⏱ {{ fmt(r.sec) }}</span>
+          </div>
+        </div>
+        <div class="ep-note">共 {{ results.length }} 次（全部保留，可滚动查看）</div>
+      </div>
+    </div>
+
+    <div class="pnl-btns">
+      <button class="btn btn-gh" @click="cancel()">取消</button>
+      <button class="btn btn-pri" @click="start()">
+        🚀 {{ srcMode === 'single' ? '开始单题快练' : srcMode === 'ai' ? '开始考试（AI 出题）' : srcMode === 'import' ? '识别并组卷' : '错题组卷开始' }}
+      </button>
+    </div>
+  </div>
+</template>

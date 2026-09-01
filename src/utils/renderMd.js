@@ -2,6 +2,13 @@
 import katex from 'katex'
 import { marked } from 'marked'
 import { normalizeSvg } from './svgFix'
+import DOMPurify from 'dompurify'
+import { sanitizeSvg } from '../api/figEnhance'
+// DOMPurify：浏览器下自动取实例；Node/测试无 window 时降级（不影响 SVG 归一化与渲染本身）
+let purify = null
+try {
+  purify = typeof DOMPurify.sanitize === 'function' ? DOMPurify : (typeof DOMPurify === 'function' ? DOMPurify(globalThis.window || undefined) : null)
+} catch (e) { purify = null }
 
 function katexHtml(src, display) {
   try {
@@ -60,8 +67,8 @@ export function renderMd(t) {
   // SVG 图形块：```svg ... ``` → 渲染为内联 <svg>（图形推理/几何/统计图展示）
   html = html.replace(/<pre><code class="language-svg">([\s\S]*?)<\/code><\/pre>/g, (m, inner) => {
     let svg = inner.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*"[^"]*"/gi, '').replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-    if (!/<svg[\s\S]*?<\/svg>/i.test(svg)) return ''
+    svg = sanitizeSvg(svg) // 对齐 figEnhance 白名单净化（剥 script/foreignObject/image/style/on* /危险URL）
+    if (!svg) return ''
     svg = svg.replace(/<svg[\s\S]*?<\/svg>/gi, (blk) => normalizeSvg(blk)) // 零裁切：补 viewBox / 按内容自适应画布边界
     return '<div class="gen-svg">' + svg + '</div>'
   })
@@ -80,5 +87,14 @@ export function renderMd(t) {
   // 裸符号兜底：\times → × 等（未进公式、直接写在正文里的命令）
   const TEX_SYM = { '\\times': '×', '\\div': '÷', '\\approx': '≈', '\\leq': '≤', '\\geq': '≥', '\\neq': '≠', '\\pm': '±', '\\cdot': '·', '\\rightarrow': '→', '\\Rightarrow': '⇒', '\\infty': '∞', '\\le': '≤', '\\ge': '≥', '\\ne': '≠', '\\%': '%', '\\ ' : ' ' }
   html = html.replace(/\\times|\\div|\\approx|\\leq|\\geq|\\neq|\\pm|\\cdot|\\rightarrow|\\Rightarrow|\\infty|\\le|\\ge|\\ne|\\%/g, (m) => TEX_SYM[m] || m)
+  // 安全加固（批次3.1）：整体 DOMPurify 白名单净化——剥 script/iframe/object/embed/link/meta/style 与 on* / javascript: 注入
+  if (purify && typeof purify.sanitize === 'function') html = purify.sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    ADD_ATTR: ['viewBox', 'target'],
+    ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'mfrac', 'msqrt', 'msup', 'msub', 'mtext', 'mspace', 'munder', 'mover', 'munderover', 'merror', 'mpadded', 'mphantom', 'mfenced'],
+    ALLOW_DATA_ATTR: true
+    })
+  // 关键内容自动着色：回复中的「正确答案 / 秒杀 / 陷阱 / 复盘」等强调句染强调色（其余正文保持黑/白），突出每次回复的关键信息
+  html = html.replace(/<strong>([^<]*?(?:【正确答案】|正确答案|秒杀|陷阱|复盘|易错点|要点|结论)[^<]*?)<\/strong>/g, '<span class="k-ans"><strong>$1</strong></span>')
   return html
 }

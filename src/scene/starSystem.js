@@ -617,6 +617,13 @@ export function createScene(container) {
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement)
       }
+      // 批次5-P5-4 释放场景资源：geometry/material/texture 全量 dispose，避免反复进出累积 GPU 内存
+      scene.traverse((o) => {
+        if (o.geometry) o.geometry.dispose()
+        const mm = o.material
+        if (Array.isArray(mm)) mm.forEach((x) => { if (x) { if (x.map) x.map.dispose(); x.dispose() } })
+        else if (mm) { if (mm.map) mm.map.dispose(); mm.dispose() }
+      })
     }
   }
 

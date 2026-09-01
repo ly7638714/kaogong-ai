@@ -61,10 +61,7 @@ export function localQuizVerify(q) {
 
   // 5) 问法方向 vs 解析结论方向（选非题答案若被解析说成"正确/符合"→ 冲突）
   const dir = askDirection(q)
-  const last100 = explain.slice(-100)
-  if (dir === 'fei' && /(正确答案是|故选|应选)/.test(last100) && /(符合|正确|属于|能推出)/.test(last100) && !/不/.test(last100.slice(0, 20))) {
-    // 选非题解析末尾若只说"正确/符合"而未说明"错误/不属于"，存疑但不强判（避免误杀）
-  }
+  // 选非题解析末尾若只说"正确/符合"而未说明"错误/不属于"，存疑但不强判（避免误杀）；此处为注释说明，不做强判
 
   // 6) 题干过短（一般行测题干至少几十字；图推题可有图形但题干也应说明问法）
   const hasSvg = /<svg|```svg/.test(stem) || opts.some((o) => /<svg|```svg/.test(String(o.t || '')))

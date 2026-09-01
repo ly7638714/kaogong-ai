@@ -1,171 +1,32 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { store, saveWqs, saveCfg } from '../store'
-import { activeCfg, chatOnce, chatStream, buildQuizSys, buildGroupPrompt, supportsVision } from '../api'
-import { parseQuiz, extractChoices, answerLetter, parseMaterialQuiz } from '../utils/quiz'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { store, saveWqs, saveCfg, addWrong } from '../store'
+import { TEMPLATES, SUB_VARIANTS, DIR_LIB } from './examData'
+import { activeCfg, chatOnce, chatStream, supportsVision } from '../api'
+import { extractChoices, answerLetter } from '../utils/quiz'
 import { showToast } from '../utils/toast'
 import { exportPaper } from '../utils/export'
 import { renderMd } from '../utils/renderMd'
-import { genTutuQuestion } from '../utils/tutuGen'
+import { zhentiIndex, zhentiPaper, zhentiToItems, zhentiTypes } from '../data/zhenti'
 import { petAnalyzeCurrent } from '../utils/pet'
-import { verifyTruthTable } from '../utils/logicVerify'
-import { localQuizVerify } from '../utils/quizVerify'
-import { plateChecks, plateAiHint, plateLearn } from '../utils/quizVerifyProfiles'
-import { recordGenLog, genLogHint } from '../utils/quizLog'
-import { figCfg } from '../api/figEnhance'
 import { mountCharts } from '../utils/chartMount'
-import { diffCurve } from '../api/professor'
+import { usePaperParse } from '../composables/usePaperParse'
+import { useExamGen } from '../composables/useExamGen'
+import ExamConfig from './ExamConfig.vue'
+import ExamAnswer from './ExamAnswer.vue'
+import ExamReport from './ExamReport.vue'
 
 const emit = defineEmits(['close'])
-const props = defineProps({ initialSrc: { type: String, default: 'ai' }, initialPaper: { type: Object, default: null } })
+const props = defineProps({ initialSrc: { type: String, default: 'ai' }, initialPaper: { type: Object, default: null }, initialLocal: { type: Boolean, default: false } })
 
 // ===== 试卷模板库（基于国考/省考最新考情调研，均可自由编辑）=====
 // 2025 起国考新增「政治理论」：副省 135 / 地市·执法 130；判断推理含 图推/定义/类比/逻辑 子板块
-const TEMPLATES = [
-  {
-    id: 'gk_fj', name: '国考·副省级', total: 135, mins: 120, tag: '2025新大纲',
-    note: '政治20+常识15+言语30+数量15+判断35(图推10/定义10/类比5/逻辑10)+资料20',
-    modules: [
-      { subject: '政治理论', count: 20, refMin: 12 },
-      { subject: '常识判断', count: 15, refMin: 8 },
-      { subject: '言语理解', count: 30, refMin: 28 },
-      { subject: '数量关系', count: 15, refMin: 12 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 10, refMin: 10 },
-      { subject: '资料分析', count: 20, refMin: 25 }
-    ]
-  },
-  {
-    id: 'gk_ds', name: '国考·地市级', total: 130, mins: 120, tag: '2025新大纲',
-    note: '政治20+常识15+言语30+数量10+判断35+资料20',
-    modules: [
-      { subject: '政治理论', count: 20, refMin: 12 },
-      { subject: '常识判断', count: 15, refMin: 8 },
-      { subject: '言语理解', count: 30, refMin: 28 },
-      { subject: '数量关系', count: 10, refMin: 10 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 10, refMin: 10 },
-      { subject: '资料分析', count: 20, refMin: 25 }
-    ]
-  },
-  {
-    id: 'gk_xz', name: '国考·行政执法', total: 130, mins: 120, tag: '2025新大纲',
-    note: '同地市级（政治20+常识15+言语30+数量10+判断35+资料20）',
-    modules: [
-      { subject: '政治理论', count: 20, refMin: 12 },
-      { subject: '常识判断', count: 15, refMin: 8 },
-      { subject: '言语理解', count: 30, refMin: 28 },
-      { subject: '数量关系', count: 10, refMin: 10 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 10, refMin: 10 },
-      { subject: '资料分析', count: 20, refMin: 25 }
-    ]
-  },
-  {
-    id: 'lk_120', name: '省考联考·120题', total: 120, mins: 120, tag: '湖南/福建/宁夏/陕西等',
-    note: '常识20+言语40+数量10+判断35+资料15',
-    modules: [
-      { subject: '常识判断', count: 20, refMin: 10 },
-      { subject: '言语理解', count: 40, refMin: 32 },
-      { subject: '数量关系', count: 10, refMin: 12 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 10, refMin: 8 },
-      { subject: '逻辑判断', count: 5, refMin: 6 },
-      { subject: '资料分析', count: 15, refMin: 22 }
-    ]
-  },
-  {
-    id: 'lk_110', name: '省考联考·110题', total: 110, mins: 120, tag: '安徽/海南/广西等',
-    note: '常识15+言语35+数量10+判断30+资料20',
-    modules: [
-      { subject: '常识判断', count: 15, refMin: 8 },
-      { subject: '言语理解', count: 35, refMin: 30 },
-      { subject: '数量关系', count: 10, refMin: 12 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 5, refMin: 6 },
-      { subject: '资料分析', count: 20, refMin: 25 }
-    ]
-  },
-  {
-    id: 'gd_90', name: '广东·90题', total: 90, mins: 90, tag: '2025起100→90',
-    note: '常识15+言语20+数量15+判断25+资料15',
-    modules: [
-      { subject: '常识判断', count: 15, refMin: 10 },
-      { subject: '言语理解', count: 20, refMin: 20 },
-      { subject: '数量关系', count: 15, refMin: 18 },
-      { subject: '图形推理', count: 8, refMin: 9 },
-      { subject: '定义判断', count: 6, refMin: 6 },
-      { subject: '类比推理', count: 6, refMin: 6 },
-      { subject: '逻辑判断', count: 5, refMin: 6 },
-      { subject: '资料分析', count: 15, refMin: 17 }
-    ]
-  },
-  {
-    id: 'zj_130', name: '浙江·130题', total: 130, mins: 120, tag: '常识20/言语35/判断35/数量20/资料20',
-    note: '模块题量每年略有浮动，可自行调整',
-    modules: [
-      { subject: '常识判断', count: 20, refMin: 10 },
-      { subject: '言语理解', count: 35, refMin: 30 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 10, refMin: 10 },
-      { subject: '数量关系', count: 20, refMin: 18 },
-      { subject: '资料分析', count: 20, refMin: 28 }
-    ]
-  },
-  {
-    id: 'js_135', name: '江苏A/B·135题', total: 135, mins: 120, tag: '2025新增政治理论10题',
-    note: '政治10+常识15+言语35+数量15+判断35+资料25',
-    modules: [
-      { subject: '政治理论', count: 10, refMin: 6 },
-      { subject: '常识判断', count: 15, refMin: 8 },
-      { subject: '言语理解', count: 35, refMin: 30 },
-      { subject: '数量关系', count: 15, refMin: 12 },
-      { subject: '图形推理', count: 10, refMin: 9 },
-      { subject: '定义判断', count: 10, refMin: 8 },
-      { subject: '类比推理', count: 5, refMin: 5 },
-      { subject: '逻辑判断', count: 10, refMin: 10 },
-      { subject: '资料分析', count: 25, refMin: 30 }
-    ]
-  },
-  {
-    id: 'custom', name: '🛠 自由组卷（自定义板块）', total: 45, mins: 120, tag: '非真题模板 · 自由编辑板块/题量/时限',
-    note: '自由组卷：随意增删板块、改题数与参考时限，或按你的省份/进度自行搭建卷面（不套用任何真题结构）',
-    modules: [
-      { subject: '常识判断', count: 10, refMin: 6 },
-      { subject: '言语理解', count: 10, refMin: 9 },
-      { subject: '判断推理', count: 10, refMin: 9 },
-      { subject: '数量关系', count: 5, refMin: 5 },
-      { subject: '资料分析', count: 10, refMin: 12 }
-    ]
-  }
-]
+
 
 const SUBJECTS = ['政治理论', '常识判断', '言语理解', '数量关系', '判断推理', '图形推理', '定义判断', '类比推理', '逻辑判断', '资料分析']
 
 // 题型轮换库：同板块内按序轮换子题型，提升整卷质量与多样性
-const SUB_VARIANTS = {
-  '判断推理': ['削弱型', '加强型', '前提假设型', '结论推出型', '解释型', '评价型', '论证缺陷型', '翻译推理', '真假话', '分析推理'],
-  '逻辑判断': ['削弱型', '加强型', '前提假设型', '结论推出型', '解释型', '评价型', '论证缺陷型', '翻译推理', '真假话', '分析推理'],
-  '图形推理': ['位置规律', '样式规律', '属性规律', '数量规律', '组合规律', '空间重构', '截面图', '三视图', '立体拼合', '汉字字母'],
-  '定义判断': ['选是题', '选非题', '多定义题', '匹配对应题'],
-  '类比推理': ['二词型', '三词型', '填空型', '集合关系', '逻辑关系', '对应关系', '语法关系', '语义关系'],
-  '言语理解': ['中心理解', '意图判断', '标题填入', '态度观点', '细节判断', '词句理解', '语句填空', '下文推断', '语句排序', '逻辑填空'],
-  '资料分析': ['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'],
-  '数量关系': ['工程问题', '行程问题', '排列组合', '概率问题', '利润问题', '容斥问题', '最值问题'],
-  '常识判断': ['时政', '法律常识', '科技常识', '人文历史', '地理常识', '经济常识'],
-  '政治理论': ['新思想', '党史', '马原哲学', '时政报告', '重要会议']
-}
+
 
 // ===== 状态 =====
 const templateId = ref('gk_ds')
@@ -194,7 +55,6 @@ const paperDir = ref('auto') // 组卷问法：auto=AI随机(是/非) / is=选�
 const paperDirText = ref('')
 const paperYtN = ref(5) // 一拖N：每组小题数（国考一拖5 / 江苏一拖2 可调）
 const paperYtNGroup = ref(0) // 一拖N 分析推理组数：0=不加入 / 1 / 2
-const DIFF_LABEL = { easy: '易', mid: '中', hard: '难', real: '真题级' }
 const mixMode = ref('module')   // module=按模块顺序出卷（贴合真实卷面）；mix=混合打乱
 const srcMode = ref(props.initialSrc || 'ai') // ai=AI智能出题 / import=导入材料 / wrong=错题集 / single=单题快练
 const singleMode = ref(false) // 单题快练：不启动整卷计时、答后留在本题可再来一题
@@ -202,8 +62,51 @@ const singlePlate = ref('逻辑判断') // 单题快练·细分板块（默认�
 const singleVariant = ref('不限') // 单题快练子题型（不限=自动轮换）
 const singleBatch = ref(1) // 单题快练组量：1/5/10/15/20
 const autoNext = ref(false) // 单题快练：答对自动进入下一题
+// 仿真答题卡交卷模式（默认开）：先填涂答题卡->交卷->统一看答案与解析；关闭则恢复「答完即时看对错+萌宠错因分析」原体验
+const sheetMode = ref(localStorage.getItem('xc_sheet_mode') !== '0')
+watch(sheetMode, (v) => { try { localStorage.setItem('xc_sheet_mode', v ? '1' : '0') } catch (e) {} })
 const singleDir = ref('auto') // 问法方向：auto=随机 / is=选是 / not=选非 / custom=自定义
 const singleLocal = ref(false) // 图推单题：🎲 本地真题生成（零额度、确定性质检）
+if (props.initialLocal) singleLocal.value = true // 离线练习：默认本地生成
+// 📚 真题快练（批次7·真题库）：28卷3583题（网友回忆版），无官方答案→AI判题；收录不全持续补充
+const zhentiIdx = ref(null)
+const zhentiSel = ref('')
+const zhentiPlates = ref([])
+const zhentiLimit = ref(20)
+const zhentiLoading = ref(false)
+const zhentiSecs = ['常识判断', '言语理解', '数量关系', '判断推理', '资料分析']
+watch(srcMode, async (v) => {
+  window.__ztLog = (window.__ztLog || []).concat('watch:' + v)
+  if (v === 'zhenti') {
+    try {
+      zhentiLoading.value = true
+      const idx = await zhentiIndex()
+      zhentiIdx.value = idx
+      window.__ztLog = (window.__ztLog || []).concat('loaded:' + (idx.papers?.length || 0))
+    } catch (e) {
+      window.__ztLog = (window.__ztLog || []).concat('err:' + e.message)
+      showToast('真题索引加载失败: ' + e.message, 'error')
+    }
+    zhentiLoading.value = false
+  }
+})
+function toggleZhentiPlate(p) {
+  zhentiPlates.value = zhentiPlates.value.includes(p) ? zhentiPlates.value.filter(x => x !== p) : zhentiPlates.value.concat(p)
+}
+function startZhenti() {
+  if (!zhentiSel.value) { showToast('请先选择一份真题卷', 'info'); return }
+  zhentiLoading.value = true
+  zhentiPaper(zhentiSel.value).then(async (record) => {
+    const ty = await zhentiTypes().catch(() => null)
+    const items = zhentiToItems(record, zhentiPlates.value, zhentiLimit.value, ty && ty.papers ? ty.papers[record.id] : null)
+    if (!items.length) { showToast('该筛选下无真题，请调整板块', 'info'); return }
+    singleMode.value = false
+    const paper = makePaper('真题快练 · ' + (record.title || record.id), items)
+    papers.value.unshift(paper); savePapers()
+    startPaper(paper)
+    showToast('📚 真题加载完成（' + items.length + '题）· 真题无官方答案，作答后由AI判题', 'info')
+  }).catch((e) => showToast('真题加载失败: ' + e.message, 'error')).finally(() => { zhentiLoading.value = false })
+}
 const tutuFormat = ref('auto') // 图推出题形式：auto=自动轮换 / 一组图 / 两组图 / 九宫格 / 分组分类
 const singleMatType = ref('auto') // 资料分析材料类型：auto=随机轮换 / text=纯文字 / table=表格 / chart=图形 / mixed=综合混合（真题：一篇材料配5题）
 // 六大板块 → 细分板块 层级
@@ -219,17 +122,7 @@ const singleGroup = ref((SIX_GROUPS.find((g) => g.subs.includes(singlePlate.valu
 const singlePlates = computed(() => (SIX_GROUPS.find((g) => g.key === singleGroup.value) || SIX_GROUPS[0]).subs)
 const singleDirText = ref('')
 // 按细分板块预置的问法库（题干自由问法）
-const DIR_LIB = {
-  '逻辑判断': ['最能削弱', '最能加强', '前提/假设', '不能推出', '最能解释'],
-  '图形推理': ['填入问号处', '能由它折叠而成', '不可能是其截面', '符合三视图'],
-  '定义判断': ['属于…的是', '不属于…的是'],
-  '类比推理': ['逻辑关系最相似', '逻辑关系最不相似'],
-  '言语理解': ['这段文字意在', '主旨是', '标题是', '接下来最可能'],
-  '资料分析': ['能推出的是', '不能推出的是', '占…的比重约'],
-  '数量关系': ['问…是多少', '至少/至多'],
-  '常识判断': ['正确的是', '错误的是'],
-  '政治理论': ['正确的是', '错误的是']
-}
+
 const dirLib = computed(() => DIR_LIB[singlePlate.value] || [])
 function setDirText(t) { singleDirText.value = t; singleDir.value = 'custom' }
 function onSingleGroup() {
@@ -242,14 +135,6 @@ const singleVars = computed(() => {
   if (p === '判断推理') return (SUB_VARIANTS['逻辑判断'] || []).filter((v) => v !== '一拖五') // 单题排除一拖五（组卷才支持）
   return SUB_VARIANTS[p] || []
 })
-function resolveDir(d) { if (d === 'is' || d === 'not') return d; return Math.random() < 0.5 ? 'is' : 'not' }
-function dirHint(subject, dir, dirText) {
-  if (dirText) return '\n【问法】本题问法：' + dirText + '（严格按此问法出题）。'
-  if (subject === '定义判断' || subject === '图形推理' || subject === '空间重构') return ''
-  return dir === 'is'
-    ? '\n【问法】本题为选是题：问"下列属于/正确的是/符合的是/能推出的是"（非定义类按本板块惯例使用正向问法）。'
-    : '\n【问法】本题为选非题：问"下列不属于/错误的是/不符合的是/不能推出的是"。'
-}
 const onlyPend = ref(false) // 错题组卷：只看未复盘
 const byWrongCount = ref(false) // 错题组卷：按错次优先排序
 try { const _sp = localStorage.getItem('xc_single_plate'); if (_sp && SUBJECTS.includes(_sp)) singlePlate.value = _sp } catch (e) {}
@@ -258,6 +143,7 @@ function toggleWrongSel(p) { const i = wrongSel.value.indexOf(p); if (i >= 0) wr
 const wrongLimit = ref(0) // 错题组卷题量：0=全部
 const wrongPlates = computed(() => { const s = new Set(); store.wqs.forEach((q) => { if (q.subject) s.add(q.subject) }); return [...s] })
 const aiLayout = ref(false) // 导出前先 AI 智能排版（梳理考点/错因/秒杀规律）
+const separateAns = ref(false) // 题答分离：题目在前，答案与解析集中到卷尾（打印重做友好）
 // 导入识别后由「预览校对」界面统一决定去向（开始作答 / 存入错题本）
 const imgs = ref([])
 const textFiles = ref([])
@@ -267,6 +153,21 @@ const results = ref([])
 try { results.value = JSON.parse(localStorage.getItem('xc_paper_results') || '[]') || [] } catch (e) {}
 
 const phase = ref('config') // config | extract | doing | result
+const qLimit = ref(0) // 导入识别后题量上限（0=不限）
+// ===== 仿真考试答题卡：考生信息 + 2B 填涂 =====
+const sheetShow = ref(false) // 答题卡视图开关（doing 阶段可切 题目/答题卡）
+const examName = ref(''), examRoom = ref(''), examNo = ref('')
+try {
+  const ei = JSON.parse(localStorage.getItem('xc_exam_info') || '{}')
+  examName.value = ei.name || ''
+  examRoom.value = ei.room || ''
+  examNo.value = ei.no || ''
+} catch (e) {}
+function saveExamInfo() {
+  try { localStorage.setItem('xc_exam_info', JSON.stringify({ name: examName.value, room: examRoom.value, no: examNo.value })) } catch (e) {}
+}
+const reviewOpen = ref({})
+const answeredCount = computed(() => questions.value.filter((qq, i) => marks.value[i] != null && marks.value[i].pick != null).length)
 const extracting = ref(false)
 const previewList = ref([]) // 识别结果预览（导入校对）
 const previewEdit = ref(-1)
@@ -282,6 +183,18 @@ const genBusy = ref(false)
 const genLive = ref('') // 单题流式实时显示
 const designerShow = ref(false) // 命题人设计说明弹窗
 const paperMode = ref(localStorage.getItem('xc_paper_mode') !== '0')
+// 批次8·一题五步闭环：成绩单一键「变式检验」→ 串联到对话页出变式题（考点相同/素材全新）
+function variantToChat(i) {
+  const qq = questions.value[i]
+  if (!qq || !qq.stem) { showToast('该题无题干，无法出变式', 'info'); return }
+  const last = String((marks.value[i] && marks.value[i].pick) || '')
+  const ask = '请针对下面这道题出一道【考点题型完全相同、题干素材全新】的变式检验题（输出题干+四个选项+单独一行【正确答案】X，考我之后给解析）：\n' + String(qq.stem).slice(0, 400) + '\n选项：' + (qq.options || []).map(o => o.k + '.' + o.t).join(' ') + (qq.answer ? '\n（原题答案：' + qq.answer + (last && last !== qq.answer ? '，我选了' + last : '') + '）' : '')
+  store.tab = 'chat'
+  store.pendingAsk = ask
+  emit('close')
+  showToast('🔁 已把原题带到对话页出变式，答完自动判分', 'info')
+}
+
 const savedWrongFlash = ref(false) // 错题入库成功闪绿反馈
 function savePaperMode() { try { localStorage.setItem('xc_paper_mode', paperMode.value ? '1' : '0') } catch (e) {} }
 const prefetchQ = ref(null) // 预生成下一题：{ item, plate, difficulty, variant }
@@ -297,9 +210,7 @@ const genCur = ref('')
 const genEta = ref(0)
 const genSec = ref(0)
 const genStatus = ref('') // 当前出题阶段（生成中/质检中/第N次重出），让用户知道在等什么
-let genTimer = null
-let genAbort = false
-let genCtrl = null // AbortController：取消出卷时立即中断进行中的请求
+// 注：genTimer / genAbort / genCtrl 已随出题流程收拢进 composables/useExamGen.js
 // 板块参考倒计时（仅倒计时，不设正计时）
 const modName = ref('')
 const modDone = ref(0)
@@ -308,7 +219,6 @@ const modRefSec = ref(0)
 const modLeft = ref(0)
 const startAt = ref(0)
 let timers = { q: null, t: null }
-const generating = {}
 
 const fmt = (s) => {
   const m = Math.floor(Math.max(0, s) / 60)
@@ -393,166 +303,27 @@ const tmplJudgeNote = computed(() => {
   if (subs.length) return subs.map((m) => m.subject + ' ' + m.count + '题').join(' · ')
   return ''
 })
+// 1.8 自定义「判断推理」单行 → 出卷时自动展开为 4 子板块，UI 显示换算说明
+const judgeSplitHint = computed(() => {
+  const j = modules.value.find((m) => m.subject === '判断推理')
+  if (!j || (Number(j.count) || 0) <= 0) return ''
+  return '🧩 本卷「判断推理」' + j.count + ' 题将在出卷时自动展开为 图推/定义/类比/逻辑 4 子板块均分（余数依次补前项），题型轮换覆盖全类。'
+})
 
 // ===== 材料导入（图片/PDF/Word/txt/tex）=====
-function onFiles(ev) {
-  const files = Array.from(ev.target.files || [])
-  for (const f of files) {
-    const n = (f.name || '').toLowerCase()
-    if (f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(n)) readImg(f)
-    else if (/\.pdf$/i.test(n)) readPdf(f)
-    else if (/\.(txt|tex|md|markdown)$/i.test(n)) readText(f)
-    else if (/\.docx$/i.test(n)) readDocx(f)
-    else showToast('暂不支持 ' + f.name, 'error')
-  }
-  ev.target.value = ''
-}
-function readImg(f) {
-  const r = new FileReader()
-  r.onload = (e) => imgs.value.push(e.target.result)
-  r.readAsDataURL(f)
-}
-async function readPdf(f) {
-  try {
-    const buf = await f.arrayBuffer()
-    const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
-    GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
-    const pdf = await getDocument({ data: buf }).promise
-    const parts = []
-    let imaged = 0
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p)
-      // ① 优先提取文本层（精度远高于 OCR）
-      try {
-        const tc = await page.getTextContent()
-        const t = (tc.items || []).map((it) => it.str || '').join(' ').replace(/\s+/g, ' ').trim()
-        if (t && t.length > 40) { parts.push('【第' + p + '页】' + t); continue }
-      } catch (e) {}
-      // ② 无文本层 → 转图 OCR
-      const vp = page.getViewport({ scale: 2 })
-      const canvas = document.createElement('canvas')
-      canvas.width = vp.width
-      canvas.height = vp.height
-      const ctx = canvas.getContext('2d')
-      await page.render({ canvasContext: ctx, viewport: vp }).promise
-      imgs.value.push(canvas.toDataURL('image/jpeg', 0.85))
-      imaged++
-    }
-    if (parts.length) {
-      textFiles.value.push({ name: f.name, text: parts.join('\n') })
-      showToast('✅ 已解析 PDF（文本层优先，' + pdf.numPages + ' 页，识别更准）' + (imaged ? '；' + imaged + ' 页无文本转图片' : ''), 'success')
-    } else if (imaged) {
-      showToast('✅ 已解析 PDF（无文本层，转为图片识别 ' + imaged + ' 页）', 'success')
-    }
-  } catch (e) {
-    showToast('PDF 解析失败：' + e.message, 'error')
-  }
-}
-async function readText(f) {
-  textFiles.value.push({ name: f.name, text: await f.text() })
-  showToast('✅ 已读取 ' + f.name, 'success')
-}
-async function readDocx(f) {
-  try {
-    const buf = await f.arrayBuffer()
-    const JSZip = (await import('jszip')).default
-    const zip = await JSZip.loadAsync(buf)
-    const xml = await zip.file('word/document.xml').async('string')
-    const txt = xml
-      .replace(/<w:p[^>]*>/g, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-    textFiles.value.push({ name: f.name, text: txt })
-    showToast('✅ 已读取 Word（' + txt.length + ' 字）', 'success')
-  } catch (e) {
-    showToast('Word 解析失败：' + e.message, 'error')
-  }
-}
-function rmImg(i) { imgs.value.splice(i, 1) }
-function rmTxt(i) { textFiles.value.splice(i, 1) }
+// 批次6B R3-②b：解析实现已纯移动至 composables/usePaperParse.js
+//   onFiles / readImg / readPdf / readText / readDocx / rmImg / rmTxt / norm / shuffle / applyConfig / textToQuestions
+const { onFiles, rmImg, rmTxt, norm, applyConfig, textToQuestions } = usePaperParse({ imgs, textFiles, modules, mixMode, pickGenC })
 
 const VISION_SYS = '你是公考行测真题整理专家。请把图片/扫描件中的行测题目逐题、完整地提取出来（题干、选项 A-D、正确答案、解析如有）。要求：①每题独立一个对象；②题干与选项逐字保留，不改写不遗漏（含数字/图表数据/材料原文）；③按内容判断板块归属（判断推理/言语理解/数量关系/资料分析/常识判断/政治理论/图形推理/类比推理/定义判断/逻辑判断）；④材料题/大题按小题拆分；⑤识别不清的题目跳过、绝不编造。严格只输出 JSON 数组，不要多余文字。'
 const VISION_PROMPT =
   '[{"no":1,"subject":"判断推理","stem":"题干原文","options":{"A":"...","B":"...","C":"...","D":"..."},"answer":"B","analysis":"解析(若有)"}]'
-const TEXT_SYS =
-  '你是公考行测真题整理专家。把下面的文本/题目逐题整理成 JSON 数组，每题含 no/subject/stem/options/answer/analysis。要求：①题干与选项完整保留（含数字/图表数据/材料原文）；②按内容判断板块归属；③材料题/大题按小题拆分；④识别不清跳过、不编造。严格只输出 JSON 数组。'
-
-function norm(qs) {
-  return (qs || [])
-    .map((x, i) => {
-      const optsObj = x.options || {}
-      let opts = Array.isArray(x.options)
-        ? x.options.map((o, k) => ({ k: 'ABCD'[k] || 'A', t: typeof o === 'string' ? o : (o && o.t) }))
-        : Object.keys(optsObj).map((k) => ({ k: k.toUpperCase(), t: optsObj[k] }))
-      opts = opts.filter((o) => o.t).slice(0, 4)
-      return {
-        no: x.no || i + 1,
-        subject: x.subject || '未分类',
-        stem: x.stem || '',
-        options: opts,
-        answer: String(x.answer || '').toUpperCase(),
-        analysis: x.analysis || ''
-      }
-    })
-    .filter((x) => x.stem)
-}
-function shuffle(a) {
-  const b = a.slice()
-  for (let i = b.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[b[i], b[j]] = [b[j], b[i]]
-  }
-  return b
-}
-function applyConfig(qs) {
-  let list = qs.slice()
-  const subs = modules.value.filter((m) => ['图形推理', '定义判断', '类比推理', '逻辑判断'].includes(m.subject))
-  const hasJudgeSub = subs.length > 0
-  // 过滤：导入/错题的 subject 需命中卷面构成板块（判断推理子板块视为整体）
-  list = list.filter((x) => {
-    const s = x.subject || ''
-    if (hasJudgeSub) return subs.some((m) => m.subject === s) || ['判断推理'].includes(s)
-    return modules.value.some((m) => m.subject === s) || s === '判断推理' && modules.value.some((m) => m.subject === '判断推理')
-  })
-  // 题量裁剪：每板块最多取卷面题数
-  const plan = {}
-  modules.value.forEach((m) => { plan[m.subject] = m.count })
-  if (hasJudgeSub) {
-    subs.forEach((m) => { plan[m.subject] = m.count })
-  }
-  const picked = {}
-  list = list.filter((x) => {
-    const s = x.subject === '判断推理' ? (subs[0] && subs[0].subject) || '判断推理' : x.subject
-    const cap = plan[s] != null ? plan[s] : 9999
-    picked[s] = picked[s] || 0
-    if (picked[s] >= cap) return false
-    picked[s]++
-    return true
-  })
-  if (mixMode.value === 'mix') list = shuffle(list)
-  else {
-    const order = modules.value.map((m) => m.subject)
-    list.sort((a, b) => order.indexOf(a.subject) - order.indexOf(b.subject))
-  }
-  return list
-}
 function makePaper(name, qs) {
   return { id: Date.now() + Math.random(), name, ts: Date.now(), questions: qs }
 }
 function savePapers() { try { localStorage.setItem('xc_papers', JSON.stringify(papers.value)) } catch (e) {} }
 function saveResults() { try { localStorage.setItem('xc_paper_results', JSON.stringify(results.value)) } catch (e) {} }
 
-async function textToQuestions(text) {
-  const c = pickGenC()
-  if (!c || !c.key) return
-  try {
-    const reply = await chatOnce(c, [{ role: 'system', content: TEXT_SYS }, { role: 'user', content: String(text).slice(0, 8000) }], 3000)
-    const m = String(reply || '').match(/\[[\s\S]*\]/)
-    return m ? norm(JSON.parse(m[0])) : []
-  } catch (e) { return [] }
-}
 function buildWrongQuestions() {
   let src = store.wqs.slice()
   if (onlyPend.value) src = src.filter((q) => !(q.reviewed || q.digested))
@@ -616,9 +387,10 @@ async function doExtract() {
     phase.value = 'config'
     return
   }
-  previewList.value = all
+  const limited = qLimit.value > 0 ? all.slice(0, qLimit.value) : all
+  previewList.value = limited
   phase.value = 'preview'
-  showToast('✅ 识别出 ' + all.length + ' 题，请预览校对后「开始作答」或「存入错题本」', 'success')
+  showToast('✅ 识别出 ' + all.length + ' 题' + (qLimit.value > 0 && all.length > qLimit.value ? '，按上限取前 ' + qLimit.value + ' 题' : '') + '，请预览校对后「开始作答」或「存入错题本」', 'success')
   // 识别完成 → 进入预览校对（由预览界面决定「开始作答 / 存入错题本」）
 }
 
@@ -626,6 +398,9 @@ async function doExtract() {
 function start() {
   // 单题快练：无条件立刻进入「出题等待界面」；Key 缺失在等待界面内明确提示（出题用的是文字模型，勿用视觉模型前置拦截）
   if (srcMode.value === 'single') { startSingle(); return }
+  if (srcMode.value === 'zhenti') { startZhenti(); return }
+  if (srcMode.value === 'morning') { startMorning(); return }
+  if (srcMode.value === 'weekRedo') { startWeekRedo(); return }
   const c = activeCfg(srcMode.value === 'ai' ? false : true)
   if (!c || !c.key) {
     showToast('请先在设置配置' + (srcMode.value === 'ai' ? '文字' : '视觉/文字') + '模型 API Key', 'error')
@@ -644,88 +419,6 @@ function start() {
   }
   startAi()
 }
-// AI 智能出题：按卷面构成每个板块生成 min(count, aiCap) 题，预生成（并发2）并展示进度/预计剩余时间
-// 组卷规则引擎：判断推理大类自动展开为 4 子板块（避免只出逻辑题），保证题型轮换覆盖全类
-function expandModules(list) {
-  const out = []
-  ;(list || []).forEach((m) => {
-    if (m.subject === '判断推理') {
-      const subs = ['图形推理', '定义判断', '类比推理', '逻辑判断']
-      const n = Math.max(1, m.count || 1)
-      const base = Math.floor(n / subs.length), rem = n % subs.length
-      const ref = Math.max(3, Math.round((m.refMin || 20) / subs.length))
-      subs.forEach((s, i) => { out.push({ subject: s, count: base + (i < rem ? 1 : 0), refMin: ref }) })
-    } else out.push({ ...m })
-  })
-  return out
-}
-function resolvePaperDir() {
-  if (paperDir.value === 'is' || paperDir.value === 'not') return paperDir.value
-  if (paperDir.value === 'custom') return 'custom'
-  return resolveDir('auto')
-}
-function startAi() {
-  const plan = []
-  let total = 0
-  const modN = (m) => (aiCap.value > 0 ? Math.max(1, Math.min(m.count || 1, aiCap.value)) : Math.max(1, m.count || 1))
-  const exp = expandModules(modules.value)
-  exp.forEach((m) => { total += modN(m) })
-  let gi = 0
-  let gid = 0
-  exp.forEach((m) => {
-    const n = modN(m)
-    const vars = SUB_VARIANTS[m.subject] || []
-    if (m.subject === '资料分析') {
-      // 真题卷面：一篇材料配 5 题（最后一组可不足），材料形式轮换；组内题型递进
-      const groups = []
-      for (let i = 0; i < n; i += 5) groups.push(Math.min(5, n - i))
-      groups.forEach((gn) => {
-        for (let k = 0; k < gn; k++) {
-          const d = difficulty.value === 'curve' ? diffCurve(gi, total) : difficulty.value
-          const variant = k === gn - 1 ? '综合分析' : (['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 6])
-          plan.push({
-            subject: '资料分析', difficulty: d, variant, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', group: true, groupId: gid, groupN: gn,
-            groupLeader: k === 0, matType: (m.matType && m.matType !== 'auto') ? m.matType : ['text', 'table', 'mixed', 'chart'][gid % 4],
-            stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
-          })
-          gi++
-        }
-        gid++
-      })
-      return
-    }
-    // 预分配题型（同板块内轮换，单题题型；一拖N 分析推理单独追加，见末尾）
-    const slots = []
-    for (let i = 0; i < n; i++) {
-      const v = vars.length ? vars[i % vars.length] : ''
-      slots.push({ v })
-    }
-    slots.forEach((s) => {
-      const d = difficulty.value === 'curve' ? diffCurve(gi, total) : difficulty.value
-      plan.push({ subject: m.subject, difficulty: d, variant: s.v, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
-      gi++
-    })
-  })
-  // 一拖N 分析推理组：独立于题型轮换（每组 N 小题，属分析推理综合推演）
-  const ytGroups = Math.max(0, Math.min(2, paperYtNGroup.value || 0))
-  for (let g = 0; g < ytGroups; g++) {
-    const gn = Math.max(2, Math.min(5, paperYtN.value || 5))
-    for (let k = 0; k < gn; k++) {
-      const d = difficulty.value === 'curve' ? diffCurve(gi, total) : difficulty.value
-      plan.push({
-        subject: '逻辑判断', difficulty: d, variant: '一拖五', group: true, groupId: gid, groupN: gn,
-        groupLeader: k === 0,
-        stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
-      })
-      gi++
-    }
-    gid++
-  }
-  if (!plan.length) { showToast('请先配置卷面（至少一个板块）', 'info'); return }
-  const paper = makePaper('智能模拟卷 · ' + selTmpl.value.name, plan)
-  papers.value.unshift(paper); savePapers()
-  genAll(paper)
-}
 // 预生成所有题目：并发 2，进度条 + 预计剩余时间（用户可随时取消）
 const readyAsk = ref(false) // 组卷出完，等用户确认开考
 let readyPaper = null
@@ -742,160 +435,26 @@ function readyBack() {
   questions.value = []
   clearTimers()
 }
-async function genAll(paper) {
-  genAbort = false
-  if (genCtrl) { genCtrl.abort(); genCtrl = null }
-  genCtrl = new AbortController()
-  questions.value = paper.questions
-  phase.value = 'gen'
-  genTotal.value = questions.value.length
-  genDone.value = 0
-  genErrCount.value = 0
-  genCur.value = '准备出题…'
-  genLive.value = ''
-  genEta.value = 0
-  genSec.value = 0
-  const t0 = Date.now()
-  if (genTimer) clearInterval(genTimer)
-  genTimer = setInterval(() => { genSec.value = Math.round((Date.now() - t0) / 1000) }, 1000)
-  const times = []
-  let cursor = 0
-  const CONC = Math.max(1, Math.min(4, genConcur.value || 3))
-  async function worker() {
-    while (cursor < questions.value.length && !genAbort) {
-      const i = cursor++
-      const item = questions.value[i]
-      genCur.value = '第 ' + (i + 1) + ' / ' + genTotal.value + ' 题 · ' + item.subject + (item.difficulty ? '（' + (DIFF_LABEL[item.difficulty] || item.difficulty) + '）' : '')
-      const st = Date.now()
-      await genOne(i)
-      const dt = Date.now() - st
-      times.push(dt)
-      if (times.length > 10) times.shift()
-      genDone.value++
-      if (item.err) genErrCount.value++
-      const avg = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length)
-      genEta.value = Math.max(0, Math.round(((questions.value.length - genDone.value) * avg) / 1000))
-    }
-  }
-  // 按并发度设置启动对应数量的 worker（之前写死 2 路，UI 的并发选项形同虚设）
-  await Promise.all(Array.from({ length: CONC }, () => worker()))
-  if (genTimer) { clearInterval(genTimer); genTimer = null }
-  if (genAbort) { phase.value = 'config'; showToast('已取消出卷', 'info'); return }
-  if (!questions.value.some((q) => !q.err && q.stem)) {
-    phase.value = 'config'
-    const firstErr = questions.value.find((q) => q.err && q.stem)
-    let reason = firstErr ? String(firstErr.stem).replace(/^[（(]出题失败[：:]\s*/, '').slice(0, 160) : ''
-    if (reason.includes('未配置模型')) reason = '未配置文字模型，请到设置填 Key'
-    showToast('出题失败：' + (reason || '请检查模型 Key 或网络'), 'error')
-    return
-  }
-  if (singleMode.value) {
-    questions.value.forEach((qq) => { if (qq && qq.stem && !qq.err) addToQuizCol(qq) })
-    if (questions.value.length === 1) prefetchSingle()
-  }
-  if (singleMode.value && questions.value.length === 1) {
-    // 单题快练：出完直接开考（不打断节奏）
-    startPaper(paper)
-  } else {
-    // 组卷/多题组：等用户点「是」才开考与计时
-    readyPaper = paper
-    readyAsk.value = true
-  }
-  showToast('✅ 出卷完成，共 ' + questions.value.length + ' 题' + (genErrCount.value ? '（' + genErrCount.value + ' 题失败已跳过）' : ''), 'success')
-}
+// 出卷完成 → 组卷/多题组：等用户点「是」才开考与计时（原 genAll 内直接赋值 readyPaper，现由 composable 回调注入）
+const onPaperReady = (p) => { readyPaper = p; readyAsk.value = true }
+
+// 批次6B R3-②a：出题主流程已纯移动至 composables/useExamGen.js
+//   genOne（出题）/ verifyQuestion（质检）/ retryGen（重试）/ genAll+worker（并发出卷）
+//   + 组卷入口 startAi / startSingle / startMorning / startWeekRedo / startRedo / nextSingle / 出题集管理
+const {
+  cancelGen, ensureGen, retryGen, nextSingle, startRedo,
+  startAi, startSingle, startMorning, startWeekRedo, saveQuizCol, updateQuizColResult
+} = useExamGen({
+  pickGenC, makePaper, savePapers, startPaper, onPaperReady,
+  questions, phase, cur, singleMode, singlePlate, singleVariant, singleDir, singleDirText,
+  singleLocal, singleBatch, singleMatType, singleVars, difficulty, tutuFormat, modules,
+  aiCap, genConcur, paperDir, paperDirText, paperYtNGroup, paperYtN, selTmpl, prefetchQ,
+  papers, quizCol, genLive, genStatus, genCur, genDone, genTotal, genErrCount, genSec,
+  genEta, genBusy
+})
 function saveFastGenModel() { try { localStorage.setItem('xc_fast_gen_model', String(fastGenModel.value || '').trim()) } catch (e) {} }
-function saveQuizCol() { try { localStorage.setItem('xc_quiz_col', JSON.stringify(quizCol.value)) } catch (e) {} }
-function addToQuizCol(q) {
-  const key = String(q.stem || '').slice(0, 40)
-  const exist = quizCol.value.find((x) => String(x.stem || '').slice(0, 40) === key)
-  if (exist) { exist.lastAt = Date.now(); saveQuizCol(); return }
-  quizCol.value.unshift({
-    id: Date.now() + Math.random(), ts: Date.now(),
-    subject: q.subject, difficulty: q.difficulty, variant: q.variant,
-    stem: q.stem, options: q.options || [], answer: q.answer, explain: q.explain || '', designer: q.designer || '',
-    wrongCount: 0, correctStreak: 0, lastAt: Date.now(), lastOk: null, history: []
-  })
-  if (quizCol.value.length > 200) quizCol.value = quizCol.value.slice(0, 200)
-  saveQuizCol()
-}
-// 二刷：直接用出题集里的题（不重新调 AI），先做题后看答案
-function startRedo(col) {
-  singleMode.value = true
-  const item = {
-    subject: col.subject, difficulty: col.difficulty, variant: col.variant,
-    stem: col.stem, options: (col.options || []).map((o) => ({ ...o })),
-    answer: col.answer, explain: col.explain || '', designer: col.designer || '',
-    picked: null, correct: null, timeout: false, err: false, fromCol: true
-  }
-  const paper = makePaper('二刷 · ' + col.subject, [item])
-  papers.value.unshift(paper); savePapers()
-  startPaper(paper)
-}
 function delQuizCol(i) { quizCol.value.splice(i, 1); saveQuizCol() }
 function clearQuizCol() { quizCol.value = []; saveQuizCol(); showToast('已清空出题集', 'info') }
-function updateQuizColResult(q, ok) {
-  const key = q && String(q.stem || '').slice(0, 40)
-  if (!key) return
-  const col = quizCol.value.find((x) => String(x.stem || '').slice(0, 40) === key)
-  if (!col) return
-  col.lastAt = Date.now(); col.lastOk = ok
-  if (ok) { col.correctStreak++; } else { col.wrongCount++; col.correctStreak = 0 }
-  col.history = col.history || []
-  col.history.push({ t: Date.now(), ok })
-  if (col.history.length > 20) col.history = col.history.slice(-20)
-  saveQuizCol()
-}
-function cancelGen() {
-  genAbort = true
-  if (genCtrl) { genCtrl.abort(); genCtrl = null } // 立即中断进行中的生成请求，避免取消后仍在消耗额度
-  if (genTimer) { clearInterval(genTimer); genTimer = null }
-  phase.value = 'config'
-  questions.value = []
-  showToast('已取消出卷', 'info')
-}
-function buildSingleItems() {
-  const diff = difficulty.value === 'curve' ? 'mid' : difficulty.value
-  const fixedVar = singleVariant.value === '不限' ? '' : singleVariant.value
-  const vars = singleVars.value
-  const batch = Math.max(1, Math.min(20, singleBatch.value || 1))
-  const items = []
-  // 资料分析·真题题组模式：组量≥5 时，一篇完整材料（文字/表格/图形/综合，可自定义）配 5 题，第5题为综合分析；组量>5 拆多组
-  if (singlePlate.value === '资料分析' && batch > 1) {
-    let gid = 0
-    for (let g = 0; g < batch; g += 5) {
-      const gn = Math.min(5, batch - g)
-      const matType = singleMatType.value === 'auto' ? ['text', 'table', 'mixed', 'chart'][gid % 4] : singleMatType.value
-      const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
-      const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
-      for (let k = 0; k < gn; k++) {
-        const variant = k === gn - 1 ? '综合分析' : (['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 6])
-        items.push({
-          subject: '资料分析', difficulty: diff, variant, dir, dirText,
-          group: true, groupId: gid, groupN: gn, groupLeader: k === 0, matType,
-          stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
-        })
-      }
-      gid++
-    }
-    return items
-  }
-  for (let i = 0; i < batch; i++) {
-    const v = fixedVar || (vars.length ? vars[i % vars.length] : '')
-    const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
-    const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
-    items.push({ subject: singlePlate.value, difficulty: diff, variant: v, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
-  }
-  return items
-}
-function startSingle() {
-  try { localStorage.setItem('xc_single_plate', singlePlate.value) } catch (e) {}
-  singleMode.value = true
-  const items = buildSingleItems()
-  const batch = items.length
-  const paper = makePaper('单题快练 · ' + singlePlate.value + (batch > 1 ? '（' + batch + ' 题组）' : ''), items)
-  papers.value.unshift(paper); savePapers()
-  genAll(paper) // 先出题再开考，避免做题倒计时提前启动
-}
 function startPaper(paper) {
   curPaper.value = paper
   questions.value = paper.questions
@@ -949,301 +508,77 @@ function timeoutQ() {
   petAnalyzeCurrent({ timeout: true })
   if (singleMode.value) { qLeft.value = perQ.value; qElapsed.value = 0 } else nextQ()
 }
-// 核心出题：生成第 i 题（含题型轮换），供预生成/单题/重出共用
-// 资料分析材料 SVG 兜底绘制：把 Markdown/文字材料画成真题风格 SVG 表格/图表（迁移图推绘图能力）
-async function drawZlMaterialSVG(material, matType) {
-  const m = String(material || '').trim()
-  if (!m || /```svg/.test(m)) return m
-  const isDrawable = matType === 'table' || matType === 'mixed' || matType === 'chart' || /表格|柱状|折线|饼图|统计|同比|指标|比上年|增长/.test(m.slice(0, 220))
-  if (!isDrawable) return m
-  let c = null
-  try { c = figCfg() } catch (e) {}
-  if (!c || !c.key) return m
-  const prompt = '你是公考资料分析「材料图表绘制专家」。把下面这份资料分析材料画成一张真题风格的 SVG 图（表格或柱状/折线/饼图），只输出一个 ```svg 代码块，不要任何其他文字。' +
-    'SVG 铁律：<svg width=620 height=按内容 viewBox="0 0 620 H">、白底、深色描边、元素坐标在界内留≥8px、字体≥12px、数据自洽可验算。' +
-    '表格→<rect>画表头(深色底#1e3a5f+白字)+单元格+<text>写数据并标注单位；柱状/折线/饼图→坐标轴/图例/数值/年份清晰。材料内容：\n' + m.slice(0, 1200)
-  try {
-    const resp = await fetch(c.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(c.key ? { Authorization: 'Bearer ' + c.key } : {}) },
-      body: JSON.stringify({ model: c.model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], max_tokens: 3200, stream: false, temperature: 0.2 })
-    })
-    if (!resp.ok) return m
-    const d = await resp.json()
-    const text = String((d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '').trim()
-    const svgM = String(text).match(/```svg\s*\n?([\s\S]*?)```|<svg[\s\S]*?<\/svg>/)
-    const svg = svgM ? (svgM[1] || svgM[0]).trim() : ''
-    if (svg && svg.includes('<svg')) return m + '\n\n```svg\n' + svg + '\n```'
-  } catch (e) {}
-  return m
-}
-async function genOne(i) {
-  const item = questions.value[i]
-  if (!item || item.stem) return
-  if (item.fromWrong) return
-  if (item.group && !item.groupLeader) return // 占位：由组首生成后统一填充
-  // 🎲 本地真题图推生成（单题快练·图形推理 且 选择了本地）→ 零额度、确定性质检、永不裁切
-  if (singleMode.value && item.subject === '图形推理' && singleLocal.value) {
-    const lq = genTutuQuestion()
-    if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; return }
-  }
-  const c = pickGenC()
-  if (!c || !c.key) {
-    // 未配 Key 时图推单题也能本地出题
-    if (singleMode.value && item.subject === '图形推理' && !String(item.variant || '').match(/空间重构|截面图|三视图|立体拼合/)) {
-      const lq = genTutuQuestion()
-      if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; return }
-    }
-    item.err = true; item.stem = '（未配置模型，无法出题）'; return
-  }
-  // 资料分析「材料+题组」：一次生成整组
-  if (item.group) {
-    const gn = item.groupN || 5
-    const failAll = (msg) => {
-      for (let k = 0; k < gn; k++) {
-        const slot = questions.value[i + k]
-        if (slot) { slot.err = true; slot.stem = msg }
-      }
-    }
-    try {
-      const isZL = item.subject === '资料分析'
-      const sys = buildGroupPrompt(item.subject, item.variant, item.difficulty || 'mid', gn, item.matType)
-      const matTypeName = { text: '纯文字材料', table: '表格材料', mixed: '混合材料', chart: '图形数据材料' }[item.matType] || '混合材料'
-      const ask = (isZL
-        ? '请为【资料分析】出一篇完整材料 + ' + gn + ' 道题（材料形式：' + matTypeName + '，第' + gn + '题为综合分析题，前 ' + (gn - 1) + ' 题考点递进）。'
-        : '请为【逻辑判断】出一套「一拖' + gn + '」题组（1 个共用材料 + ' + gn + ' 道小题，小题可在不违背总题干逻辑的前提下新增附加条件）。') +
-        '【本次输出要求（提速，必须遵守）】只输出 材料 + ' + gn + ' 道小题的题干/选项/答案：### 📄 材料 → ### 第1题（题干 + A./B./C./D. 四选项 + 单独一行【正确答案】X）→ ### 第2题…；不要输出解析/考点/秒杀/命题人设计说明（这些稍后按需单独生成）。材料与各题数据必须自洽、可互相验算。'
-      const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 8000, 120000, genCtrl && genCtrl.signal)
-      const parsed = parseMaterialQuiz(reply, gn)
-      const okN = parsed && parsed.qs.length ? Math.min(gn, parsed.qs.length) : 0
-      // 本地唯一单选质检：题组里任何一题不满足「严格单选」→ 整组重出（保证质量是根本）
-      const badIdx = (parsed && parsed.qs || []).findIndex((qq) => !localQuizVerify(qq).ok)
-      if (okN >= Math.min(2, gn) && badIdx >= 0) {
-        failAll('（本组第 ' + (badIdx + 1) + ' 题未过本地唯一单选质检：' + localQuizVerify(parsed.qs[badIdx]).reason + '，可点「重出」重试整组）')
-        return
-      }
-      if (okN >= Math.min(2, gn)) {
-        // 材料/共用题干缺失时视为整组失败（缺材料题无法作答），触发重出而非静默拼成无材料题
-        if (!parsed.material) { failAll('（材料缺失，可点「重出」重试整组）'); return }
-        // 资料分析：材料若没有 SVG 图，用图形增强模型兜底绘制成真题风格图表（迁移图推绘图能力）
-        let mat = parsed.material
-        if (isZL && !/```svg/.test(mat) && (item.matType === 'table' || item.matType === 'mixed' || item.matType === 'chart')) {
-          showToast('📊 正在把材料绘制成图表…', 'info')
-          mat = await drawZlMaterialSVG(mat, item.matType)
-        }
-        for (let k = 0; k < gn; k++) {
-          const slot = questions.value[i + k]
-          const q = parsed.qs[k]
-          if (slot && q) {
-            slot.stem = '【📄 材料】\n' + mat + '\n\n' + q.stem
-            slot.options = q.options
-            slot.answer = q.answer
-            slot.explain = q.explain || ''
-            slot.variant = slot.variant || (isZL ? (k === gn - 1 ? '综合分析' : ['基期/现期', '增长率', '增长量', '比重', '平均数', '倍数', '隔年增长', '年均增长', '混合增长率', '拉动增长/贡献率'][k % 10]) : '分析推理')
-          } else if (slot) {
-            slot.err = true
-            slot.stem = '（本组第 ' + (k + 1) + ' 题解析失败，可点「重出」重试整组）'
-          }
-        }
-      } else failAll('（材料题组生成格式异常，可点「重出」重试整组）')
-      // 写入出题历史（材料题组）：成功与否 + 失败原因，供 AI 学习
-      recordGenLog({ plate: item.subject, variant: item.variant || '', difficulty: item.difficulty || '', ok: !!parsed && okN >= Math.min(2, gn) && !questions.value[i + (gn - 1)].err, attempts: 1, reasons: [], src: 'group' })
-    } catch (e) {
-      if (genAbort) return // 取消出卷：静默返回，不记为出题失败
-      failAll('（出题失败：' + e.message + '）')
-      recordGenLog({ plate: item.subject, variant: item.variant || '', difficulty: item.difficulty || '', ok: false, attempts: 1, reasons: [String(e && e.message || '')], src: 'group' })
-    }
-    return
-  }
-  const variant = item.variant || ''
-  try {
-    const sys = buildQuizSys({ plate: item.subject, difficulty: item.difficulty || 'mid', variant })
-    const dir = item.dir || resolveDir('auto')
-    const dh = dirHint(item.subject, dir, item.dirText)
-    const fmtHint = (item.subject === '图形推理' && singleMode.value && tutuFormat.value && tutuFormat.value !== 'auto') ? '本题出题形式固定为【' + tutuFormat.value + '】，请严格按【图形推理】子命题人的「SVG 布局铁律」中该形式的画布尺寸与格子布局出图。' : ''
-    const zlLearn = genLogHint(item.subject, variant) + (plateLearn(item.subject) ? '（本板块避坑：' + plateLearn(item.subject) + '）' : '')
-    const ask = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + (zlLearn ? '\n' + zlLearn : '') + dh +
-      '【本次输出要求（提速，必须遵守）】只输出：题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X' +
-      (item.subject === '逻辑判断' && variant === '真假话' ? ' + 末尾【验证数据】JSON' : '') +
-      '。不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。' + fmtHint
-    const msgs = [{ role: 'system', content: sys }, { role: 'user', content: ask }]
-    let reply
-    if (singleMode.value && questions.value.length === 1) {
-      // 单题：流式生成，题干边出边显示
-      genLive.value = ''
-      reply = await chatStream(msgs, c, (d) => { if (d && d.text) genLive.value = liveVisible(d.text) }, genCtrl && genCtrl.signal, 150000)
-      genLive.value = liveVisible(reply || '')
-    } else {
-      reply = await chatOnce(c, msgs, 6000, 120000, genCtrl && genCtrl.signal)
-    }
-    const extractVerifyData = (text) => {
-      const m = String(text || '').match(/【验证数据】\s*(\{[\s\S]*?\})/)
-      if (!m) return null
-      try { return JSON.parse(m[1]) } catch (e) { return null }
-    }
-    // 出题质检：本地校验(4选项) → 真假话程序真值表硬校验 → 严格质检，最多重试 3 次
-    let qz = null
-    let raw = reply || '' // 最近一次模型输出原文
-    let fixHint = '' // 质检未通过原因 → 下一轮定向修正（减少盲目重出、更快成功）
-    const failReasons = [] // 各次质检失败原因 → 写入出题历史（供 AI 学习）
-    let genAttempts = 0 // 出题尝试次数（记录进历史）
-    let ttVerified = false // 真假话已过程序真值表硬校验（比 AI 质检更强，免二次 AI 质检）
-    let lastParsed = null // 解析成功的题先记下，作为放宽兜底（避免 AI 质检过严反复“多次重出”）
-    const stage = (attempt, label) => { genStatus.value = (attempt > 0 ? '第 ' + (attempt + 1) + ' 次重出 · ' : '') + label }
-    for (let attempt = 0; attempt < 3 && !qz; attempt++) {
-      genAttempts++
-      stage(attempt, 'AI 生成中…')
-      let cur = attempt === 0 ? parseQuiz(raw) : null
-      if (!cur || !cur.options || cur.options.length < 4) {
-        // 网络/Key 错误直接抛出（外层显示真实原因），不盲目重试；质检不过则带原因定向重出
-        raw = await chatOnce(c, fixHint ? [{ role: 'system', content: sys }, { role: 'user', content: ask + fixHint }] : msgs, 6000, 90000, genCtrl && genCtrl.signal)
-        cur = parseQuiz(raw)
-      }
-      if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
-      // 本地唯一单选质检（确定性 skill）：通用硬规则 + 本板块/题型「质检子命题人」专属检查
-      const lv = localQuizVerify(cur)
-      const plateErr = plateChecks(cur, item.subject, variant)
-      const allErr = [...(lv.ok ? [] : [lv.reason]), ...plateErr]
-      if (allErr.length) {
-        const reason = allErr.join('；')
-        failReasons.push(reason)
-        fixHint = '。上一版未过本地质检（' + reason + '）：请修正使题目恰有唯一正确选项（单选），其余三项必须明显不符合问法，严禁重复/同义选项' + (plateLearn(item.subject) ? '（本板块避坑：' + plateLearn(item.subject) + '）' : ''); continue
-      }
-      lastParsed = cur // 解析成功且通过本地质检 → 记下，供放宽兜底
-      if ((variant === '真假话' || String(raw).includes('【验证数据】')) && item.subject === '逻辑判断') {
-        stage(attempt, '真值表硬校验中…')
-        const vd = extractVerifyData(raw)
-        const vt = vd ? verifyTruthTable(vd) : null
-        if (!vt || !vt.ok) { fixHint = '。上一版真值表校验未通过（' + (vt ? vt.reason : '缺少【验证数据】JSON') + '）：请重设条件/选项，使 2^n 枚举恰一组满足题设真假数、且恰一个选项对应唯一解，并在输出末尾附【验证数据】JSON'; continue }
-        ttVerified = true
-      }
-      if (store.cfg.strictGen && !ttVerified) {
-        stage(attempt, 'AI 质检中…')
-        const vq = await verifyQuestion(cur, item.subject, variant)
-        if (!vq) { failReasons.push('AI质检未过（唯一解/恰一正确/无逻辑谬误）'); fixHint = '。上一版未过 AI 质检（题干自洽/唯一解/恰一正确/无逻辑谬误）：请按反馈修正后重出'; continue }
-      }
-      qz = cur
-    }
-    // 放宽兜底：本地唯一单选质检必须通过；未通过本地质检的题绝不收（保证唯一单选是底线）
-    // 写入出题历史（供 AI 学习：板块/题型/尝试次数/失败原因/是否成功）
-    recordGenLog({ plate: item.subject, variant, difficulty: item.difficulty || '', ok: !!qz, attempts: genAttempts, reasons: failReasons, src: 'single' })
-    if (!qz && lastParsed && variant !== '真假话' && localQuizVerify(lastParsed).ok) qz = lastParsed
-    if (qz && qz.options && qz.options.length >= 4) {
-      item.stem = qz.stem
-      item.options = qz.options
-      item.answer = qz.answer
-      item.explain = qz.explain || ''
-      item.designer = qz.designer || ''
-      item.variant = variant
-    } else {
-      // AI 多次未过质检 → 图推自动回退本地真题生成（保证一定出得了题、且无裁切）
-      if (item.subject === '图形推理' && !String(item.variant || '').match(/空间重构|截面图|三视图|立体拼合/)) {
-        const lq = genTutuQuestion()
-        if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地真题'; item.local = true; item.err = false; return }
-      }
-      item.stem = '（本题目 AI 生成多次未通过质检，可点「重出」重试）'
-      item.err = true
-    }
-  } catch (e) {
-    if (genAbort) { item.err = true; return } // 取消出卷：仅标记待重出，不覆盖为“出题失败”
-    item.stem = '（出题失败：' + e.message + '）'
-    item.err = true
-  }
-}
-async function ensureGen(i) {
-  const item = questions.value[i]
-  if (!item || item.stem || generating[i]) return
-  if (item.fromWrong) return
-  generating[i] = true
-  genBusy.value = true
-  await genOne(i)
-  generating[i] = false
-  genBusy.value = false
-  // 预生成下一题
-  if (questions.value[i + 1]) ensureGen(i + 1)
-}
-async function prefetchSingle() {
-  // 后台预生成下一题（同板块/难度/题型），点「再来一题」秒开
-  if (!singleMode.value || genAbort) return
-  const plate = singlePlate.value
-  const diff = difficulty.value === 'curve' ? 'mid' : difficulty.value
-  const variant = singleVariant.value === '不限' ? '' : singleVariant.value
-  if (plate === '图形推理' && singleLocal.value) {
-    const lq = genTutuQuestion()
-    if (lq) prefetchQ.value = { item: { ...item, stem: lq.stem, options: lq.options, answer: lq.answer, explain: lq.explain || '', variant: '本地真题', local: true }, plate, difficulty: diff, variant: variant === '' ? '不限' : variant }
-    return
-  }
-  const c = pickGenC()
-  if (!c || !c.key) return
-  const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
-  const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
-  const item = { subject: plate, difficulty: diff, variant, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false }
-  try {
-    const sys = buildQuizSys({ plate, difficulty: diff, variant })
-    const ask = (variant ? '请为【' + plate + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + plate + '】出一道仿真模拟题。') + dirHint(plate, dir, dirText)
-    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 6000, 120000, genCtrl && genCtrl.signal)
-    const qz = parseQuiz(reply)
-    if (qz && qz.options && qz.options.length >= 4) prefetchQ.value = { item: { ...item, stem: qz.stem, options: qz.options, answer: qz.answer, explain: qz.explain || '', designer: qz.designer || '' }, plate, difficulty: diff, variant }
-  } catch (e) { /* 预生成失败静默，下次点再来一题再实时生成 */ }
-}
-function nextSingle() {
-  // 单题快练：优先用预生成的下一题（秒开），否则实时生成
-  singleMode.value = true
-  const curPlate = singlePlate.value
-  const curDiff = difficulty.value === 'curve' ? 'mid' : difficulty.value
-  const curVar = singleVariant.value === '不限' ? '' : singleVariant.value
-  const pf = prefetchQ.value
-  if (pf && pf.item && pf.item.stem && pf.plate === curPlate && pf.difficulty === curDiff && pf.variant === curVar) {
-    const item = { ...pf.item, picked: null, correct: null, timeout: false, err: false }
-    const paper = makePaper('单题快练 · ' + curPlate, [item])
-    papers.value[0] = paper; savePapers()
-    prefetchQ.value = null
-    if (item && item.stem && !item.err) addToQuizCol(item)
-    startPaper(paper)
-    prefetchSingle()
-    return
-  }
-  prefetchQ.value = null
-  singlePlate.value = curPlate
-  singleVariant.value = curVar === '' ? '不限' : curVar
-  const items = buildSingleItems()
-  const paper = makePaper('单题快练 · ' + curPlate + (items.length > 1 ? '（' + items.length + ' 题组）' : ''), items)
-  papers.value[0] = paper; savePapers()
-  genAll(paper)
-}
-function retryGen() {
-  const i = cur.value
-  const item = questions.value[i]
-  if (!item) return
-  if (item.group) {
-    // 整组重出：定位组首，清空整组
-    let lead = i
-    for (let k = i; k >= 0; k--) {
-      const x = questions.value[k]
-      if (x && x.group && x.groupId === item.groupId) lead = k
-      else break
-    }
-    for (let k = lead; k < lead + (item.groupN || 5); k++) {
-      const x = questions.value[k]
-      if (x) { x.stem = null; x.err = false; x.options = []; x.answer = ''; x.explain = '' }
-    }
-    ensureGen(lead)
-    return
-  }
-  item.stem = null; item.err = false; item.options = []; item.answer = ''; item.explain = ''
-  ensureGen(i)
-}
+// 注：drawZlMaterialSVG / genOne（含质检与本地回退）已纯移动至 composables/useExamGen.js
+// 注：ensureGen / prefetchSingle 已纯移动至 composables/useExamGen.js
+// 注：nextSingle / retryGen 已纯移动至 composables/useExamGen.js
 function pick(k) {
   const i = cur.value
   const qq = questions.value[i]
-  if (!qq || marks.value[i] != null || qq.err) return
-  marks.value[i] = { ok: k === qq.answer, pick: k, usedSec: qElapsed.value }
+  if (!qq || qq.err) return
+  // 答题卡交卷模式：只填涂不判对错（交卷前可反复改涂，交卷后统一判分 + 显示答案/解析）
+  // 即时模式：保留原「答完即时看对错 + 萌宠错因分析 + 答对自动下一题」体验
+  marks.value[i] = { pick: k, usedSec: qElapsed.value }
+  if (qq.zhenti && !qq.answer) {
+    marks.value[i].judging = true
+    judgeZhenti(i, k)
+    return
+  }
   syncPetCurQ(i)
   maybeEnhance(i)
-  if (qq.answer && k === qq.answer) { if (autoNext.value && i < questions.value.length - 1) { setTimeout(() => nextQ(), 500); return } } else if (qq.answer) {
-    showToast('❌ 选错了，正确答案是 ' + qq.answer + '，萌宠正在分析你的错因…', 'error')
-    petAnalyzeCurrent()
+  if (!sheetMode.value) {
+    marks.value[i].ok = qq.answer ? k === qq.answer : false
+    if (qq.answer && k === qq.answer) { if (autoNext.value && i < questions.value.length - 1) { setTimeout(() => nextQ(), 500); return } } else if (qq.answer) {
+      showToast('❌ 选错了，正确答案是 ' + qq.answer + '，萌宠正在分析你的错因…', 'error')
+      petAnalyzeCurrent()
+    }
+  } else if (autoNext.value && i < questions.value.length - 1) { setTimeout(() => nextQ(), 450) }
+}
+// 📚 真题快练：AI判题（网友回忆版无官方答案）
+const zhentiJudgeBusy = {}
+async function judgeZhenti(i, k) {
+  const qq = questions.value[i]
+  if (!qq) return
+  if (zhentiJudgeBusy[i]) { setTimeout(() => judgeZhenti(i, k), 1500); return }
+  zhentiJudgeBusy[i] = true
+  const c = pickGenC()
+  if (!c || !c.key) { showToast('真题AI判题需在设置配置文字模型Key', 'error'); zhentiJudgeBusy[i] = false; const m = marks.value[i]; if (m) m.judging = false; return }
+  let reply = ''
+  try {
+    reply = await chatOnce(c, [
+      { role: 'system', content: '你是行测阅卷老师。根据题干与选项确定唯一正确答案，只输出一行：正确选项是X（X为A/B/C/D）。不确定时选最符合题意的一项。' },
+      { role: 'user', content: qq.stem + '\n' + qq.options.map(o => o.k + '.' + o.t).join('\n') + '\n考生选择了' + k + '。请给出正确选项。' },
+    ], 300, 60000)
+  } catch (e) {}
+  zhentiJudgeBusy[i] = false
+  const mk = marks.value[i]
+  if (!mk) return
+  mk.judging = false
+  // 修复：真题无答案时用 AI 判题结果回填答案（此前 reply 被丢弃导致"无答案→AI判题"恒失败）
+  const m2 = String(reply || '').match(/正确选项是\s*([A-D])/i)
+  if (m2) qq.answer = m2[1].toUpperCase()
+  if (qq.answer) {
+    mk.ok = k === qq.answer
+    showToast(mk.ok ? '✅ 真题判题：回答正确' : '❌ 真题判题：正确答案是 ' + qq.answer, mk.ok ? 'success' : 'error')
+    syncPetCurQ(i)
+  } else {
+    showToast('真题判题失败，可点重试', 'error')
   }
+}
+// 答题卡 2B 填涂：点格子即填涂（重选覆盖），交卷后不可改
+function sheetPick(i, k) {
+  if (i < 0 || i >= questions.value.length || phase.value !== 'doing') return
+  const qq = questions.value[i]
+  if (!qq || qq.err) return
+  // 2B 铅笔：交卷前可反复改涂（覆盖上一笔）
+  marks.value[i] = { pick: k, usedSec: marks.value[i] && marks.value[i].usedSec != null ? marks.value[i].usedSec : 0 }
+  if (cur.value === i) syncPetCurQ(i)
+  maybeEnhance(i)
+  if (autoNext.value && i < questions.value.length - 1 && sheetShow.value) setTimeout(() => { cur.value = i + 1; qLeft.value = perQ.value; qElapsed.value = 0 }, 350)
+}
+// 答题卡格子 = 该题真实选项字母（兼容判断对/错、非 ABCD 键；无选项题显示 — 回题目页自评）
+function sheetKeys(qq) {
+  if (qq && qq.options && qq.options.length) return qq.options.map((o) => o.k).filter(Boolean)
+  return []
 }
 function selfMark(ok) {
   const i = cur.value
@@ -1277,7 +612,7 @@ function go(i) {
   if (gIt && gIt.stem && !gIt.err) maybeEnhance(i)
 }
 function nextQ() {
-  if (cur.value < questions.value.length - 1) { go(cur.value + 1) } else finish()
+  if (cur.value < questions.value.length - 1) { go(cur.value + 1) } else askFinish()
 }
 function prevQ() { if (cur.value > 0) go(cur.value - 1) }
 const finishAsk = ref(false) // 提前交卷确认弹窗
@@ -1291,9 +626,21 @@ function confirmFinish() { finishAsk.value = false; finish() }
 function finish() {
   clearTimers()
   questions.value.forEach((qq, i) => {
-    if (marks.value[i] == null) marks.value[i] = { ok: false, pick: '', timeout: false, blank: true }
+    const m = marks.value[i]
+    if (m == null) marks.value[i] = { ok: false, pick: '', timeout: false, blank: true }
+    else if (m.ok === undefined) {
+      // 答题卡模式：交卷时统一判分
+      m.ok = qq.answer ? m.pick === qq.answer : !!(m.self)
+      if (!qq.answer && m.pick === '对') m.ok = true
+      if (!qq.answer && m.pick === '错') m.ok = false
+    }
   })
   if (singleMode.value) questions.value.forEach((qq, i) => updateQuizColResult(qq, !!(marks.value[i] && marks.value[i].ok)))
+  // 答题卡交卷后：萌宠自动分析第一道错题错因（延续原即时模式的错因分析能力）
+  if (sheetMode.value) {
+    const wi = questions.value.findIndex((qq, i) => marks.value[i] && !marks.value[i].ok)
+    if (wi >= 0) setTimeout(() => { syncPetCurQ(wi); petAnalyzeCurrent() }, 400)
+  }
   const rec = { ts: Date.now(), name: curPaper.value ? curPaper.value.name : '模拟卷', n: questions.value.length, score: score.value, rate: rate.value, sec: totalElapsed.value }
   results.value.unshift(rec)
   if (results.value.length > 50) results.value = results.value.slice(0, 50)
@@ -1307,21 +654,7 @@ function achieveText() {
   if (r >= 60) return '👍 合格，把错题复盘一遍更稳'
   return '💪 再接再厉，错题都进本子重点刷'
 }
-// 出题严格质检：二次验证 题干自洽/唯一解/恰一正确（开启 strictGen 时对每道生成题执行）
-async function verifyQuestion(q, plate, variant) {
-  const c = pickGenC()
-  if (!c || !c.key) return true
-  try {
-    const learn = genLogHint(plate, variant) // 历史质检学习：过去这类题常错在哪
-    const sys = '你是公考行测出题质检员（严格单选）。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②【唯一正确项】必须且只能有一个选项符合题目问法：禁止多选、禁止无正确选项、禁止两个选项同真、禁止选项全对、禁止两个选项同义重复；③选非题（错误的是/不属于/不能推出/不符合）必须保证其余三项均【符合】问法、只有答案项【不符合】；选是题反之；④选项与题干相关、无逻辑谬误；⑤若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。' + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"指出具体是哪几个选项都成立/都不成立/重复，便于重出修正"}'
-    const user = '题干：' + String(q.stem || '') + '\n选项：' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n答案：' + String(q.answer || '')
-    const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 400)
-    const m = String(r || '').match(/"ok"\s*:\s*(true|false)/)
-    // fail-closed：质检结果无法解析（缺 ok 字段/JSON 异常）一律视同不合格，触发重出，避免"白付钱却放行劣质题"
-    if (!m) return false
-    return m[1] === 'true'
-  } catch (e) { return false }
-}
+// 注：verifyQuestion（出题严格质检）已纯移动至 composables/useExamGen.js
 // ===== AI 深度解析：导入/错题的解析太简单时，走「名师讲解」路径补全（同对话回复逻辑） =====
 async function enhanceExplain(q) {
   const c = pickGenC()
@@ -1388,9 +721,10 @@ function maybeEnhance(i) {
 function saveWrongs() {
   const wrongs = questions.value.filter((qq, i) => marks.value[i] && !marks.value[i].ok)
   if (!wrongs.length) { showToast('👍 当前没有答错的题，无需入库', 'success'); return }
+  let saved = 0, rejected = 0
   wrongs.forEach((qq) => {
     if (qq.fromWrong) return
-    store.wqs.unshift({
+    const r = addWrong({
       id: Date.now() + Math.random(),
       subject: qq.subject || '未分类',
       question: qq.stem + '\n\n' + (qq.options || []).map((o) => o.k + '. ' + o.t).join('\n'),
@@ -1402,10 +736,13 @@ function saveWrongs() {
       correctStreak: 0,
       mastery: 0,
       digested: false
-    })
+    }, { silent: true })
+    if (r && r.ok) saved++
+    else rejected++
   })
   saveWqs()
-  showToast('✅ 已存入错题本 ' + wrongs.length + ' 题', 'success')
+  if (rejected) showToast('✅ 已存入 ' + saved + ' 题，' + rejected + ' 条非完整/重复未入库', 'warning')
+  else showToast('✅ 已存入错题本 ' + saved + ' 题', 'success')
   savedWrongFlash.value = true
   setTimeout(() => { savedWrongFlash.value = false }, 1600)
 }
@@ -1420,20 +757,20 @@ function startPreviewExam() {
 function savePreviewToWrong() {
   const qs = previewList.value.filter((q) => q.stem)
   if (!qs.length) { showToast('没有可用的题目', 'info'); return }
-  const before = store.wqs.length
+  let saved = 0, rejected = 0
   qs.forEach((q) => {
-    const key = String(q.stem || '').slice(0, 40)
-    if (!store.wqs.some((w) => String(w.question || '').slice(0, 40) === key)) {
-      store.wqs.unshift({
-        id: Date.now() + Math.random(), subject: q.subject || '未分类',
-        question: q.stem + '\n\n' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n'),
-        answer: '正确答案 ' + (q.answer || ''), reasons: ['导入习题集'],
-        time: new Date().toLocaleString(), at: Date.now(), wrongCount: 0, correctStreak: 0, mastery: 0, digested: false
-      })
-    }
+    const r = addWrong({
+      id: Date.now() + Math.random(), subject: q.subject || '未分类',
+      question: q.stem + '\n\n' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n'),
+      answer: '正确答案 ' + (q.answer || ''), reasons: ['导入习题集'],
+      time: new Date().toLocaleString(), at: Date.now(), wrongCount: 0, correctStreak: 0, mastery: 0, digested: false
+    }, { silent: true })
+    if (r && r.ok) saved++
+    else rejected++
   })
   saveWqs()
-  showToast('✅ 已存入错题本 ' + (store.wqs.length - before) + ' 题', 'success')
+  if (rejected) showToast('✅ 已存入 ' + saved + ' 题，' + rejected + ' 条非完整/重复未入库', 'warning')
+  else showToast('✅ 已存入错题本 ' + saved + ' 题', 'success')
 }
 function delPreview(i) { previewList.value.splice(i, 1) }
 function delPaper(i) { papers.value.splice(i, 1); savePapers() }
@@ -1456,7 +793,7 @@ const topTitle = computed(() => {
   if (phase.value === 'gen') return '⏳ AI 出卷中…'
   if (phase.value === 'doing') return '📝 作答中 · ' + (curPaper.value ? curPaper.value.name : '模拟卷')
   if (phase.value === 'result') return '📄 成绩单'
-  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'import' ? '📂 导入组卷' : srcMode.value === 'wrong' ? '📚 错题组卷' : '📝 模拟组卷'
+  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'morning' ? '🌅 每日晨练包' : srcMode.value === 'weekRedo' ? '📅 每周重做卷' : srcMode.value === 'import' ? '📂 导入组卷' : srcMode.value === 'wrong' ? '📚 错题组卷' : '📝 模拟组卷'
 })
 function topBack() {
   if (phase.value === 'doing' || phase.value === 'result' || phase.value === 'preview') backToConfig()
@@ -1468,13 +805,7 @@ function toggleFold(k) {
   else if (k === 'results') { openResults.value = !openResults.value; try { localStorage.setItem('xc_ep_results', openResults.value ? '1' : '0') } catch (e) {} }
   else { openQuizCol.value = !openQuizCol.value; try { localStorage.setItem('xc_ep_quizcol', openQuizCol.value ? '1' : '0') } catch (e) {} }
 }
-// 流式实时显示时隐藏答案与解析：只保留到第一个揭示标记之前（题干+选项）
-const REVEAL_RE = /【正确答案】|###\s*✅?\s*(答案解析|解析|答案详解)|正确答案\s*[:：]|^答案\s*[:：]/m
-function liveVisible(t) {
-  const s = String(t || '')
-  const i = s.search(REVEAL_RE)
-  return i >= 0 ? s.slice(0, i) : s
-}
+// 注：REVEAL_RE / liveVisible（流式隐藏答案）已纯移动至 composables/useExamGen.js
 onMounted(() => {
   if (props.initialPaper && props.initialPaper.questions && props.initialPaper.questions.length) {
     const p = props.initialPaper
@@ -1492,18 +823,43 @@ const moduleStats = computed(() => {
   const map = {}
   questions.value.forEach((qq, i) => {
     const s = qq.subject || '未分类'
-    if (!map[s]) map[s] = { subject: s, total: 0, ok: 0, sec: 0 }
+    if (!map[s]) map[s] = { subject: s, total: 0, ok: 0, answered: 0 }
     map[s].total++
     if (marks.value[i] && marks.value[i].ok) map[s].ok++
-    map[s].sec += marks.value[i] ? 1 : 0
+    if (marks.value[i]) map[s].answered++
   })
   return Object.values(map)
 })
 function doExportPaper(format) {
   if (!curPaper.value || !questions.value.length) { showToast('暂无可导出的卷子', 'info'); return }
-  exportPaper(curPaper.value, marks.value, { score: score.value, rate: rate.value, sec: totalElapsed.value, moduleStats: moduleStats.value }, format, aiLayout.value)
+  exportPaper(curPaper.value, marks.value, { score: score.value, rate: rate.value, sec: totalElapsed.value, moduleStats: moduleStats.value }, format, aiLayout.value, separateAns.value)
 }
-onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
+// 注：genTimer 的清理已随 useExamGen 内部 onUnmounted 处理
+onUnmounted(() => { clearTimers() })
+
+// R3-③：把全部状态/方法聚合成一个 reactive ctx，注入三个子组件
+// （ExamConfig / ExamAnswer / ExamReport）。子组件用 toRefs 暴露状态、直接解构暴露方法，
+// 模板逐字搬入，避免任何双向绑定错位。
+const examCtx = reactive({
+  // 状态 ref / 计算属性
+  srcMode, sheetMode, templateId, modules, perQ, fastGenModel, useFigGen, aiCap, genConcur, mixMode,
+  paperDir, paperDirText, paperYtN, paperYtNGroup, difficulty, singleGroup, singlePlate, singleVariant,
+  singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType, autoNext, imgs, textFiles,
+  qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit, onlyPend, byWrongCount, papers,
+  openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, selTmpl, tmplJudgeNote, judgeSplitHint,
+  totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates,
+  q, cur, questions, qLeft, qElapsed, marks, modLeft, modTotal, modDone, totalLeft, totalElapsed,
+  paperMode, sheetShow, answeredCount, genStatus, qHtml, optHtmls, hasSvgOpts, qExplainHtml, score, rate,
+  moduleStats, reviewOpen, prefetchQ, savedWrongFlash, aiLayout, separateAns, curPaper, singleMode,
+  // 常量
+  TEMPLATES, SUBJECTS, SIX_GROUPS, zhentiSecs, store,
+  // 方法
+  onTemplate, templateTotal, moduleRefSec, rmRow, addRow, saveFastGenModel, saveCfg, onSingleGroup,
+  onSinglePlate, setDirText, toggleZhentiPlate, toggleWrongSel, toggleFold, openPaper, delPaper, startRedo,
+  delQuizCol, clearQuizCol, onFiles, rmImg, rmTxt, fmt, cancel, start, go, retryGen, pick, selfMark,
+  variantToChat, enhanceExplain, openDesigner, backToConfig, saveWrongs, finish, nextSingle, askFinish,
+  prevQ, nextQ, doExportPaper, replay, backList, renderMd, savePaperMode, achieveText
+})
 
 </script>
 
@@ -1515,357 +871,8 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
         <span class="pnl-top-t">{{ topTitle }}</span>
       </div>
       <!-- ========== 配置 ========== -->
-      <div v-if="phase === 'config'" class="pp-config">
-        <div class="ep-src-row">
-          <button class="fp-b" :class="{ on: srcMode === 'single' }" @click="srcMode = 'single'">⚡ 单题快练</button>
-          <button class="fp-b" :class="{ on: srcMode === 'ai' }" @click="srcMode = 'ai'">🎲 AI 整卷出题</button>
-          <button class="fp-b" :class="{ on: srcMode === 'import' }" @click="srcMode = 'import'">📂 导入材料</button>
-          <button class="fp-b" :class="{ on: srcMode === 'wrong' }" @click="srcMode = 'wrong'">📚 错题集组卷</button>
-        </div>
-
-        <div v-if="srcMode === 'ai'" class="ep-block">
-          <div class="ep-block-hd">📐 卷面构成（国考/省考模板，均可自由编辑）</div>
-          <div class="ep-note">💡 全真模考：按国考/省考模板题量与时限整卷组题，考点/题型自动轮换，出完直接开考计时。</div>
-          <div class="ep-tmpl-row">
-            <select v-model="templateId" class="tb-sel" @change="onTemplate()">
-              <option v-for="t in TEMPLATES" :key="t.id" :value="t.id">{{ t.name }} · {{ templateTotal(t) }}题 / {{ t.mins }}分钟</option>
-            </select>
-            <button class="btn btn-gh" @click="onTemplate()">↻ 载入模板</button>
-          </div>
-          <div v-if="selTmpl.tag" class="ep-note">🏷️ {{ selTmpl.tag }}</div>
-          <div v-if="selTmpl.note" class="ep-note">💡 {{ selTmpl.note }}</div>
-          <div v-if="tmplJudgeNote" class="ep-note">🧩 判断推理子板块：{{ tmplJudgeNote }}（国考判断推理常为 4 子板块各 10 题）</div>
-
-          <div class="ep-mods">
-            <div class="ep-mod-row hd"><span>板块</span><span>题数</span><span>参考时限(分)</span><span class="ep-perq">每题约</span><span></span></div>
-            <div v-for="(m, i) in modules" :key="i" class="ep-mod-row">
-              <select v-model="m.subject" class="tb-sel">
-                <option v-for="s in SUBJECTS" :key="s" :value="s">{{ s }}</option>
-              </select>
-              <input v-model.number="m.count" type="number" min="1" max="80" class="ep-inp" />
-              <input v-model.number="m.refMin" type="number" min="1" max="120" class="ep-inp" />
-              <span class="ep-perq">{{ moduleRefSec(m) }}s</span>
-              <button class="ep-x" @click="rmRow(i)">×</button>
-            </div>
-          </div>
-          <div class="ep-mod-actions">
-            <button class="btn btn-gh" @click="addRow()">➕ 加板块</button>
-            <span class="ep-total">合计 <b>{{ totalQ }}</b> 题 · 参考 <b>{{ refTotal }}</b> 分钟<template v-if="selTmpl.mins">（官方 {{ selTmpl.mins }} 分钟）</template></span>
-          </div>
-        </div>
-
-        <div class="ep-block">
-          <div class="ep-block-hd">⚙️ 出卷参数</div>
-          <div class="ep-param">
-            <label>每题限时</label>
-            <select v-model="perQ" class="tb-sel">
-              <option :value="30">30 秒</option><option :value="45">45 秒</option>
-              <option :value="60">60 秒（推荐，≤1分钟）</option>
-              <option :value="75">75 秒</option><option :value="90">90 秒</option>
-            </select>
-            <span class="ep-hint">整卷倒计时 = 题数 × 每题限时</span>
-          </div>
-          <div class="ep-param">
-            <label>出题快模型（提速）</label>
-            <input v-model="fastGenModel" class="pv-edit" style="margin-top: 6px" placeholder="留空=跟随文字模型；填 deepseek-chat 等非思考模型名，出题/预生成用它，比思考模型(v4-flash)快很多（需与文字模型同一服务商/Key）" @change="saveFastGenModel()" />
-            <span class="ep-hint">为什么：v4-flash 是思考模型，每次出题先想一大段再作答；deepseek-chat 直接作答。出题用快的、对话/解析用质量高的。</span>
-          </div>
-          <div class="ep-param">
-            <label><input v-model="useFigGen" type="checkbox" /> 🚀 出题用智谱快模型（图形增强里配置的 GLM）</label>
-            <span class="ep-hint">出题/预生成/解析/质检都用智谱 GLM（非思考、快）；智谱 Key 在「设置 → 图形增强」里填。此项优先于「出题快模型」。</span>
-          </div>
-          <div v-if="srcMode === 'ai'" class="ep-param">
-            <label>每板块题量</label>
-            <select v-model="aiCap" class="tb-sel">
-              <option :value="0">全量（严格按卷面模板题量）</option>
-              <option :value="3">抽样 3 题/板块（快测）</option>
-              <option :value="5">抽样 5 题/板块</option>
-              <option :value="10">抽样 10 题/板块</option>
-            </select>
-            <span class="ep-hint">全量=按所选国考/省考模板题量出题（如国考副省 135 题）；抽样用于快速体验，题量与模板不符</span>
-          </div>
-          <div v-if="srcMode === 'ai'" class="ep-param">
-            <label>出卷并发度</label>
-            <select v-model="genConcur" class="tb-sel">
-              <option :value="2">2 路并发（稳妥）</option>
-              <option :value="3">3 路并发（推荐）</option>
-              <option :value="4">4 路并发（最快，需 API 支持）</option>
-            </select>
-            <span class="ep-hint">并发出题请求数，越高整卷出得越快；若模型 API 频繁报限流/超时，请调低</span>
-          </div>
-          <div v-if="srcMode !== 'single'" class="ep-param">
-            <label>出卷顺序</label>
-            <select v-model="mixMode" class="tb-sel">
-              <option value="module">按板块顺序（贴近真实卷）</option>
-              <option value="mix">混合打乱</option>
-            </select>
-          </div>
-          <div v-if="srcMode === 'ai'" class="ep-param">
-            <label>问法（整卷统一）</label>
-            <select v-model="paperDir" class="tb-sel">
-              <option value="auto">AI 随机（是/非 自由）</option>
-              <option value="is">选是题（正确的是/属于/能推出）</option>
-              <option value="not">选非题（错误的是/不属于/不能推出）</option>
-              <option value="custom">自定义问法</option>
-            </select>
-            <input v-if="paperDir === 'custom'" v-model="paperDirText" class="pv-edit" style="margin-top: 6px" placeholder="输入整卷统一问法，如：最能削弱上述结论？" />
-            <span class="ep-hint">整卷每题按此问法出题；auto=AI 自由随机 是/非；自定义问法全卷统一</span>
-          </div>
-          <div v-if="srcMode === 'ai'" class="ep-param">
-            <label>一拖N 分析推理组（逻辑判断）</label>
-            <select v-model="paperYtNGroup" class="tb-sel">
-              <option :value="0">不加入（默认）</option>
-              <option :value="1">1 组</option>
-              <option :value="2">2 组</option>
-            </select>
-            <label style="margin-top: 6px">每组题数</label>
-            <select v-model="paperYtN" class="tb-sel">
-              <option :value="2">一拖2（江苏考情）</option>
-              <option :value="3">一拖3</option>
-              <option :value="4">一拖4</option>
-              <option :value="5">一拖5（国考地市/执法）</option>
-            </select>
-            <span class="ep-hint">一拖N = 1 个共用题干 + N 个分析推理小题（属分析推理综合推演，独立于削弱/加强等题型）；小题可在不违背总题干逻辑的前提下新增附加条件</span>
-          </div>
-          <div class="ep-param">
-            <label>出题难度</label>
-            <select v-model="difficulty" class="tb-sel">
-              <option value="curve">智能曲线（前易后难，30%易/50%中/20%难）</option>
-              <option value="easy">易（单一考点，直接对应）</option>
-              <option value="mid">中（一处拐弯/一个陷阱）</option>
-              <option value="hard">难（复合考点+强干扰）</option>
-              <option value="real">真题级（反套路·强干扰·陷阱叠加）</option>
-            </select>
-            <span class="ep-hint">已接入「命题专家」规范：考点先行·干扰项错因·唯一解自检</span>
-          </div>
-          <div class="ep-param">
-            <label>
-              <input v-model="store.cfg.strictGen" type="checkbox" @change="saveCfg()" />
-              出题严格质检（生成后二次验证 唯一解/恰一正确/无逻辑谬误，更稳但略慢）
-            </label>
-          </div>
-        </div>
-
-        <div v-if="srcMode === 'single'" class="ep-block">
-          <div class="ep-block-hd">⚡ 单题快练</div>
-          <div class="ep-note">💡 专项速刷 · 五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量，碎片时间快速突破。</div>
-          <div class="ep-param">
-            <label>① 六大板块</label>
-            <select v-model="singleGroup" class="tb-sel" @change="onSingleGroup()">
-              <option v-for="g in SIX_GROUPS" :key="g.key" :value="g.key">{{ g.key }}</option>
-            </select>
-          </div>
-          <div class="ep-param">
-            <label>② 细分板块</label>
-            <select v-model="singlePlate" class="tb-sel" @change="onSinglePlate()">
-              <option v-for="s in singlePlates" :key="s" :value="s">{{ s }}</option>
-            </select>
-          </div>
-          <div class="ep-param">
-            <label>③ 题型</label>
-            <select v-model="singleVariant" class="tb-sel">
-              <option value="不限">不限（自动轮换）</option>
-              <option v-for="v in singleVars" :key="v" :value="v">{{ v }}</option>
-            </select>
-            <span class="ep-hint">该细分板块下的子题型，由对应「子命题人」精准出题</span>
-          </div>
-          <div class="ep-param">
-            <label>④ 问法</label>
-            <select v-model="singleDir" class="tb-sel">
-              <option value="auto">AI 自由随机（是/非）</option>
-              <option value="is">选是题（正确的是 / 属于 / 能推出）</option>
-              <option value="not">选非题（错误的是 / 不属于 / 不能推出）</option>
-              <option value="custom">自定义问法</option>
-            </select>
-            <input v-if="singleDir === 'custom'" v-model="singleDirText" class="pv-edit" style="margin-top: 6px" placeholder="输入自定义问法，如：最能削弱上述结论？" />
-            <div v-if="dirLib.length" class="ep-chips" style="margin-top: 6px">
-              <button v-for="dir in dirLib" :key="dir" class="fp-b" @click="setDirText(dir)">{{ dir }}</button>
-            </div>
-            <span class="ep-hint">不同板块题干可自由问法（如判断推理：最能削弱 / 最不能 / 前提假设…），点上面快捷问法或自定义</span>
-          </div>
-          <div class="ep-param">
-            <label>⑤ 组量</label>
-            <select v-model="singleBatch" class="tb-sel">
-              <option :value="1">1 题（单题）</option>
-              <template v-if="singlePlate === '资料分析'">
-                <option :value="5">5 题（1篇材料·真题5题组）</option>
-                <option :value="10">10 题（2篇材料）</option>
-                <option :value="15">15 题（3篇材料）</option>
-                <option :value="20">20 题（4篇材料）</option>
-              </template>
-              <template v-else>
-                <option :value="5">5 题一组</option>
-                <option :value="10">10 题一组</option>
-                <option :value="15">15 题一组</option>
-                <option :value="20">20 题一组</option>
-              </template>
-            </select>
-            <span class="ep-hint">{{ singlePlate === '资料分析' ? '资料分析真题模式：一篇完整材料配5题（第5题为综合分析），可自定义材料形式；选 1 题则出单题' : '组内逐题作答，做完自动批改，可「再来一组」' }}</span>
-          </div>
-          <div v-if="singlePlate === '图形推理'" class="ep-param">
-            <label>⑥ 出题形式</label>
-            <select v-model="tutuFormat" class="tb-sel">
-              <option value="auto">不限（自动轮换）</option>
-              <option value="一组图">一组图（5图+问号）</option>
-              <option value="两组图">两组图（类比式）</option>
-              <option value="九宫格">九宫格（3×3）</option>
-              <option value="分组分类">分组分类（6图）</option>
-            </select>
-            <span class="ep-hint">固定某种图推出题形式；「不限」= 一组图/两组图/九宫格/分组分类 自动轮换</span>
-
-          <div class="ep-param">
-            <label>⑦ 出题方式</label>
-            <div class="ep-chips">
-              <button class="fp-b" :class="{ on: !singleLocal }" @click="singleLocal = false">🤖 AI 出题（丰富多变）</button>
-              <button class="fp-b" :class="{ on: singleLocal }" @click="singleLocal = true">🎲 本地真题生成（零额度）</button>
-            </div>
-            <span class="ep-hint">本地 = 黑白块/汉字/字母/旋转/数量/对称/叠加/分组等真题高频规律，确定性且永不裁切；AI 出题失败也会自动回退本地</span>
-          </div>
-          </div>
-          <div v-if="singlePlate === '资料分析'" class="ep-param">
-            <label>⑥ 材料类型（真题：一篇材料配5题）</label>
-            <select v-model="singleMatType" class="tb-sel">
-              <option value="auto">随机轮换（文字/表格/图形/综合）</option>
-              <option value="text">纯文字材料</option>
-              <option value="table">表格材料</option>
-              <option value="chart">图形材料（柱状/折线/饼图）</option>
-              <option value="mixed">综合混合（文字+表格+图形）</option>
-            </select>
-            <span class="ep-hint">组量选 5/10/15/20 时按真题模式出「完整材料 + 每5题一组」（第5题为综合分析题）；选 1 题则出单题。材料会尽量绘制成 SVG 表格/图表。</span>
-          </div>
-          <div class="ep-param">
-            <label>
-              <input v-model="autoNext" type="checkbox" />
-              答对自动进入下一题（批量模式连刷更流畅）
-            </label>
-          </div>
-        </div>
-
-        <div v-if="srcMode === 'import'" class="ep-block">
-          <div class="ep-block-hd">📂 题目材料（图片 / PDF / Word / txt / tex）</div>
-          <div class="ep-src-row" style="margin-top: 0">
-            <label class="btn btn-pri" style="cursor: pointer; text-align: center; margin: 0">
-              📁 添加题目材料（可多选）
-              <input type="file" accept="image/*,.pdf,.docx,.txt,.tex,.md,.markdown" multiple style="display: none" @change="onFiles" />
-            </label>
-            <button v-if="imgs.length || textFiles.length" class="btn btn-gh" @click="imgs = []; textFiles = []">🧹 清空材料</button>
-          </div>
-          <div v-if="imgs.length || textFiles.length" class="ep-note" style="color: var(--hud-cyan)">已添加：图片 {{ imgs.length }} 张 · 文本 {{ textFiles.length }} 份</div>
-          <div class="ep-param" style="margin-top: 8px">
-            <label>识别后题量上限</label>
-            <select v-model="qLimit" class="tb-sel">
-              <option :value="0">不限（按卷面裁剪）</option>
-              <option :value="10">10 题</option>
-              <option :value="20">20 题</option>
-              <option :value="50">50 题</option>
-            </select>
-            <span class="ep-hint">AI 识别整理后先按「📐 卷面构成」裁剪，再按此上限取题（整卷出题里可调整卷面）</span>
-          </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">💡 本地试卷数字化：图片/PDF/Word/txt/tex 上传 → AI 统一整理成题 → 按卷面裁剪组卷作答</div>
-          <div v-if="imgs.length" class="pp-imgs">
-            <div v-for="(im, i) in imgs" :key="'i' + i" class="pp-thumb"><img :src="im" /><button class="pp-x" @click="rmImg(i)">×</button></div>
-          </div>
-          <div v-if="textFiles.length" class="pp-txts">
-            <div v-for="(t, i) in textFiles" :key="'t' + i" class="pp-txt-item"><span>📄 {{ t.name }}（{{ t.text.length }} 字）</span><button class="pp-x" @click="rmTxt(i)">×</button></div>
-          </div>
-        </div>
-
-        <div v-if="srcMode === 'wrong'" class="ep-block">
-          <div class="ep-block-hd">📚 错题集组卷</div>
-          <div class="ep-note">💡 错题复盘卷：从<b>应用内错题本</b>组卷（作答后不会重复入库），可只刷未复盘的、先刷错得多的，做完自动判分。</div>
-          <div class="ep-note" style="color: var(--hud-cyan)">需要导入本地错题文件（错题截图 / 错题 PDF / 新题）？→ 用「📂 导入材料」→ 识别预览 →「📌 全部存入错题本」→ 再回此处组卷二刷。</div>
-          <div class="ep-param">
-            <label>板块选择（可多选 / 全选，自由组合）</label>
-            <div class="ep-chips">
-              <button class="fp-b" :class="{ on: !wrongSel.length }" @click="wrongSel = []">✅ 全部</button>
-              <button v-for="p in wrongPlates" :key="p" class="fp-b" :class="{ on: wrongSel.includes(p) }" @click="toggleWrongSel(p)">{{ p }}</button>
-            </div>
-            <span class="ep-hint">选一个或多个板块自由组合组卷，不选 = 全部板块</span>
-          </div>
-          <div class="ep-param">
-            <label>组卷题量</label>
-            <select v-model="wrongLimit" class="tb-sel">
-              <option :value="0">全部（按板块裁剪）</option>
-              <option :value="5">5 题</option>
-              <option :value="10">10 题</option>
-              <option :value="20">20 题</option>
-              <option :value="30">30 题</option>
-            </select>
-            <span class="ep-hint">先按卷面板块匹配裁剪，再按此上限取题</span>
-          </div>
-          <div class="ep-param">
-            <label>
-              <input v-model="onlyPend" type="checkbox" />
-              只看未复盘错题（优先攻克待复盘）
-            </label>
-          </div>
-          <div class="ep-param">
-            <label>
-              <input v-model="byWrongCount" type="checkbox" />
-              按错次优先排序（错得越多越靠前）
-            </label>
-          </div>
-          <div class="ep-note">当前错题本：共 <b>{{ store.wqs.length }}</b> 题 · 已复盘 <b>{{ store.wqs.filter((q) => q.reviewed || q.digested).length }}</b> 题</div>
-        </div>
-
-        <div v-if="papers.length" class="ep-block">
-          <div class="ep-block-hd ep-fold-hd" @click="toggleFold('papers')">
-            <span>🗂️ 历史卷子（{{ papers.length }}）</span><span class="ep-fold-ic">{{ openPapers ? '▾ 收起' : '▸ 展开' }}</span>
-          </div>
-          <div v-if="openPapers" class="ep-list-scroll">
-            <div v-for="(p, i) in papers" :key="p.id" class="ep-paper">
-              <button class="ep-paper-btn" @click="openPaper(p)">{{ p.name }} · {{ p.questions.length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
-              <button class="ep-x" @click="delPaper(i)">×</button>
-            </div>
-            <div class="ep-note">共 {{ papers.length }} 卷（全部保留，可滚动查看）</div>
-          </div>
-        </div>
-
-        <div v-if="quizCol.length" class="ep-block">
-          <div class="ep-block-hd ep-fold-hd" @click="toggleFold('quizcol')">
-            <span>📚 出题集（{{ quizCol.length }}）</span><span class="ep-fold-ic">{{ openQuizCol ? '▾ 收起' : '▸ 展开' }}</span>
-          </div>
-          <div v-if="openQuizCol">
-            <div class="ep-note">单题快练/出题自动收纳，支持二刷：先做题 → 点选项 → 再显示答案与解析</div>
-            <div class="ep-list-scroll">
-              <div v-for="(c, i) in quizCol" :key="c.id" class="ep-paper">
-                <span class="qc-status" :class="c.lastOk === true ? 'ok' : c.lastOk === false ? 'no' : ''">{{ c.lastOk === true ? '✓' : c.lastOk === false ? '✗' : '•' }}</span>
-                <button class="ep-paper-btn" :title="'【' + c.subject + (c.variant ? '·' + c.variant : '') + '】' + (c.stem || '').slice(0, 80) + '（累计错' + c.wrongCount + '次 · 连对' + c.correctStreak + '）'" @click="startRedo(c)">{{ c.subject }}{{ c.variant ? '·' + c.variant : '' }} · {{ (c.stem || '').slice(0, 22) }}…</button>
-                <button class="ep-x" @click="delQuizCol(i)">×</button>
-              </div>
-            </div>
-            <div class="ep-note">共 {{ quizCol.length }} 题（全部保留，可滚动查看）</div>
-            <button class="btn btn-gh" style="margin-top: 6px" @click="clearQuizCol()">🗑 清空出题集</button>
-          </div>
-        </div>
-
-        <div v-if="results.length" class="ep-block">
-          <div class="ep-block-hd ep-fold-hd" @click="toggleFold('results')">
-            <span>🏅 考试战绩（{{ results.length }}）</span><span class="ep-fold-ic">{{ openResults ? '▾ 收起' : '▸ 展开' }}</span>
-          </div>
-          <div v-if="openResults">
-            <div class="ep-stats">平均正确率 <b>{{ avgRate }}%</b> · 已完成 <b>{{ results.length }}</b> 卷</div>
-            <div class="ep-list-scroll">
-              <div v-for="(r, i) in results" :key="i" class="pp-item">
-                <div class="pp-info"><div class="pp-name">{{ r.name }}</div><div class="pp-meta">{{ r.n }} 题 · {{ new Date(r.ts).toLocaleString() }}</div></div>
-                <span class="pp-score" :class="r.rate >= 80 ? 'ok' : r.rate >= 60 ? 'mid' : 'no'">{{ r.score }}/{{ r.n }} · {{ r.rate }}%</span>
-                <span class="pp-meta">⏱ {{ fmt(r.sec) }}</span>
-              </div>
-            </div>
-            <div class="ep-note">共 {{ results.length }} 次（全部保留，可滚动查看）</div>
-          </div>
-        </div>
-
-        <div class="pnl-btns">
-          <button class="btn btn-gh" @click="cancel()">取消</button>
-          <button class="btn btn-pri" @click="start()">
-            🚀 {{ srcMode === 'single' ? '开始单题快练' : srcMode === 'ai' ? '开始考试（AI 出题）' : srcMode === 'import' ? '识别并组卷' : '错题组卷开始' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- ========== AI 出卷中（进度条 + 预计时间） ========== -->
-      <div v-else-if="phase === 'gen'" class="pp-extract">
+            <ExamConfig v-if="phase === 'config'" :ctx="examCtx" />
+<div v-else-if="phase === 'gen'" class="pp-extract">
         <div class="gen-panel">
           <div class="sim-loading"><span class="spin"></span> AI 正在出卷…（并发出题，请稍候）</div>
           <div v-if="singleMode && genLive" class="gen-live">{{ genLive }}</div>
@@ -1913,99 +920,12 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
       </div>
 
       <!-- ========== 作答 ========== -->
-      <div v-else-if="phase === 'doing' && q" class="sim-doing" :class="{ paper: paperMode, imm: singleMode }">
-        <div class="pp-timer-bar">
-          <span class="sim-plate">📐 {{ q.subject }}<template v-if="q.variant"> · {{ q.variant === '一拖五' ? '一拖N 分析推理' : q.variant }}</template></span>
-          <span class="sim-prog">第 {{ cur + 1 }} / {{ questions.length }} 题</span>
-          <span class="pp-tq" :class="{ warn: qLeft <= 10 }">本题 ⏳ {{ fmt(qLeft) }} · ⏱ {{ fmt(qElapsed) }}<template v-if="marks[cur] && marks[cur].usedSec != null"> · ✅ 已用 {{ marks[cur].usedSec }}s</template></span>
-        </div>
-        <div v-if="!singleMode" class="pp-timer-bar total">
-          <span class="pp-total">📦 板块参考 ⏳ {{ fmt(modLeft) }}<template v-if="modTotal"> · 已完成 {{ modDone }}/{{ modTotal }} 题</template></span>
-        </div>
-        <div v-if="!singleMode" class="pp-timer-bar total">
-          <span class="pp-total">📄 整卷 ⏳ {{ fmt(totalLeft) }} · 总用时 ⏱ {{ fmt(totalElapsed) }}</span>
-        </div>
-        <div v-else class="pp-timer-bar total">
-          <span class="pp-total">⚡ 单题快练 · {{ singlePlate }}<template v-if="questions.length > 1"> · 本组已用 ⏱ {{ fmt(totalElapsed) }}</template></span>
-        </div>
-
-        <div v-if="questions.length > 1" class="ep-nav">
-          <button
-            v-for="(qq, i) in questions"
-            :key="i"
-            class="ep-nav-btn"
-            :class="{ cur: i === cur, ok: marks[i] && marks[i].ok, no: marks[i] && !marks[i].ok }"
-            @click="go(i)"
-          >{{ i + 1 }}</button>
-        </div>
-
-        <div v-if="!q.stem && !q.err" class="sim-loading"><span class="spin"></span> AI 正在出题（{{ q.subject }}）{{ genStatus ? '· ' + genStatus : '…' }}</div>
-        <template v-else>
-          <div class="draft-btn-row">
-            <button class="btn btn-gh" :class="{ on: paperMode }" title="护眼纸张 / 屏幕模式切换" @click="paperMode = !paperMode; savePaperMode()">📄 {{ paperMode ? '纸张' : '屏幕' }}</button>
-            <span class="ep-hint" style="font-size: 11px">✏️ 随手记：点屏幕任意位置的悬浮球即可写笔记（设置里可开关）</span>
-          </div>
-          <div class="sim-q" v-html="qHtml"></div>
-          <div v-if="q.err" class="sim-err">
-            ⚠️ {{ q.stem }}
-            <button class="btn btn-gh" @click="retryGen()">↻ 重出</button>
-          </div>
-          <div v-else-if="q.options && q.options.length" class="quiz-opts" :class="{ big: singleMode, 'has-svg': hasSvgOpts }">
-            <button
-              v-for="(o, oi) in q.options"
-              :key="o.k"
-              class="quiz-opt"
-              :class="{ picked: marks[cur] && marks[cur].pick === o.k, right: marks[cur] && o.k === q.answer, wrong: marks[cur] && marks[cur].pick === o.k && o.k !== q.answer }"
-              :disabled="marks[cur] != null"
-              @click="pick(o.k)"
-            >
-              <span class="qk">{{ o.k }}</span><span class="qt" v-html="optHtmls[oi]"></span>
-            </button>
-          </div>
-          <div v-else-if="!marks[cur]" class="pp-nochoice">
-            <button class="btn btn-gh" @click="marks[cur] = { reveal: true }">👁 查看答案</button>
-          </div>
-          <div v-if="marks[cur] && !marks[cur].ok && marks[cur].pick === '' && marks[cur].reveal" class="pp-nochoice">
-            <div class="quiz-result no">正确答案 {{ q.answer }}</div>
-            <div class="pp-selftj">
-              <button class="btn btn-gh" @click="selfMark(false)">❌ 还没掌握</button>
-              <button class="btn btn-pri" @click="selfMark(true)">✅ 这题会了</button>
-            </div>
-          </div>
-          <div v-if="marks[cur] && marks[cur].ok !== undefined && !marks[cur].timeout" class="quiz-result" :class="marks[cur].ok ? 'ok' : 'no'">
-            {{ marks[cur].ok ? '✅ 回答正确' : (marks[cur].blank ? '⬜ 未作答（已按错计）' : (marks[cur].self ? '❌ 还没掌握，已计错' : '❌ 回答错误，正确答案 ' + q.answer)) }}
-          </div>
-          <!-- 解析：答完（无论对错）→ 有解析直接显示；没有则显示醒目的「📖 查看解析」按钮，点击生成/打开 -->
-          <div v-if="marks[cur] && marks[cur].ok !== undefined && (q.analysis || q.explain || q.aiEnhancing)" class="sim-explain" v-html="qExplainHtml"></div>
-          <div v-else-if="marks[cur] && marks[cur].ok !== undefined" class="designer-btn-row">
-            <button class="btn btn-pri" :disabled="q.aiEnhancing" @click="enhanceExplain(q)">{{ q.aiEnhancing ? '⏳ 正在生成解析…' : '📖 查看解析' }}</button>
-          </div>
-          <div v-if="marks[cur] && marks[cur].ok !== undefined && (q.designer || q.explain)" class="designer-btn-row">
-            <button class="btn btn-gh" title="看完解析还不懂？看看命题人为什么这么出、每个干扰项用了什么陷阱" :disabled="q.designerLoading" @click="openDesigner()">{{ q.designerLoading ? '🧠 正在生成命题人设计说明…' : '🧠 命题人设计说明（出题意图 · 陷阱设计）' }}</button>
-          </div>
-          <div class="pnl-btns">
-            <button class="btn btn-gh" title="返回出卷配置（保留当前卷子到历史卷子）" @click="backToConfig()">← 返回配置</button>
-            <button class="btn btn-gh" @click="cancel()">退出</button>
-            <template v-if="singleMode && questions.length === 1">
-              <button class="btn btn-gh" :class="{ 'wq-saved': savedWrongFlash }" @click="saveWrongs()">{{ savedWrongFlash ? '✅ 已入库' : '📌 错题入库' }}</button>
-              <button class="btn btn-pri btn-next" @click="nextSingle()">🔁 再来一题 ▶</button>
-              <span v-if="prefetchQ && prefetchQ.item && prefetchQ.item.stem" class="ep-hint" style="display: inline-block; margin-left: 6px">🔮 下一题已预生成，秒开</span>
-              <span v-else class="ep-hint" style="display: inline-block; margin-left: 6px"><span class="spin" style="display:inline-block; width:12px;height:12px"></span> 正在预生成下一题…</span>
-            </template>
-            <template v-else>
-              <button class="btn btn-gh" :class="{ 'wq-saved': savedWrongFlash }" title="把答错的题一键存入错题本" @click="saveWrongs()">{{ savedWrongFlash ? '✅ 已入库' : '📌 错题入库' }}</button>
-              <button class="btn btn-gh" title="提前交卷：未答题目会提示并可按错计" @click="askFinish()">📤 交卷</button>
-              <button class="btn btn-gh" :disabled="cur === 0" @click="prevQ()">◀ 上一题</button>
-              <button v-if="marks[cur] && (marks[cur].ok !== undefined || marks[cur].pick !== '' || marks[cur].reveal)" class="btn btn-pri" @click="nextQ()">
-                {{ cur + 1 >= questions.length ? '交卷 📄' : '下一题 ▶' }}
-              </button>
-            </template>
-          </div>
-        </template>
+            <ExamAnswer v-else-if="phase === 'doing' && q" :ctx="examCtx" />
+      <!-- 作答中题目尚未就绪：显示加载占位，绝不闪现空成绩单 -->
+      <div v-else-if="phase === 'doing'" class="pp-extract">
+        <div class="sim-loading"><span class="spin"></span> 题目加载中…</div>
       </div>
-
-      <!-- 组卷出完，确认开考 -->
-      <div v-if="readyAsk" class="ov show">
+<div v-if="readyAsk" class="ov show">
         <div class="pnl">
           <h3>📝 组卷已出完毕</h3>
           <p style="line-height:1.8">本卷共 <b style="color:#34d399">{{ questions.length }}</b> 题已就绪<span v-if="genErrCount">（<b style="color:#fb7185">{{ genErrCount }} 题失败已跳过</b>）</span>。<br />是否准备好开始作答？点击「是」后才进入答题与计时。</p>
@@ -2029,45 +949,44 @@ onUnmounted(() => { clearTimers(); if (genTimer) clearInterval(genTimer) })
       </div>
 
       <!-- ========== 成绩单 ========== -->
-      <div v-else class="sim-result">
-        <h3>📄 成绩单 · {{ curPaper ? curPaper.name : '模拟卷' }}</h3>
-        <div class="sr-score">{{ score }} / {{ questions.length }}</div>
-        <div class="sr-rate">{{ rate }}% · {{ achieveText() }}</div>
-        <div class="sr-meta">总用时 {{ fmt(totalElapsed) }} · 平均每题 {{ questions.length ? Math.round(totalElapsed / questions.length) : 0 }} 秒</div>
-        <div v-if="moduleStats.length" class="ep-mstats">
-          <div v-for="ms in moduleStats" :key="ms.subject" class="ep-mstat">
-            <span class="ep-ms-name">{{ ms.subject }}</span>
-            <span class="ep-ms-bar"><i :style="{ width: (ms.total ? Math.round((ms.ok / ms.total) * 100) : 0) + '%' }"></i></span>
-            <span class="ep-ms-num">{{ ms.ok }}/{{ ms.total }}</span>
+            <ExamReport v-else-if="phase === 'result'" :ctx="examCtx" />
+<!-- ========== 草稿纸已统一为全局「✏️ 随手记」（见设置） ========== -->
+      <!-- ========== 仿真考试答题卡（2B 铅笔填涂，交卷后统一查看答案） ========== -->
+      <Teleport to="body">
+        <div v-if="sheetShow && phase === 'doing' && sheetMode" class="ov show exam-sheet-ov" @click.self="sheetShow = false">
+          <div class="pnl exam-sheet-pnl">
+            <div class="es-head">
+              <div class="es-title">📋 行测模拟考试 · 答题卡</div>
+              <div class="es-remind">请用 2B 铅笔将所选答案涂满，交卷后统一查看答案与解析</div>
+              <div class="es-info">
+                <label>姓名 <input v-model="examName" placeholder="填写姓名" @change="saveExamInfo()" /></label>
+                <label>考场号 <input v-model="examRoom" placeholder="考场号" @change="saveExamInfo()" /></label>
+                <label>准考证号 <input v-model="examNo" placeholder="准考证号" @change="saveExamInfo()" /></label>
+              </div>
+            </div>
+            <div class="es-grid">
+              <div v-for="(qq, i) in questions" :key="i" class="es-row" :class="{ cur: i === cur }" @click="go(i)">
+                <span class="es-no">{{ i + 1 }}</span>
+                <button
+                  v-for="c in sheetKeys(qq)"
+                  :key="c"
+                  class="es-cell"
+                  :class="{ filled: marks[i] && marks[i].pick === c }"
+                  @click.stop="sheetPick(i, c)"
+                >{{ c }}</button>
+                <span v-if="!sheetKeys(qq).length" class="es-cell es-none" title="本题无选项，请回题目页自评">—</span>
+                <span class="es-st" :class="{ ok: marks[i] && marks[i].pick }">{{ marks[i] && marks[i].pick ? '已涂 ' + marks[i].pick : '未涂' }}</span>
+              </div>
+            </div>
+            <div class="pnl-btns">
+              <button class="btn btn-gh" @click="sheetShow = false">← 回题目</button>
+              <span class="es-count">已涂 {{ answeredCount }} / {{ questions.length }}</span>
+              <button class="btn btn-pri" @click="sheetShow = false; askFinish()">📤 交卷</button>
+            </div>
           </div>
         </div>
-        <div class="sr-list">
-          <div v-for="(qq, i) in questions" :key="i" class="sr-item">
-            <span class="sr-mark" :class="marks[i] && marks[i].ok ? 'ok' : 'no'">{{ marks[i] && marks[i].ok ? '✓' : '✗' }}</span>
-            <span class="sr-t">{{ (qq.subject || '') + ' · ' + (qq.stem || '').slice(0, 46) }}</span>
-          </div>
-        </div>
-        <div class="ep-export-row">
-          <span class="ep-export-l">📤 导出整卷：</span>
-          <button class="btn btn-gh ep-export-b" :class="{ on: aiLayout }" :title="aiLayout ? 'AI 排版已开启：先梳理考点/错因/秒杀规律再导出' : 'AI 排版关闭：原样导出'" @click="aiLayout = !aiLayout">✨ {{ aiLayout ? 'AI排版开' : 'AI排版关' }}</button>
-          <button class="btn btn-gh ep-export-b" @click="doExportPaper('docx')">Word</button>
-          <button class="btn btn-gh ep-export-b" @click="doExportPaper('pdf')">PDF</button>
-          <button class="btn btn-gh ep-export-b" @click="doExportPaper('md')">Markdown</button>
-          <button class="btn btn-gh ep-export-b" @click="doExportPaper('tex')">LaTeX</button>
-          <button class="btn btn-gh ep-export-b" @click="doExportPaper('typ')">Typst</button>
-        </div>
-        <div v-if="aiLayout" class="ep-note" style="text-align: center">✨ AI 排版：先让 AI 梳理每题的考点 / 错因 / 秒杀规律并突出错题，再生成排版文档（需文字模型 Key，耗时约 10-20 秒）</div>
-        <div class="pnl-btns">
-          <button class="btn btn-gh" title="返回出卷配置（卷子已保存在历史卷子）" @click="backToConfig()">← 返回配置</button>
-          <button v-if="singleMode" class="btn btn-gh" @click="nextSingle()">🔁 再来一组</button>
-          <button v-else class="btn btn-gh" @click="replay()">🔁 再来一卷</button>
-          <button class="btn btn-gh" :class="{ 'wq-saved': savedWrongFlash }" @click="saveWrongs()">{{ savedWrongFlash ? '✅ 已入库' : '📌 错题入库' }}</button>
-          <button class="btn btn-gh" @click="backList()">🏠 卷子列表</button>
-          <button class="btn btn-pri" @click="cancel()">完成</button>
-        </div>
-      </div>
+      </Teleport>
 
-      <!-- ========== 草稿纸已统一为全局「✏️ 随手记」（见设置） ========== -->
       <!-- ========== 命题人设计说明弹窗（Teleport 到 body，避免被 .pnl 层叠上下文困住） ========== -->
       <Teleport to="body">
         <div v-if="designerShow && q && q.designer" class="ov show designer-ov" @click.self="designerShow = false">

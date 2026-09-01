@@ -232,6 +232,14 @@ function setFoldRig(rig) {
   foldRig = rig
   foldRigReady.value = !!rig
 }
+// 进入「展开图」或切到「选图折叠」子页签时，确保折纸骨架已构建。
+// 否则 buildStage() 会回退成普通立方体，表现为点「展开图」页签主画布不切换。
+function ensureNetRig() {
+  if (foldRig) return
+  const nt = CUBE_NETS[netIdx.value] || CUBE_NETS[0]
+  setFoldRig(buildFoldRig(nt.cells, nt.adjacency))
+  foldProg.value = 0
+}
 
 // ===== 左侧演示区：截图保存 =====
 function downloadDataUrl(dataUrl, name) {
@@ -952,7 +960,10 @@ function toggleMode(m) {
     if (!comboParts.value.length) applyComboPreset(0)
     else nextTick(() => buildStage())
   } else if (m === 'net') {
-    nextTick(() => buildStage())
+    nextTick(() => {
+      ensureNetRig()
+      buildStage()
+    })
   } else if (m === 'ai') {
     genAiQuiz()
   } else if (m === 'tip') {
@@ -1185,7 +1196,10 @@ function setNetTab(t) {
   netTab.value = t
   resetQuiz()
   if (t === 'paint') initPaint()
-  nextTick(() => buildStage())
+  nextTick(() => {
+    if (t === 'fold') ensureNetRig()
+    buildStage()
+  })
 }
 function toggleNet(k) {
   const s = new Set(netKeys.value)
