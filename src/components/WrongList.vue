@@ -1,7 +1,8 @@
 <script setup>
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
-import { toRefs } from 'vue'
+import { toRefs, computed } from 'vue'
+import { SUB_DICT } from '../utils/askAssist'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -9,6 +10,7 @@ const {
   cur,
   fReason,
   fRev,
+  fSub,
   fSubj,
   jumpN,
   kw,
@@ -20,6 +22,12 @@ const {
   stats,
   subjList
 } = toRefs(props.ctx)
+// 当前板块下的题型选项（供题型筛选下拉）
+const subOpts = computed(() => {
+  if (!fSubj.value) return []
+  const m = SUB_DICT[fSubj.value] || {}
+  return Object.keys(m)
+})
 
 const {
   PAGE,
@@ -53,11 +61,15 @@ const {
         </div>
       </div>
       <!-- 筛选 + 快速定位 -->
-      <div class="wq-filters">
+      <div id="wqFilters" class="wq-filters">
         <input v-model="kw" class="wq-search" placeholder="🔍 搜题干 / 选项 / 答案 / 错因 / 秒杀 / 笔记…" />
         <select v-model="fSubj">
           <option value="">全部板块</option>
           <option v-for="s in subjList" :key="s" :value="s">{{ s }}</option>
+        </select>
+        <select v-model="fSub" :disabled="!fSubj" title="先选板块再筛题型">
+          <option value="">全部题型</option>
+          <option v-for="s in subOpts" :key="s" :value="s">{{ s }}</option>
         </select>
         <select v-model="fRev">
           <option value="all">全部状态</option>

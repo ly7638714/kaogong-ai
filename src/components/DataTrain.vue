@@ -437,8 +437,13 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
 </template>
 
 <style scoped>
-.dt-ov { z-index: 91; }
-.dt-pnl { width: min(1180px, 97vw); max-width: min(1180px, 97vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; }
+/* 层级需高于移动端训练抽屉(.chat-tools-bd 322 / .chat-tools-ov 321)与随手记(.draft-fab 420)，
+   否则从「🎯训练」抽屉进入后被抽屉与全屏遮罩压住 → 界面被盖住/点不到（资料速算显示不全的根因） */
+.dt-ov { z-index: 431; }
+.dt-pnl { width: min(1180px, 97vw); max-width: min(1180px, 97vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; overflow-x: hidden; }
+/* 长题干/长公式不撑破容器（资料分析常出现超长数字与表格） */
+.dt-q, .dt-ex-b, .dt-method-b, .dt-md-row, .dt-kb-row { overflow-wrap: break-word; word-break: break-word; }
+.dt-t { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
 .dt-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .dt-title { font-size: 16px; font-weight: 800; color: var(--accent); }
 .dt-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -548,23 +553,56 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
 
 /* ===== 手机（≤760px）：单列自适应，侧栏变横向卡片 ===== */
 @media (max-width: 760px) {
-  .dt-ov { overflow-x: hidden; padding: 0; align-items: stretch; }
-  .dt-pnl { width: 100%; max-width: 100%; max-height: 100vh; max-height: 100dvh; height: 100vh; height: 100dvh; border-radius: 0; }
-  .dt-body { flex-direction: column; flex-wrap: nowrap; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  .dt-side { flex: none; width: 100%; min-width: 0; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; max-height: none; gap: 8px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
-  .dt-side .dt-card { flex: 0 0 230px; min-width: 230px; }
-  .dt-train { flex: 1 1 auto; min-width: 0; max-height: none; overflow-y: visible; }
+  /* 真·全屏：抵消 .ov 的 40px 内边距与 .ov .pnl 的 88vh/圆角底部抽屉样式
+     （用 .dt-ov .dt-pnl 提高权重，确保覆盖 ≤640px 的全局底-sheet 规则） */
+  .dt-ov { overflow-x: hidden; padding: 0; align-items: stretch; overscroll-behavior: contain; }
+  .dt-ov .dt-pnl {
+    width: 100%; max-width: 100%;
+    height: 100vh; height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0; border-bottom: none;
+    padding: 10px 10px 12px;
+  }
+  .dt-body { flex-direction: column; flex-wrap: nowrap; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  /* 侧栏横滑：每张卡约 3/4 屏宽，露出下一张形成可滑动提示；手机隐藏「快捷键」卡（无键盘） */
+  .dt-side { flex: none; width: 100%; min-width: 0; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; max-height: none; gap: 8px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .dt-side .dt-card { flex: 0 0 76%; min-width: 0; max-width: 320px; }
+  .dt-side .dt-keys { display: none; }
+  .dt-train { flex: 1 1 auto; min-width: 0; max-height: none; overflow-y: visible; overflow-x: hidden; }
   .dt-title { font-size: 14px; }
-  .dt-head { gap: 6px; }
-  .dt-opt { font-size: 13px; padding: 11px 10px; min-height: 44px; }
+  .dt-head { gap: 6px; margin-bottom: 8px; }
+  .dt-chip { font-size: 11px; padding: 3px 8px; }
+  .dt-chip-sub { display: none; }
+  .dt-opt { font-size: 13px; padding: 11px 10px; min-height: 46px; }
   .dt-q { font-size: 13.5px; }
   .dt-mat :deep(th), .dt-mat :deep(td) { padding: 3px 5px; font-size: 11px; }
   .dt-mat :deep(table) { display: block; overflow-x: auto; }
-  .dt-modes .btn, .dt-diff .btn { font-size: 12px; padding: 6px 8px; }
+  .dt-modes .btn, .dt-diff .btn { font-size: 12px; padding: 6px 8px; min-height: 32px; }
   .dt-ex-b { font-size: 13px; }
-  .dt-ex-acts .btn { font-size: 12px; }
+  .dt-ex-acts .btn { font-size: 12px; min-height: 34px; }
   .dt-kb-bar .btn { font-size: 11.5px; padding: 5px 7px; }
   .dt-kb-head { padding: 8px 10px; }
   .dt-kb-detail { padding: 8px 10px; }
+  .dt-kb-input { flex: 1 1 100%; min-width: 0; }
+  .dt-qcard { padding: 10px 11px; }
+  .dt-explain { padding: 10px 11px; }
+}
+/* 刘海屏/手势条：底部留安全区，避免「下一题/提交」被系统手势条压住点不到 */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  @media (max-width: 760px) {
+    .dt-ov .dt-pnl { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  }
+}
+/* ===== 极窄屏（≤380px，如 iPhone SE / 小屏安卓）：再降一档，保证一屏内可操作 ===== */
+@media (max-width: 380px) {
+  .dt-title { font-size: 13px; }
+  .dt-acts { gap: 4px; }
+  .dt-chip { font-size: 10.5px; padding: 2px 6px; }
+  .dt-head .btn { font-size: 11.5px; padding: 5px 7px; }
+  .dt-side .dt-card { flex: 0 0 88%; }
+  .dt-modes .btn, .dt-diff .btn { font-size: 11.5px; padding: 5px 7px; }
+  .dt-opt { font-size: 12.5px; padding: 10px 8px; }
+  .dt-q { font-size: 13px; line-height: 1.7; }
+  .dt-ex-b { font-size: 12.5px; }
 }
 </style>

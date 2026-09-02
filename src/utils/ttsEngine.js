@@ -1,10 +1,11 @@
 // ttsEngine.js —— 真人级 TTS 引擎（去掉「AI 味」的核心）
 // 四引擎统一分发：智谱 GLM-TTS（超拟人·真人级，默认） / OpenAI 兼容（CosyVoice2） / Edge 免费神经音色 / 系统语音（兜底）
 // 外部（tts.js / App.vue）只依赖 speakPro / stopSpeakPro / speakingPro 与语音列表接口，改造时不影响调用方。
-/* global Audio, crypto, FormData, File */
+/* global Audio, crypto, FormData, File, atob */
 import { reactive } from 'vue'
 import { store } from '../store'
-import { recordCost, getTtsPrice, getCloneFee, beginCost } from './costTrack'
+import { recordCost, getTtsPrice, getCloneFee, beginCost, getBudget, todaySpend } from './costTrack'
+import { showToast } from './toast'
 import { ttsCacheKey, ttsCacheGet, ttsCacheSet } from './ttsCache'
 import { cleanSpeechText, chunkForTts } from './tts/clean'
 import { smoothWavBytes } from './tts/wav'
@@ -13,11 +14,13 @@ export { symbolsToChinese, cleanSpeechText, chunkText, chunkForTts } from './tts
 export { smoothWavBytes } from './tts/wav'
 
 // ============ 引擎元信息 ============
+// free=true 表示完全免费、无需任何 Key；其余为真人级付费引擎（按字符计费，新用户通常有免费额度）
 export const TTS_ENGINES = [
-  { id: 'glm', name: '🎙️ 智谱 GLM-TTS', tag: '超拟人·真人级（推荐）', desc: '新一代语音大模型，情绪/语气随内容变化，几乎听不出合成感；用你已有的智谱 Key 即可' },
-  { id: 'openai', name: '🎨 OpenAI 兼容', tag: 'CosyVoice2 等', desc: '任意 OpenAI 兼容 TTS 接口（硅基流动 CosyVoice2 / 自定义），支持音色克隆' },
-  { id: 'edge', name: '🚀 Edge 免费神经', tag: '微软 Neural 音色', desc: '免费无 Key，但部分网络会拦截微软服务器；失败会自动回退系统语音' },
-  { id: 'sys', name: '🧠 系统语音', tag: '本机兜底', desc: '浏览器自带语音，无需联网；机械感较强，作为最后兜底' }
+  { id: 'glm', name: '🎙️ 智谱 GLM-TTS', tag: '超拟人·真人级（推荐）', free: false, desc: '新一代语音大模型，情绪/语气随内容起伏，几乎听不出合成感；用你已有的智谱 Key 即可（open.bigmodel.cn 注册有免费额度）。单价约 ¥0.02/次。' },
+  { id: 'dash', name: '🍊 阿里百炼 Qwen3-TTS', tag: '廉价真人·实测可用', free: false, desc: '官方 ¥0.8/万字符（≈0.08 元/千字），中文自然、支持自然语言"自定义音色"；用通义 DashScope Key 即可（bailian.console.aliyun.com 新用户有试用额度）。' },
+  { id: 'openai', name: '🎨 OpenAI 兼容', tag: 'CosyVoice2 等', free: false, desc: '任意 OpenAI 兼容 TTS 接口（如硅基流动 CosyVoice2、本地 vLLM），支持上传音频克隆你的专属音色；需自备对应 Key/服务地址。' },
+  { id: 'edge', name: '🚀 Edge 免费神经', tag: '微软 Neural · 免费', free: true, desc: '完全免费、无需任何 Key！微软神经网络音色（含晓晓/云扬等 200+ 种），音质够用；缺点是部分网络会拦截微软服务器，此时会自动回退系统语音。' },
+  { id: 'sys', name: '🧠 系统语音', tag: '本机兜底 · 免费', free: true, desc: '浏览器/系统自带语音，完全免费、无需联网；机械感较强，一般作为真人引擎不可用时的最后兜底。' }
 ]
 
 // ============ 全局朗读状态（设置页可见，便于用户感知是否在播/是否失败）============
@@ -355,10 +358,11 @@ export async function glmSynthesize(text, opts = {}) {
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   const total = bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll)
+  const chars = chunks.join('').length
   try {
-    const chars = chunks.join('').length
-    recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((chars / 1000) * getTtsPrice() * 100000) / 100000, note: chars + ' 字' })
+    recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((chars / 1000) * getTtsPrice('glm') * 100000) / 100000, note: chars + ' 字' })
   } catch (e) {}
+  ttsAddForEngine(chars)
   return { ok: true, bytes: total, mime: 'audio/wav' }
 }
 function concatBuffers(buffs) {
@@ -430,7 +434,152 @@ export async function openaiSynthesize(text, opts = {}) {
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
+  const chars = chunks.join('').length
+  ttsAddForEngine(chars)
   return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg' }
+}
+
+// ============ ③ 阿里百炼 TTS（Qwen3-TTS·廉价真人，v3.8.91 实测可用）============
+// 端点与模型已用真实 Key 实测（2026-09-02）：qwen3-tts-instruct-flash 官方价 ¥0.8/万字符。
+// 原生 DashScope multimodal-generation 端点（OpenAI 兼容 /audio/speech 当前返回 404，不用）。
+// 官方音色清单（阿里云百炼《Qwen-TTS 音色列表》，2026-09-02 抓取核实）。
+// models: 该音色在哪些非实时模型系列可用 —— 'instruct'=qwen3-tts-instruct-flash 系列，'flash'=qwen3-tts-flash 系列。
+// 用户选的模型含 instruct 时仅显示 instruct 音色；含 flash 时显示全部 flash 音色（含方言/外语）。
+export const DASH_PRESET_VOICES = [
+  { id: '', name: '（留空=官方默认）', emoji: '🎙️', models: ['instruct', 'flash'] },
+  { id: 'Cherry', name: '芊悦 · 阳光亲切小姐姐（女）', emoji: '👩', models: ['instruct', 'flash'] },
+  { id: 'Serena', name: '苏瑶 · 温柔小姐姐（女）', emoji: '👩', models: ['instruct', 'flash'] },
+  { id: 'Ethan', name: '晨煦 · 阳光温暖男声（带北方口音）', emoji: '👨', models: ['instruct', 'flash'] },
+  { id: 'Chelsie', name: '千雪 · 二次元虚拟女友（女）', emoji: '🎀', models: ['instruct', 'flash'] },
+  { id: 'Momo', name: '茉兔 · 撒娇搞怪逗你开心（女）', emoji: '🐰', models: ['instruct', 'flash'] },
+  { id: 'Vivian', name: '十三 · 拽拽可爱小暴躁（女）', emoji: '😼', models: ['instruct', 'flash'] },
+  { id: 'Moon', name: '月白 · 率性帅气（男）', emoji: '🧑', models: ['instruct', 'flash'] },
+  { id: 'Maia', name: '四月 · 知性与温柔碰撞（女）', emoji: '🌷', models: ['instruct', 'flash'] },
+  { id: 'Kai', name: '凯 · 耳朵的一场 SPA（男）', emoji: '🎧', models: ['instruct', 'flash'] },
+  { id: 'Nofish', name: '不吃鱼 · 不会翘舌音的设计师（男）', emoji: '🎨', models: ['instruct', 'flash'] },
+  { id: 'Bella', name: '萌宝 · 小萝莉（女）', emoji: '🧒', models: ['instruct', 'flash'] },
+  { id: 'Eldric Sage', name: '沧明子 · 沉稳睿智老者（男）', emoji: '🧓', models: ['instruct', 'flash'] },
+  { id: 'Mia', name: '乖小妹 · 温顺乖巧（女）', emoji: '🐱', models: ['instruct', 'flash'] },
+  { id: 'Mochi', name: '沙小弥 · 聪明伶俐小大人（男）', emoji: '🧒', models: ['instruct', 'flash'] },
+  { id: 'Bellona', name: '燕铮莺 · 声音洪亮御姐（女）', emoji: '🔥', models: ['instruct', 'flash'] },
+  { id: 'Vincent', name: '田叔 · 沙哑烟嗓江湖豪情（男）', emoji: '🥃', models: ['instruct', 'flash'] },
+  { id: 'Bunny', name: '萌小姬 · 萌属性小萝莉（女）', emoji: '🐰', models: ['instruct', 'flash'] },
+  { id: 'Neil', name: '阿闻 · 专业新闻主持人字正腔圆（男）', emoji: '🎙️', models: ['instruct', 'flash'] },
+  { id: 'Elias', name: '墨讲师 · 学科严谨会叙事（女）', emoji: '👩‍🏫', models: ['instruct', 'flash'] },
+  { id: 'Arthur', name: '徐大爷 · 质朴嗓音老者（男）', emoji: '🧓', models: ['instruct', 'flash'] },
+  { id: 'Nini', name: '邻家妹妹 · 软黏甜妹（女）', emoji: '🍡', models: ['instruct', 'flash'] },
+  { id: 'Seren', name: '小婉 · 温和舒缓助眠（女）', emoji: '🌙', models: ['instruct', 'flash'] },
+  { id: 'Pip', name: '顽屁小孩 · 调皮童真（男）', emoji: '🧒', models: ['instruct', 'flash'] },
+  { id: 'Stella', name: '少女阿月 · 迷糊少女（女）', emoji: '🌟', models: ['instruct', 'flash'] },
+  // ——— 以下仅 qwen3-tts-flash 系列支持（含方言/外语）———
+  { id: 'Jennifer', name: '詹妮弗 · 电影质感美语女声（女·外语）', emoji: '🎬', models: ['flash'] },
+  { id: 'Ryan', name: '甜茶 · 戏感炸裂（男·外语）', emoji: '🎭', models: ['flash'] },
+  { id: 'Katerina', name: '卡捷琳娜 · 御姐韵律（女·外语）', emoji: '💃', models: ['flash'] },
+  { id: 'Aiden', name: '艾登 · 美语大男孩（男·外语）', emoji: '🍳', models: ['flash'] },
+  { id: 'Bodega', name: '博德加 · 热情西班牙大叔（男·外语）', emoji: '🇪🇸', models: ['flash'] },
+  { id: 'Sonrisa', name: '索尼莎 · 热情拉美大姐（女·外语）', emoji: '🌮', models: ['flash'] },
+  { id: 'Alek', name: '阿列克 · 战斗民族冷与暖（男·外语）', emoji: '🇷🇺', models: ['flash'] },
+  { id: 'Dolce', name: '多尔切 · 慵懒意大利大叔（男·外语）', emoji: '🇮🇹', models: ['flash'] },
+  { id: 'Sohee', name: '素熙 · 韩国欧尼（女·外语）', emoji: '🇰🇷', models: ['flash'] },
+  { id: 'Ono Anna', name: '小野杏 · 鬼灵精怪青梅（女·外语）', emoji: '🇯🇵', models: ['flash'] },
+  { id: 'Lenn', name: '莱恩 · 德国青年（男·外语）', emoji: '🇩🇪', models: ['flash'] },
+  { id: 'Emilien', name: '埃米尔安 · 法国大哥哥（男·外语）', emoji: '🇫🇷', models: ['flash'] },
+  { id: 'Andre', name: '安德雷 · 磁性沉稳男（男·外语）', emoji: '🎙️', models: ['flash'] },
+  { id: 'Radio Gol', name: '拉迪奥·戈尔 · 足球诗人（男·外语）', emoji: '⚽', models: ['flash'] },
+  { id: 'Jada', name: '阿珍 · 风风火火沪上阿姐（女）', emoji: '🥟', models: ['flash'] },
+  { id: 'Dylan', name: '晓东 · 北京胡同少年（男）', emoji: '🏮', models: ['flash'] },
+  { id: 'Li', name: '老李 · 耐心南京瑜伽老师（男）', emoji: '🧘', models: ['flash'] },
+  { id: 'Marcus', name: '秦川 · 老陕（男）', emoji: '🍜', models: ['flash'] },
+  { id: 'Roy', name: '阿杰 · 诙谐闽南哥仔（男）', emoji: '🍵', models: ['flash'] },
+  { id: 'Peter', name: '李彼得 · 天津相声捧哏（男）', emoji: '🥠', models: ['flash'] },
+  { id: 'Sunny', name: '晴儿 · 甜到心里的川妹子（女）', emoji: '🌶️', models: ['flash'] },
+  { id: 'Eric', name: '程川 · 跳脱市井成都男（男）', emoji: '🐼', models: ['flash'] },
+  { id: 'Rocky', name: '阿强 · 幽默粤语阿强（男）', emoji: '🍊', models: ['flash'] },
+  { id: 'Kiki', name: '阿清 · 甜美港妹闺蜜（女）', emoji: '🍡', models: ['flash'] }
+]
+export function dashVoicesForModel(model) {
+  const m = String(model || 'qwen3-tts-instruct-flash').toLowerCase()
+  const mk = m.includes('instruct') ? 'instruct' : (m.includes('flash') ? 'flash' : 'instruct')
+  return DASH_PRESET_VOICES.filter((v) => (v.models || ['instruct', 'flash']).includes(mk))
+}
+// 百炼 TTS 模型列表（按发布时间 最新→旧 排序；数据来自阿里云百炼官方模型页 2026-09-02 核实）
+export const DASH_MODELS = [
+  { id: 'qwen3-tts-instruct-flash', pub: '2026-01', note: '指令式·支持自然语言自定义音色（推荐）' },
+  { id: 'qwen3-tts-flash', pub: '2025-11', note: '含方言/外语音色（如 Dylan/Kiki 等）' },
+  { id: 'qwen-tts', pub: '2025-05', note: '旧版稳定模型' }
+]
+export function dashCfg() {
+  const c = store.cfg.ttsDash || {}
+  let key = String(c.key || '').trim()
+  if (!key) {
+    // 复用图形增强 / 视觉里的通义 DashScope Key（同平台）
+    const fig = store.cfg.fig || {}
+    const vis = store.cfg.vision || {}
+    if (String(fig.url || '').includes('dashscope.aliyuncs.com')) key = String(fig.key || '').trim()
+    else if (String(vis.url || '').includes('dashscope.aliyuncs.com')) key = String(vis.key || '').trim()
+  }
+  if (!key) return null
+  return {
+    key,
+    url: String(c.url || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation').trim(),
+    model: String(c.model || 'qwen3-tts-instruct-flash').trim(),
+    voice: String(c.voice || '').trim(),
+    speed: clampSpeed(store.cfg.ttsRate)
+  }
+}
+// 合成一段百炼语音 → { ok, msg, bytes?, mime? }（mp3）
+export async function dashSynthesize(text, opts = {}) {
+  const cfg = dashCfg()
+  if (!cfg) return { ok: false, msg: '未配置通义 DashScope Key（可在 设置·语音·阿里百炼 填写，或复用图形增强/视觉里的通义 Key）' }
+  const voice = opts.voice != null ? opts.voice : cfg.voice
+  // 自定义音色（自然语言指令式，实测可用）：当传入 voiceCustom 时优先用 voice_design，
+  // 不再固定某预设音色，实现「自定义 + 多角色」而不依赖本账号未开通的 qwen3-tts-vc/vd 模型。
+  const voiceCustom = String((opts.voiceCustom != null ? opts.voiceCustom : cfg.voiceCustom) || '').trim()
+  const useCustom = voiceCustom && cfg.model.includes('instruct')
+  const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
+  if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
+  try { beginCost({ feature: 'tts', provider: 'dash', model: cfg.model, kind: 'audio' }) } catch (e) {}
+  const { bytesAll, firstErr } = await slideSynthesize(
+    chunks,
+    async (c) => {
+      const body = { model: cfg.model, input: { text: c }, parameters: { format: 'mp3' } }
+      if (useCustom) body.parameters.voice_design = voiceCustom
+      else if (voice) body.input.voice = voice
+      const r = await fetch(cfg.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+        body: JSON.stringify(body)
+      })
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}))
+        throw new Error((e.message) || 'HTTP ' + r.status)
+      }
+      const d = await r.json()
+      const out = d.output && d.output.audio
+      if (!out) throw new Error('未返回音频')
+      if (out.data) return base64ToBytes(out.data)
+      if (out.url) {
+        const ar = await fetch(out.url)
+        if (!ar.ok) throw new Error('音频下载失败 ' + ar.status)
+        return await ar.arrayBuffer()
+      }
+      throw new Error('音频字段缺失')
+    },
+    opts.onChunk
+  )
+  if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
+  const chars = chunks.join('').length
+  try {
+    recordCost({ feature: 'tts', provider: 'dash', model: cfg.model, cost: Math.round((chars / 1000) * getTtsPrice('dash') * 100000) / 100000, note: chars + ' 字' })
+  } catch (e) {}
+  ttsAddForEngine(chars)
+  return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg' }
+}
+function base64ToBytes(b64) {
+  const bin = atob(String(b64 || ''))
+  const u = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i)
+  return u.buffer
 }
 
 // ============ 音色克隆（CosyVoice2 · OpenAI 兼容，如硅基流动）============
@@ -815,20 +964,80 @@ export function sysSpeaking() {
   try { return window.speechSynthesis.speaking || window.speechSynthesis.pending } catch (e) { return false }
 }
 
+// ============ 真人朗读·省钱护栏（v3.8.90 语音系统重构）============
+// 目标：真人感不丢、普通用户也不怕超支 ——
+//   · 真人引擎(glm/openai)按「每日免费字符额度 ttsDayCap」记账（本地），用完后自动退回免费 Edge 朗读；
+//   · 若用户另外设置了「今日 AI 预算(getBudget)」，真人朗读还会按单价估算提前截止，绝不超支；
+//   · Edge/系统语音永不拦截（本来就免费）。开关 store.cfg.ttsGuard（默认开）可关。
+const TTS_LEDGER_KEY = 'xc_tts_chars'
+function ttsDayStr() {
+  try { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate() } catch (e) { return '' }
+}
+// 今日真人朗读累计字符数（供设置页展示 / 额度判断）
+export function ttsCharsToday() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TTS_LEDGER_KEY) || '{}')
+    const d = ttsDayStr()
+    return raw && raw.d === d ? Number(raw.c) || 0 : 0
+  } catch (e) { return 0 }
+}
+function ttsAddChars(n) {
+  if (!(n > 0)) return
+  try {
+    const raw = JSON.parse(localStorage.getItem(TTS_LEDGER_KEY) || '{}')
+    const d = ttsDayStr()
+    const c = (raw && raw.d === d ? Number(raw.c) || 0 : 0) + Math.round(n)
+    localStorage.setItem(TTS_LEDGER_KEY, JSON.stringify({ d, c }))
+  } catch (e) {}
+}
+let _guardToastAt = 0
+// 真人引擎是否应被本次朗读挡住（需退回 Edge）
+function paidTtsBlocked(textChars) {
+  const cfg = store.cfg || {}
+  if (cfg.ttsGuard === false) return false
+  const cap = Number(cfg.ttsDayCap)
+  if (cap > 0 && ttsCharsToday() + textChars > cap) return true
+  const b = getBudget()
+  if (b > 0) {
+    const est = ((ttsCharsToday() + textChars) / 1000) * (getTtsPrice() || 0.002)
+    if (todaySpend() + est >= b) return true
+  }
+  return false
+}
+function guardToastOnce() {
+  const now = Date.now()
+  if (now - _guardToastAt < 60000) return
+  _guardToastAt = now
+  const cap = Number((store.cfg || {}).ttsDayCap) || 20000
+  showToast('💰 今日真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费 Edge 朗读；可在 设置→语音 调整', 'info')
+}
+function ttsAddForEngine(chars) { ttsAddChars(chars) }
+
 // ============ 统一入口 ============
 // speakPro(text, { voice, rate, pitch, speed, onEnd, onError }) —— 按 store.cfg.ttsMode 分发
 export async function speakPro(text, opts = {}) {
   stopSpeakPro()
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
   gapInitOnGesture()
-  const mode = store.cfg.ttsMode || 'glm'
+  const mode0 = store.cfg.ttsMode || 'glm'
+  let mode = mode0
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
+  // 省钱护栏：真人引擎超额度 → 自动退回免费 Edge（Edge/系统永不被拦）
+  if ((mode === 'glm' || mode === 'openai' || mode === 'dash') && paidTtsBlocked(t.length)) {
+    guardToastOnce()
+    mode = 'edge'
+  }
   setStatus('speaking', '正在朗读…')
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
       const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
+      return await streamFinish(r, opts)
+    }
+    if (mode === 'dash') {
+      // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
+      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {

@@ -6,3 +6,4 @@ dist-verify/
 .env
 .env.local
 *.timestamp-*.mjs
+.env.trial

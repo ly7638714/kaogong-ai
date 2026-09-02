@@ -31,11 +31,14 @@ export function supportsVision(c) {
   c = c || store.cfg.vision
   const m = (c.model || '').toLowerCase()
   const p = c.prov || ''
-  if (p === 'openai' || p === 'anthropic' || p === 'custom') return true
+  // 天然多模态服务商：默认都支持发图
+  if (p === 'openai' || p === 'anthropic' || p === 'gemini' || p === 'openrouter' || p === 'custom') return true
   if (p === 'zhipu') return m.includes('v') || m.includes('vision')
   if (p === 'qwen') return m.includes('vl') || m.includes('vision')
   // DeepSeek 已发布视觉模型（deepseek-v4-flash-vision-exp 等，OpenAI 兼容格式）
   if (p === 'ds') return m.includes('vision') || m.includes('vl')
+  // 豆包/月之暗面/阶跃：视觉模型名带 vision 或 v 标识
+  if (p === 'doubao' || p === 'moonshot' || p === 'stepfun') return m.includes('vision') || m.includes('1v') || m.includes('vl')
   return false
 }
 

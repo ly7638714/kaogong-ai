@@ -15,6 +15,7 @@ const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
 import { GENERIC_REASONS, SUBJ_REASONS } from '../data/wrongReasons'
+import { PLATE_LIST, detectSubType } from '../utils/askAssist'
 import WrongVault from './WrongVault.vue'
 import WrongList from './WrongList.vue'
 import WrongDetail from './WrongDetail.vue'
@@ -22,6 +23,7 @@ import WrongRedo from './WrongRedo.vue'
 import WrongFocus from './WrongFocus.vue'
 import WrongCards from './WrongCards.vue'
 import WrongReason from './WrongReason.vue'
+import WrongTypeStrength from './WrongTypeStrength.vue'
 
 const cur = ref(-1),
   show = ref(false)
@@ -83,7 +85,8 @@ function reasonsFor(subject) {
 // 筛选状态
 const fSubj = ref(''),
   fRev = ref('all'),
-  fReason = ref('')
+  fReason = ref(''),
+  fSub = ref('') // 题型（板块下的具体子类，如 论证推理→加强/削弱）筛选
 const ALL_SUBJ = [
   '判断推理', '言语理解', '资料分析', '数量关系', '常识判断', '政治理论',
   '定义判断', '类比推理', '图形推理'
@@ -104,6 +107,72 @@ const stats = computed(() => {
     r = store.wqs.filter((q) => q.reviewed).length
   return { t, rev: r, pend: t - r }
 })
+// ===== 题型强弱分布（Request D Part 1）：把错题按板块→题型细分并统计 =====
+// 优先用已存的 q.sub；旧错题无 sub 时实时用 detectSubType 推断（不修改原数据）。
+function wrongTypeOf(q) {
+  if (q && q.sub) return q.sub
+  const plate = (q && (q.subject || q.plate)) || ''
+  const text = q ? q.question || q.q || q.stem || '' : ''
+  try {
+    const r = detectSubType(String(text || ''), plate)
+    return r && r.name ? r.name : '未分类'
+  } catch (e) {
+    return '未分类'
+  }
+}
+// 聚合：plates=[{plate,total,subs:[{name,count,pct,t}]}]；topWeak=全局最薄弱题型 TOP5；maxCount=全题型最大错题数
+const typeStats = computed(() => {
+  const counts = {} // plate -> sub -> n
+  let maxCount = 1
+  for (const q of store.wqs) {
+    const plate = q.subject || q.plate || '未分类'
+    const sub = wrongTypeOf(q)
+    if (!counts[plate]) counts[plate] = {}
+    counts[plate][sub] = (counts[plate][sub] || 0) + 1
+  }
+  // 板块顺序：标准 9 大板块在前（按 PLATE_LIST），其余非标准板块（如旧数据别名）按出现顺序补在末尾
+  const known = PLATE_LIST.filter((p) => counts[p])
+  const extra = Object.keys(counts).filter((p) => !PLATE_LIST.includes(p))
+  const plates = known.concat(extra)
+  const list = []
+  for (const plate of plates) {
+    const subs = Object.keys(counts[plate])
+      .map((name) => ({ name, count: counts[plate][name] }))
+      .sort((a, b) => b.count - a.count)
+    const total = subs.reduce((s, x) => s + x.count, 0)
+    subs.forEach((s) => {
+      if (s.count > maxCount) maxCount = s.count
+    })
+    list.push({ plate, total, subs })
+  }
+  const all = []
+  list.forEach((p) => p.subs.forEach((s) => all.push({ plate: p.plate, name: s.name, count: s.count })))
+  all.sort((a, b) => b.count - a.count)
+  const topWeak = all.slice(0, 5)
+  list.forEach((p) =>
+    p.subs.forEach((s) => {
+      s.pct = Math.round((s.count / p.total) * 100)
+      s.t = maxCount > 1 ? (s.count - 1) / (maxCount - 1) : 0
+    })
+  )
+  return { plates: list, topWeak, maxCount }
+})
+// 题型筛选：点题型看板 → 设板块+题型筛选并滚动到列表；再点取消
+function setTypeFilter(plate, sub) {
+  fSubj.value = plate
+  fSub.value = sub
+  kw.value = ''
+  pageN.value = 1
+  setTimeout(() => {
+    const el = document.getElementById('wqFilters')
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 60)
+}
+function clearTypeFilter() {
+  fSubj.value = ''
+  fSub.value = ''
+  pageN.value = 1
+}
 // ===== 列表可定位：关键词搜索 / 排序 / 分页 / 序号 / 跳转 =====
 const kw = ref('')
 const sortBy = ref('time') // time=最新优先 | wrong=错得多优先 | mastery=掌握低优先
@@ -115,6 +184,7 @@ const filtered = computed(() => {
     if (fRev.value === 'rev' && !q.reviewed) return false
     if (fRev.value === 'pend' && q.reviewed) return false
     if (fReason.value && !(q.reasons || []).includes(fReason.value)) return false
+    if (fSub.value && wrongTypeOf(q) !== fSub.value) return false
     const k = kw.value.trim().toLowerCase()
     if (k) {
       const hay = [q.question || q.q || q.stem || '', q.answer || '', q.explain || q.analysis || '', (q.reasons || []).join(' '), q.method || '', q.note || ''].join(' ').toLowerCase()
@@ -137,7 +207,7 @@ function jumpTo() {
   openRaw(store.wqs.indexOf(filtered.value[n - 1]))
   jumpN.value = ''
 }
-function resetFilters() { fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
+function resetFilters() { fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; fSub.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
 // 一键去重：完全相同的错题只保留一道
 function dedupeNow() {
   const n = dedupeWrongs()
@@ -919,10 +989,10 @@ function parseByField(txt) {
 const wrongCtx = reactive({
   PAGE, addCustomReason, aiBusy, aiGuideBusy, aiPolishBusy, aiPolishReason,
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
-  cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, closeImg,
-  closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
+  cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
+  closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
   cur, customReason, dedupeNow, del, delVaultPaper, delVaultQuiz,
-  downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSubj,
+  downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
   masteryOf, md, openCards, openIdx, openRedo, openRelated,
@@ -931,13 +1001,13 @@ const wrongCtx = reactive({
   redoAnswer, redoChoices, redoFeedback, redoHasChoice, redoHistory, redoPaper,
   redoPick, redoQ, redoQuizCol, redoResult, redoT, relatedQs,
   removeReason, renameInput, rep, resetFilters, reviewGaps, save,
-  show, shown, shownTotal, sortBy, startVariant, stats,
+  setTypeFilter, show, shown, shownTotal, sortBy, startVariant, stats,
   store, subjList, submitByChoice, submitRedo, todayFocus, toggleReason,
-  vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
+  typeStats, vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
   vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,
   vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
   vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow,
-  vtStartDo, vtSubmit, vtToggleOpen
+  vtStartDo, vtSubmit, vtToggleOpen, wrongTypeOf
 })
 </script>
 
@@ -951,6 +1021,7 @@ const wrongCtx = reactive({
         <button class="btn btn-gh" @click="exportAnkiCsv()">🃏 Anki/CSV</button>
         <button class="btn btn-gh" @click="$emit('txt')">TXT</button>
       </div>
+      <WrongTypeStrength :ctx="wrongCtx" />
       <WrongVault :ctx="wrongCtx" />
       <WrongList :ctx="wrongCtx" />
     </div>

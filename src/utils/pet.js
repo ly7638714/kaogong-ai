@@ -5,6 +5,7 @@ import { speak, stopSpeak, speaking } from './tts'
 import { chatOnce, supportsVision, setCostCtx } from '../api/client'
 import { SYS, KB } from '../kb'
 import { petFeatureText, petDetectUi, DATA_TRAIN_INDEX } from './petKnowledge'
+import { speakReadyText } from './speechScript'
 
 const KEY = 'xc_pet'
 const STAGES = [
@@ -104,14 +105,33 @@ export const petStats = computed(() => {
 })
 // 当前角色皮肤
 export const petSkin = computed(() => petAllSkins.value.find((s) => s.id === (store.cfg.petSkin || PET_SKINS[0].id)) || PET_SKINS[0])
-// 每个角色可绑定「大模型克隆声线」：store.cfg.skinVoices[skinId] = { engine:'glm'|'openai', voice, name, model? }
-// 绑定后一键切换角色即用克隆原声；未绑定则保持全局音色（与「语音」设置完全一致）
-export function petSkinVoiceOf(skinId) {
+// 萌宠 → 阿里百炼 Qwen3-TTS 默认对应音色（官方音色，按角色人设挑选；用户用百炼引擎时自动对应）
+const SKIN_DASH_VOICE = {
+  xueshen: 'Neil', // 薛神·判断推理名师 → 字正腔圆的新闻主持男声
+  zhangruonan: 'Serena', // 章若楠 → 温柔小姐姐
+  lixingyun: 'Moon', // 李星云 → 率性帅气男声
+  jiruxue: 'Chelsie', // 姬如雪 → 二次元虚拟女友
+  custom: 'Cherry' // 自定义人物 → 阳光亲切小姐姐
+}
+// 每个角色可绑定「大模型克隆声线」：store.cfg.skinVoices[skinId] = { engine:'glm'|'openai'|'dash', voice, name, model?, voiceCustom? }
+// 绑定后一键切换角色即用对应声线；未绑定则保持全局音色（与「语音」设置完全一致）
+export function petSkinVoiceOf(skinId, engine) {
   const s = petAllSkins.value.find((x) => x.id === skinId)
+  const eng = engine || store.cfg.ttsMode || 'glm'
   const bv = store.cfg.skinVoices && store.cfg.skinVoices[skinId]
-  if (bv && bv.voice) return { engine: bv.engine, voice: bv.voice, name: bv.name || '', model: bv.model || '', cloned: true }
+  if (bv && bv.voice) {
+    // 已绑定的声线优先（含 dash 自定义/预设音色的绑定），并附 voiceCustom（百炼自然语言音色）
+    const out = { engine: bv.engine, voice: bv.voice, name: bv.name || '', model: bv.model || '', cloned: true }
+    if (bv.engine === 'dash' && bv.voiceCustom) out.voiceCustom = bv.voiceCustom
+    return out
+  }
   // 皮肤自带的大模型克隆声线（如薛神）同样按克隆声线处理
   if (s && s.voice && s.voice.clonedVoice) return { engine: s.voice.engine, voice: s.voice.voice, name: s.voice.name || '', model: s.voice.model || '', cloned: true }
+  // 百炼引擎下，未绑定则回退到该萌宠对应的官方音色（实现"萌宠对应"）
+  if (eng === 'dash') {
+    const dv = (s && SKIN_DASH_VOICE[s.id]) || 'Cherry'
+    return { engine: 'dash', voice: dv, name: '', model: '', cloned: false }
+  }
   return (s && s.voice) ? { ...s.voice, name: '', model: '', cloned: false } : { engine: 'glm', voice: 'tongtong', name: '', model: '', cloned: false }
 }
 // 把克隆成功的声线绑定到指定角色（bind 为空则解绑）
@@ -155,6 +175,7 @@ export function petGlobalVoice() {
   if (m === 'openai') return { engine: 'openai', voice: (store.cfg.ttsOpenAI && store.cfg.ttsOpenAI.voice) || 'default', model: (store.cfg.ttsOpenAI && store.cfg.ttsOpenAI.model) || '' }
   if (m === 'edge') return { engine: 'edge', voice: store.cfg.ttsEdgeVoice || 'zh-CN-XiaoxiaoNeural', model: '' }
   if (m === 'sys') return { engine: 'sys', voice: store.cfg.ttsVoice || '', model: '' }
+  if (m === 'dash') return { engine: 'dash', voice: (store.cfg.ttsDash && store.cfg.ttsDash.voice) || 'Cherry', model: (store.cfg.ttsDash && store.cfg.ttsDash.voiceCustom) || '', custom: !!(store.cfg.ttsDash && store.cfg.ttsDash.voiceCustom) }
   return { engine: 'glm', voice: (store.cfg.ttsGm && store.cfg.ttsGm.voice) || 'tongtong', model: '' }
 }
 // 用户在语音设置里改音色时调用：把「全局音色」快照存起来，供切换非克隆角色时恢复
@@ -183,16 +204,20 @@ export function applyPetSkin(id) {
   save()
   const voice = petSkinVoiceOf(s.id)
   if (voice && voice.cloned && voice.voice) {
-    // 克隆原声 → 切到该角色即用克隆声线
+    // 克隆/绑定声线 → 切到该角色即用对应声线
     const v = voice
     if (v.engine === 'glm' && store.cfg.ttsGm) store.cfg.ttsGm.voice = v.voice
     if (v.engine === 'openai' && store.cfg.ttsOpenAI) {
       store.cfg.ttsOpenAI.voice = v.voice
       if (v.model) store.cfg.ttsOpenAI.model = v.model
     }
+    if (v.engine === 'dash' && store.cfg.ttsDash) {
+      store.cfg.ttsDash.voice = v.voice
+      store.cfg.ttsDash.voiceCustom = v.voiceCustom || ''
+    }
     if (v.engine && store.cfg.ttsMode !== v.engine) store.cfg.ttsMode = v.engine
   } else {
-    // 未绑定克隆 → 恢复全局音色（用户自己在「语音」里选的大模型声音），保持全局一致
+    // 未绑定 → 恢复全局音色（用户自己在「语音」里选的大模型声音），保持全局一致
     const g = store.cfg.globalVoice
     if (g && g.voice) {
       if (g.engine === 'glm' && store.cfg.ttsGm) store.cfg.ttsGm.voice = g.voice
@@ -201,6 +226,10 @@ export function applyPetSkin(id) {
         if (g.model) store.cfg.ttsOpenAI.model = g.model
       }
       if (g.engine === 'edge') store.cfg.ttsEdgeVoice = g.voice
+      if (g.engine === 'dash' && store.cfg.ttsDash) {
+        store.cfg.ttsDash.voice = g.voice
+        store.cfg.ttsDash.voiceCustom = g.custom ? (g.model || '') : ''
+      }
       if (g.engine) store.cfg.ttsMode = g.engine
     }
   }
@@ -371,10 +400,18 @@ export function petNextSpeed() {
   return next
 }
 // 读当前页面内容（刷题题干/错题复盘等）
+// v3.8.88：若启用「语音阅读大模型」，先异步改写为口语讲稿再朗读；未启用/失败即直接朗读原文
+let _readBusy = false
 export function petReadCurrent() {
+  if (_readBusy) return false
   const ctx = store.readCtx
   if (ctx && ctx.text) {
-    petRead(ctx.text, { speed: Number(store.cfg.ttsRate) || 1 })
+    if (!petVoiceOn.value) { petBubbleTip('我的语音被静音了，去设置里打开吧 🔇'); return false }
+    _readBusy = true
+    petBubbleTip('📖 我在帮你读～')
+    speakReadyText(ctx.text)
+      .then((t) => { _readBusy = false; petRead(t && t.length ? t : ctx.text, { speed: Number(store.cfg.ttsRate) || 1 }) })
+      .catch(() => { _readBusy = false; petRead(ctx.text, { speed: Number(store.cfg.ttsRate) || 1 }) })
     return true
   }
   petBubbleTip('当前页面没有可朗读的内容，去「单题快练」或「错题本」试试吧 🐾')

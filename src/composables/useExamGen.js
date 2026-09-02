@@ -14,6 +14,7 @@ import { recordGenLog, genLogHint } from '../utils/quizLog'
 import { figCfg } from '../api/figEnhance'
 import { diffCurve } from '../api/professor'
 import { SUB_VARIANTS } from '../components/examData'
+import { makeVariantRotator, diversitySnippet, askVariant, recordQuestion } from '../utils/genDiversity'
 import { store } from '../store'
 import { onUnmounted } from 'vue'
 
@@ -44,6 +45,8 @@ export function useExamGen(ctx) {
   let genAbort = false
   let genCtrl = null // AbortController：取消出卷时立即中断进行中的请求
   const generating = {}
+  // —— Request E 多样性：连续出题序号（问法/角度轮换）——
+  let diverSeq = 0          // 递增序号：注入 diversitySnippet / askVariant 的 seq 参数
   onUnmounted(() => { if (genTimer) clearInterval(genTimer) })
 
   function resolveDir(d) { if (d === 'is' || d === 'not') return d; return Math.random() < 0.5 ? 'is' : 'not' }
@@ -187,7 +190,12 @@ export function useExamGen(ctx) {
       const dh = dirHint(item.subject, dir, item.dirText)
       const fmtHint = (item.subject === '图形推理' && singleMode.value && tutuFormat.value && tutuFormat.value !== 'auto') ? '本题出题形式固定为【' + tutuFormat.value + '】，请严格按【图形推理】子命题人的「SVG 布局铁律」中该形式的画布尺寸与格子布局出图。' : ''
       const zlLearn = genLogHint(item.subject, variant) + (plateLearn(item.subject) ? '（本板块避坑：' + plateLearn(item.subject) + '）' : '')
-      const ask = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + (zlLearn ? '\n' + zlLearn : '') + dh +
+      // Request E·多样性：开放换话题（防撞记忆：避免重复最近题）+ 自然化 + 问法变体
+      const qv = askVariant(item.subject, variant, diverSeq)
+      const qvHint = (qv && !item.dirText) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
+      const diverTxt = diversitySnippet(item.subject, variant, diverSeq)
+      diverSeq++
+      const ask = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + (zlLearn ? '\n' + zlLearn : '') + dh + diverTxt + qvHint +
         '【本次输出要求（提速，必须遵守）】只输出：题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X' +
         (item.subject === '逻辑判断' && variant === '真假话' ? ' + 末尾【验证数据】JSON' : '') +
         '。不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。' + fmtHint
@@ -260,6 +268,8 @@ export function useExamGen(ctx) {
         item.explain = qz.explain || ''
         item.designer = qz.designer || ''
         item.variant = variant
+        // Request E·多样性：成功出题后记录本题题干头（供后续题避开同话题/同素材）
+        recordQuestion(item.subject, qz.stem)
       } else {
         // AI 多次未过质检 → 本地题库自动回退（图推/数量/政治，保证一定出得了题、且无裁切）
         const localFallback = item.subject === '图形推理' ? genTutuQuestion : (item.subject === '数量关系' ? genSlQuestion : (item.subject === '政治理论' ? genZzQuestion : null))
@@ -295,24 +305,34 @@ export function useExamGen(ctx) {
     if (!singleMode.value || genAbort) return
     const plate = singlePlate.value
     const diff = difficulty.value === 'curve' ? 'mid' : difficulty.value
-    const variant = singleVariant.value === '不限' ? '' : singleVariant.value
+    const isFree = singleVariant.value === '不限'
+    // Request E·多样性：不限时用题型轮换器让相邻"再来一题"的题型也不同
+    const vars = singleVars.value
+    const variant = isFree ? (vars.length ? makeVariantRotator(vars, diverSeq % 3)() : '') : singleVariant.value
     const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
     const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
     const item = { subject: plate, difficulty: diff, variant, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false }
     const localCapable = { '图形推理': genTutuQuestion, '数量关系': genSlQuestion, '政治理论': genZzQuestion }
     if (localCapable[plate] && (singleLocal.value || !pickGenC() || !pickGenC().key)) {
       const lq = localCapable[plate]()
-      if (lq) prefetchQ.value = { item: { ...item, stem: lq.stem, options: lq.options, answer: lq.answer, explain: lq.explain || '', variant: '本地题库', local: true }, plate, difficulty: diff, variant: variant === '' ? '不限' : variant }
+      if (lq) { prefetchQ.value = { item: { ...item, stem: lq.stem, options: lq.options, answer: lq.answer, explain: lq.explain || '', variant: '本地题库', local: true }, plate, difficulty: diff, variant: variant === '' ? '不限' : variant }; recordQuestion(plate, lq.stem) }
       return
     }
     const c = pickGenC()
     if (!c || !c.key) return
     try {
       const sys = buildQuizSys({ plate, difficulty: diff, variant })
-      const ask = (variant ? '请为【' + plate + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + plate + '】出一道仿真模拟题。') + dirHint(plate, dir, dirText)
+      const qv = askVariant(plate, variant, diverSeq)
+      const qvHint = (qv && !dirText) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
+      diverSeq++
+      const diverTxt = diversitySnippet(plate, variant, diverSeq)
+      const ask = (variant ? '请为【' + plate + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + plate + '】出一道仿真模拟题。') + dirHint(plate, dir, dirText) + diverTxt + qvHint
       const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 6000, 120000, genCtrl && genCtrl.signal)
       const qz = parseQuiz(reply)
-      if (qz && qz.options && qz.options.length >= 4) prefetchQ.value = { item: { ...item, stem: qz.stem, options: qz.options, answer: qz.answer, explain: qz.explain || '', designer: qz.designer || '' }, plate, difficulty: diff, variant }
+      if (qz && qz.options && qz.options.length >= 4) {
+        prefetchQ.value = { item: { ...item, stem: qz.stem, options: qz.options, answer: qz.answer, explain: qz.explain || '', designer: qz.designer || '' }, plate, difficulty: diff, variant }
+        recordQuestion(plate, qz.stem)
+      }
     } catch (e) { /* 预生成失败静默，下次点再来一题再实时生成 */ }
   }
 
@@ -392,16 +412,15 @@ export function useExamGen(ctx) {
         return
       }
       // 预分配题型（同板块内轮换，单题题型；一拖N 分析推理单独追加，见末尾）
-      const slots = []
+      // Request E：用题型轮换器让同一板块内相邻题题型错开（避免固定 i%len 顺序导致的相邻重复/模板感）
+      const rot = makeVariantRotator(vars, diverSeq % 5)
+      diverSeq += n
       for (let i = 0; i < n; i++) {
-        const v = vars.length ? vars[i % vars.length] : ''
-        slots.push({ v })
-      }
-      slots.forEach((s) => {
+        const v = vars.length ? rot() : ''
         const d = difficulty.value === 'curve' ? diffCurve(gi, total) : difficulty.value
-        plan.push({ subject: m.subject, difficulty: d, variant: s.v, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
+        plan.push({ subject: m.subject, difficulty: d, variant: v, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
         gi++
-      })
+      }
     })
     // 一拖N 分析推理组：独立于题型轮换（每组 N 小题，属分析推理综合推演）
     const ytGroups = Math.max(0, Math.min(2, paperYtNGroup.value || 0))
@@ -450,8 +469,10 @@ export function useExamGen(ctx) {
       }
       return items
     }
+    const rot = makeVariantRotator(vars, diverSeq % 3)
     for (let i = 0; i < batch; i++) {
-      const v = fixedVar || (vars.length ? vars[i % vars.length] : '')
+      // Request E·多样性：不限时用题型轮换器让相邻题型错开
+      const v = fixedVar || (vars.length ? rot() : '')
       const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
       const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
       items.push({ subject: singlePlate.value, difficulty: diff, variant: v, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
@@ -632,7 +653,11 @@ export function useExamGen(ctx) {
     const curDiff = difficulty.value === 'curve' ? 'mid' : difficulty.value
     const curVar = singleVariant.value === '不限' ? '' : singleVariant.value
     const pf = prefetchQ.value
-    if (pf && pf.item && pf.item.stem && pf.plate === curPlate && pf.difficulty === curDiff && pf.variant === curVar) {
+    // Request E：不限(自由)模式预生成题型已自动轮换(concrete variant)，故匹配只按板块+难度；
+    // 指定题型模式则仍要求题型一致
+    const matchFree = curVar === ''
+    const usePf = pf && pf.item && pf.item.stem && pf.plate === curPlate && pf.difficulty === curDiff && (matchFree || pf.variant === curVar)
+    if (usePf) {
       const item = { ...pf.item, picked: null, correct: null, timeout: false, err: false }
       const paper = makePaper('单题快练 · ' + curPlate, [item])
       papers.value[0] = paper; savePapers()

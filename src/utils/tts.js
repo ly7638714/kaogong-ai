@@ -22,7 +22,12 @@ import {
   resampleAudio,
   speechStartOffset,
   audioBufferToWavBytes,
-  ttsStatus
+  ttsStatus,
+  ttsCharsToday,
+  DASH_PRESET_VOICES,
+  DASH_MODELS,
+  dashVoicesForModel,
+  dashSynthesize
 } from './ttsEngine'
 
 // ===== 场景音色清单（仅系统语音兜底时使用；真人引擎在「音色市场」里选）=====
@@ -128,7 +133,7 @@ export function speaking() {
 }
 
 // ===== 真人引擎辅助（设置页「音色市场」用）=====
-export { TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, gmCfg, openaiCfg, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, detectAudioFormat, resampleAudio, speechStartOffset, audioBufferToWavBytes }
+export { TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, gmCfg, openaiCfg, dashSynthesize, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, detectAudioFormat, resampleAudio, speechStartOffset, audioBufferToWavBytes }
 
 // 试听某个音色（固定短句，立即播放；engine: glm/openai/edge）
 export async function previewVoice(engine, voice, opts = {}) {
@@ -144,6 +149,14 @@ export async function previewVoice(engine, voice, opts = {}) {
     }
     if (engine === 'openai') {
       const r = await openaiSynthesize(text, { voice, speed: 1 })
+      if (!r.ok) { ttsStatus.state = 'error'; ttsStatus.msg = '❌ 试听失败：' + r.msg; showToast('🔊 试听失败：' + r.msg, 'error'); return { ok: false } }
+      ttsStatus.state = 'speaking'; ttsStatus.msg = '正在播放真人音色试听…'
+      const played = await playBuf(r.bytes, r.mime)
+      ttsStatus.state = played ? 'done' : 'error'; ttsStatus.msg = played ? '✅ 真人音色试听完成' : '❌ 播放失败'
+      return { ok: played }
+    }
+    if (engine === 'dash') {
+      const r = await dashSynthesize(text, { voice, speed: 1, voiceCustom: (store.cfg.ttsDash && store.cfg.ttsDash.voiceCustom) || '' })
       if (!r.ok) { ttsStatus.state = 'error'; ttsStatus.msg = '❌ 试听失败：' + r.msg; showToast('🔊 试听失败：' + r.msg, 'error'); return { ok: false } }
       ttsStatus.state = 'speaking'; ttsStatus.msg = '正在播放真人音色试听…'
       const played = await playBuf(r.bytes, r.mime)

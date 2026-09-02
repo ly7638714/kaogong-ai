@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveMyMem, saveNotes } from './store'
-import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
+import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
 import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
 import { PLATE_MODE } from './api'
-import { FIG_PROVIDERS, fillFigProvPreset, testFigConn } from './api/figEnhance'
+import { PROVIDERS, MODELS, defaultModelOf, mergedModelsOf, providerOf, REGISTRY_VERSION, fastTextOf } from './api/modelRegistry'
 import ChatPage from './components/ChatPage.vue'
 import KbPage from './components/KbPage.vue'
 import StatsPage from './components/StatsPage.vue'
@@ -13,6 +13,7 @@ import CockpitPage from './components/CockpitPage.vue'
 import DraftPad from './components/DraftPad.vue'
 import FloatPanel from './components/FloatPanel.vue'
 import ExamBar from './components/ExamBar.vue'
+import ExamManager from './components/ExamManager.vue'
 import PetAvatar from './components/PetAvatar.vue'
 import Data3DPage from './components/Data3DPage.vue'
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
@@ -38,6 +39,8 @@ const tabs = [
   { k: 'wq', t: '📋 错题' },
   { k: '3d', t: '🌌 3D数据' }
 ]
+// 界面自定义：被隐藏的板块/功能入口不渲染（功能仍在，可从深链/更多菜单进入）
+const visibleTabs = computed(() => tabs.filter((t) => !(store.cfg.uiHidden && store.cfg.uiHidden['tab_' + t.k])))
 // ===== URL 深链（hash 路由）：#/ck #/chat #/kb #/ths #/stat #/wq，可收藏/分享、浏览器返回键切页 =====
 const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1, '3d': 1 }
 function tabFromHash() {
@@ -934,9 +937,9 @@ function toggleBgAuto() {
 
 // ===== 设置引导（逐项讲解）=====
 const SET_GUIDE = [
-  { id: 'set-api', t: '💬 文字模型', d: '纯文字题的 AI 大脑：选提供商、填 API Key、地址与模型名。', tips: '推荐 DeepSeek（便宜中文好）；点「🔑 如何获取 API Key」看教程；填完点底部「保存并测试」验证。' },
-  { id: 'set-vision', t: '👁️ 视觉模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek 可用同一个 Key（deepseek-v4-flash-vision-exp）；不配则发图题无法识别。' },
-  { id: 'set-fig', t: '🖼 图形理解增强（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
+  { id: 'set-api', t: '💬 文本大模型', d: '纯文字题的 AI 大脑：下拉选服务商 + 下拉选模型（新→旧），填 Key 即可。', tips: '推荐 DeepSeek（便宜中文好）；换服务商自动带官方 API 地址与最新模型；卡片内「🧪 测试连通性」一键验证。' },
+  { id: 'set-vision', t: '👁️ 视觉大模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek 可用同一个 Key（deepseek-v4-flash-vision-exp）；不配则发图题无法识别。' },
+  { id: 'set-fig', t: '🖼 图像增强大模型（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
   { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
@@ -948,13 +951,17 @@ const SET_GUIDE = [
 
 // ===== 设置面板顶部状态总览（一键看清哪些没配）=====
 const stCfg = computed(() => {
-  const textOk = !!(store.cfg.text && store.cfg.text.key)
-  const visionOk = !!(store.cfg.vision && store.cfg.vision.key)
+  const textOk = !!(store.cfg.text && store.cfg.text.key && store.cfg.text.model)
+  const visionOk = !!(store.cfg.vision && store.cfg.vision.key && store.cfg.vision.model)
+  const f = store.cfg.fig || {}
+  const figOk = !!f.on && !!f.url && !!f.model && (!!f.key || ['ollama', 'lmstudio', 'jan'].includes(f.prov))
+  const r = store.cfg.rd || {}
+  const rdOk = !!r.on && !!r.url && !!r.model && !!r.key
   const ttsMode = store.cfg.ttsMode || 'glm'
   const eng = TTS_ENGINES.find((e) => e.id === ttsMode)
   const ttsLabel = (eng && eng.name.split('（')[0].split('·')[0].trim()) || ttsMode
   const dataLoc = dirLabel.value || (store.cfg.dataDir ? store.cfg.dataDir : '本机')
-  return { textOk, visionOk, ttsLabel, dataLoc }
+  return { textOk, visionOk, figOk, rdOk, ttsLabel, dataLoc }
 })
 const tourShow = ref(false)
 const tourI = ref(0)
@@ -981,6 +988,7 @@ const SET_GROUP_META = [
   { id: 'data', t: '💾 数据' },
   { id: 'account', t: '🔐 账号' },
   { id: 'fun', t: '🎵 趣味' },
+  { id: 'ui', t: '🧩 界面自定义' },
   { id: 'help', t: '❓ 帮助' }
 ]
 const setNav = SET_GROUP_META
@@ -992,10 +1000,31 @@ const SEC_GROUP = {
   'set-look': 'look', 'set-bg': 'look',
   'set-data': 'data',
   'set-account': 'account',
+  'set-ui': 'ui',
   'set-help': 'help', 'set-about': 'help'
 }
 const chatFastModel = ref(localStorage.getItem('xc_chat_fast_model') || '')
 function saveChatFastModel() { try { localStorage.setItem('xc_chat_fast_model', String(chatFastModel.value || '').trim()) } catch (e) {} }
+// ===== 对话快模型下拉（v3.8.87）：按文字模型所选服务商给出「非思考/极速」候选 =====
+const fastCustomMode = ref(false)
+const fastCustomName = ref('')
+function fastTextOptions() {
+  const prov = (store.cfg.text && store.cfg.text.prov) || 'ds'
+  return fastTextOf(prov)
+}
+// 当前保存的快模型值不在该服务商候选内（自定义/历史值）→ 下拉里补一项保留
+function fastHasCurrentCustom() {
+  const cur = String(chatFastModel.value || '').trim()
+  return !!cur && !fastTextOptions().some((f) => f.id === cur)
+}
+function applyFastCustom() {
+  const v = String(fastCustomName.value || '').trim()
+  if (!v) { showToast('请输入快模型名', 'warn'); return }
+  chatFastModel.value = v
+  fastCustomName.value = ''
+  fastCustomMode.value = false
+  saveChatFastModel()
+}
 const setGroup = ref('ai')
 function toggleSetGroup(k) { setGroup.value = setGroup.value === k ? '' : k }
 function scrollSet(id) {
@@ -1005,6 +1034,39 @@ function scrollSet(id) {
     const el = document.getElementById(id) || document.querySelector('.set-group-bd .sec-t')
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, 60)
+}
+// ===== 界面自定义（Request D Part 2）：主界面板块/功能入口显隐开关（仅隐藏，不删除功能）=====
+// uiHidden 存于 store.cfg.uiHidden（已加入 D() 默认 {}，旧用户自动迁移）；true=隐藏
+const uiEntries = [
+  { id: 'tab_ck', label: '🚀 看板', desc: '首页驾驶舱（备考概览 / 考试倒计时）' },
+  { id: 'tab_chat', label: '💬 对话', desc: 'AI 刷题对话页' },
+  { id: 'tab_kb', label: '📚 知识库', desc: '方法速查库' },
+  { id: 'tab_ths', label: '🗂️ 积累', desc: '常识 / 时政 / 成语积累' },
+  { id: 'tab_stat', label: '📊 统计', desc: '学习数据统计图' },
+  { id: 'tab_wq', label: '📋 错题', desc: '错题复盘本' },
+  { id: 'tab_3d', label: '🌌 3D数据', desc: '3D 学习数据驾驶舱' },
+  { id: 'pet', label: '🐾 萌宠', desc: '常驻主页的宠物球与对话小窗' },
+  { id: 'music', label: '🎵 背景音乐', desc: '看板页角的背景音乐球' }
+]
+function uiHiddenOf(id) {
+  return !!(store.cfg.uiHidden && store.cfg.uiHidden[id])
+}
+function toggleUi(id) {
+  if (!store.cfg.uiHidden) store.cfg.uiHidden = {}
+  const willHide = !uiHiddenOf(id)
+  store.cfg.uiHidden[id] = willHide
+  // 隐藏的是当前所在 tab → 切到仍可见的首个 tab，避免空屏
+  if (willHide && id.indexOf('tab_') === 0 && store.tab === id.slice(4)) {
+    const firstVis = visibleTabs.value[0]
+    if (firstVis) store.tab = firstVis.k
+  }
+  saveCfg()
+  showToast(willHide ? '👻 已隐藏「' + (uiEntries.find((e) => e.id === id) || {}).label + '」（功能仍在）' : '👀 已显示「' + (uiEntries.find((e) => e.id === id) || {}).label + '」', 'info')
+}
+function resetUi() {
+  store.cfg.uiHidden = {}
+  saveCfg()
+  showToast('✅ 已恢复全部界面入口', 'success')
 }
 const sysVoices = ref([])
 function loadSysVoices() {
@@ -1067,6 +1129,55 @@ function unhideVoice(engine, id) {
   const vc = store.cfg.voiceCustom || {}
   if (vc.hidden && vc.hidden[engine]) vc.hidden[engine] = vc.hidden[engine].filter((x) => x !== id)
   saveCfg()
+}
+// ===== 百炼自定义音色（自然语言 voice_design）预设管理 =====
+const dashCustomName = ref('')
+function saveDashCustomVoice() {
+  const desc = String(store.cfg.ttsDash.voiceCustom || '').trim()
+  if (!desc) { showToast('请先填写自定义音色描述', 'info'); return }
+  if (store.cfg.ttsDash.model && !store.cfg.ttsDash.model.includes('instruct')) {
+    showToast('⚠️ 自定义音色仅 qwen3-tts-instruct-flash 等 instruct 模型支持，请先把模型改成 instruct 系列', 'error')
+    return
+  }
+  if (!store.cfg.ttsDash.customVoices) store.cfg.ttsDash.customVoices = []
+  const name = (dashCustomName.value || '').trim() || ('音色' + (store.cfg.ttsDash.customVoices.length + 1))
+  store.cfg.ttsDash.customVoices.push({ id: 'dc' + Date.now(), name, desc })
+  dashCustomName.value = ''
+  saveCfg()
+  showToast('💾 已保存自定义音色预设「' + name + '」', 'success')
+}
+function applyDashCustom(c) {
+  store.cfg.ttsDash.voiceCustom = c.desc
+  saveCfg(); savePetGlobalVoice()
+}
+function rmDashCustomVoice(i) {
+  if (!store.cfg.ttsDash.customVoices) return
+  const c = store.cfg.ttsDash.customVoices[i]
+  store.cfg.ttsDash.customVoices.splice(i, 1)
+  if (store.cfg.ttsDash.voiceCustom === (c && c.desc)) store.cfg.ttsDash.voiceCustom = ''
+  saveCfg()
+}
+// 百炼模型下拉：判断当前是否为"自定义"（不在官方列表内）
+const dashModelIsCustom = computed(() => !DASH_MODELS.some((m) => m.id === (store.cfg.ttsDash && store.cfg.ttsDash.model)))
+function onDashModelChange(e) {
+  const v = e.target.value
+  if (v === '__custom__') {
+    if (!dashModelIsCustom.value) store.cfg.ttsDash.model = ''
+  } else {
+    store.cfg.ttsDash.model = v
+  }
+  saveCfg(); savePetGlobalVoice()
+}
+// 把当前选中的百炼音色（含自定义音色）绑定给指定萌宠，实现"多角色音色"持久化
+function bindDashToSkin(id) {
+  if (petIsLocked(id)) { showToast('🔒 该角色声音已内置锁定，不可更改', 'error'); return }
+  const d = store.cfg.ttsDash || {}
+  const desc = d.voiceCustom ? ('（自定义：' + d.voiceCustom + '）') : ''
+  petBindCloneVoice(id, { engine: 'dash', voice: d.voice || 'Cherry', voiceCustom: d.voiceCustom || '', name: '百炼·' + (d.voice || '默认') + desc })
+  if (store.cfg.ttsMode !== 'dash') store.cfg.ttsMode = 'dash'
+  saveCfg()
+  const sk = petAllSkins.value.find((x) => x.id === id)
+  showToast('🔗 已把百炼音色绑定给『' + ((sk && sk.char) || id) + '』', 'success')
 }
 // 内联改名（不用 window.prompt，避免被应用内/环境拦截）
 const voiceRename = ref(null) // { engine, id, name }
@@ -1546,41 +1657,107 @@ function resetAll() {
   localStorage.clear()
   location.reload()
 }
-// 提供商预设：切换提供商自动填 url/model（含 DeepSeek 视觉模型，OpenAI 兼容格式）
-function fillProv(kind) {
-  const ps = {
-    ds: { url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' },
-    zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-5v-turbo' },
-    openai: { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o' },
-    qwen: { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-vl-max' },
-    custom: { url: '', model: '' }
-  }
-  const p = store.cfg[kind].prov,
-    pre = ps[p] || ps.custom
-  if (kind === 'vision' && p === 'ds') {
-    store.cfg[kind].url = 'https://api.deepseek.com/chat/completions'
-    store.cfg[kind].model = 'deepseek-v4-flash-vision-exp'
-    return
-  }
-  store.cfg[kind].url = pre.url
-  store.cfg[kind].model = pre.model
+// ============================================================
+// 模型配置 · 注册表驱动（v3.8.84）
+// 三类（text 文本 / vision 视觉 / fig 图像增强）共用一套逻辑：
+// 服务商下拉 + 模型下拉（新→旧）+ Key/URL + 每类独立「测试连通」按钮
+// 数据源：src/api/modelRegistry.js（内置清单 v+用户 customModels）
+// ============================================================
+const CATS = ['text', 'vision', 'fig']
+const CAT_LABEL = { text: '文本', vision: '视觉', fig: '图形增强', rd: '语音阅读' }
+// rd（语音阅读·讲稿改写）复用 文本(text) 的服务商与模型清单
+const listCat = (cat) => (cat === 'rd' ? 'text' : cat)
+// 每类测试按钮状态：busy / stat / code(''|'ok'|'bad'|'warn')
+const catUi = { text: { busy: false, stat: '', code: '' }, vision: { busy: false, stat: '', code: '' }, fig: { busy: false, stat: '', code: '' }, rd: { busy: false, stat: '', code: '' } }
+// 每类「手动添加自定义模型」输入框
+const customInput = { text: '', vision: '', fig: '', rd: '' }
+const catCfg = (cat) => store.cfg[cat]
+const catProviders = (cat) => PROVIDERS[listCat(cat)] || {}
+// 当前 provider 的模型下拉项 = 内置(新→旧) + 用户自增；当前值不在清单时额外保留一项防丢
+function catModels(cat) {
+  const c = catCfg(cat)
+  if (!c) return []
+  const list = mergedModelsOf(c.prov, listCat(cat), store.cfg.customModels)
+  const cur = c.model
+  if (cur && !list.some((m) => m.id === cur)) list.unshift({ id: cur, label: '当前模型（不在预设清单）：' + cur, src: 'cur' })
+  return list
 }
-// ===== 图形理解增强（可选·独立模型）=====
-const figTestStat = ref('')
-function fillFig() {
-  const pre = fillFigProvPreset(store.cfg.fig.prov)
-  store.cfg.fig.url = pre.url
-  store.cfg.fig.model = pre.model
+// 当前 provider 下「用户自增」模型（渲染可删 chips）
+function catUserModels(cat) {
+  const cm = (store.cfg.customModels || {})[listCat(cat)]
+  return (cm && cm[catCfg(cat).prov]) || []
+}
+// 切换服务商：自动填内置 API 地址；模型不在新清单 → 自动切到该商最新模型；custom 完全由用户手填
+function onCatProv(cat) {
+  const c = catCfg(cat)
+  if (!c) return
+  if (c.prov !== 'custom') {
+    const p = providerOf(c.prov, listCat(cat))
+    if (p.url) c.url = p.url
+    const known = mergedModelsOf(c.prov, listCat(cat), store.cfg.customModels)
+    if (!c.model || !known.some((m) => m.id === c.model)) {
+      const d = defaultModelOf(c.prov, listCat(cat))
+      if (d) c.model = d
+    }
+  }
   saveCfg()
 }
-async function figTest() {
-  const c = store.cfg.fig
-  if (!c || !c.url || !c.model) { figTestStat.value = '先填 API 地址与模型名称'; return }
-  figTestStat.value = '检测中…'
-  const r = await testFigConn(c)
-  figTestStat.value = r.ok === true ? '✅ 连通正常' : r.ok === false ? '❌ ' + (r.msg || '连接失败') : '未配置'
-  if (r.ok === true) showToast('✅ 图形增强模型连通正常', 'success')
-  else if (r.ok === false) showToast('❌ 图形增强模型连接失败：' + (r.msg || ''), 'error')
+// 添加用户自增模型（新上市/内部网关模型兜底，任何服务商下都可用）
+function addCustomModel(cat) {
+  const id = String(customInput[cat] || '').trim()
+  if (!id) { showToast('请输入模型名称后再添加', 'warn'); return }
+  if (!store.cfg.customModels) store.cfg.customModels = {}
+  const lc = listCat(cat)
+  store.cfg.customModels[lc] = store.cfg.customModels[lc] || {}
+  const prov = catCfg(cat).prov
+  store.cfg.customModels[lc][prov] = store.cfg.customModels[lc][prov] || []
+  const arr = store.cfg.customModels[lc][prov]
+  if (arr.some((m) => m.id === id)) { showToast('该模型已在列表里', 'warn'); return }
+  arr.push({ id, label: id + '（自增）', pub: '', note: '用户自增' })
+  customInput[cat] = ''
+  saveCfg()
+}
+function rmCustomModel(cat, id) {
+  const cm = (store.cfg.customModels || {})[listCat(cat)]
+  const arr = cm && cm[catCfg(cat).prov]
+  if (!arr) return
+  const i = arr.findIndex((m) => m.id === id)
+  if (i >= 0) arr.splice(i, 1)
+  saveCfg()
+}
+// 注册表兜底说明
+function registryInfo() {
+  let n = 0
+  CATS.forEach((cat) => { n += Object.keys(MODELS[cat] || {}).length })
+  return '📦 模型清单 v' + REGISTRY_VERSION + '（内置 ' + n + ' 个服务商模型表）· 新模型可在下方「➕ 手动添加」'
+}
+// 每类独立「测试连通性」：真实发起一次极小请求验证 Key/URL/模型名是否可用
+async function testCat(cat) {
+  const st = catUi[cat]
+  if (st.busy) return
+  const c = catCfg(cat)
+  const localNoKey = cat === 'fig' && ['ollama', 'lmstudio', 'jan'].includes(c && c.prov)
+  if (!c || !c.url || !c.model) { st.stat = '请先选服务商并填 API 地址与模型'; st.code = 'warn'; return }
+  if (!c.key && !localNoKey) { st.stat = '未填 API Key（本地模型除外）'; st.code = 'warn'; return }
+  st.busy = true
+  st.stat = '检测中…'
+  st.code = ''
+  const t0 = Date.now()
+  const r = await testOne(c)
+  const ms = Date.now() - t0
+  st.busy = false
+  if (r.ok === true) {
+    st.stat = '✅ 连通正常 · ' + ms + 'ms'
+    st.code = 'ok'
+    showToast('✅ ' + CAT_LABEL[cat] + '模型连通正常（' + ms + 'ms）', 'success')
+  } else if (r.ok === false) {
+    st.stat = '❌ ' + String(r.msg || '连接失败').slice(0, 90)
+    st.code = 'bad'
+    showToast('❌ ' + CAT_LABEL[cat] + '模型连接失败：' + String(r.msg || '').slice(0, 120), 'error')
+  } else {
+    st.stat = '⚠️ 未配置'
+    st.code = 'warn'
+  }
 }
 // ===== 键盘快捷键 =====
 function onPopState() {
@@ -1790,7 +1967,7 @@ onUnmounted(() => {
     </header>
     <ExamBar />
     <nav class="tabs">
-      <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k }" @click="goTab(t.k)">
+      <button v-for="t in visibleTabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k }" @click="goTab(t.k)">
         {{ t.t }}
       </button>
     </nav>
@@ -1813,6 +1990,8 @@ onUnmounted(() => {
 <div class="set-status">
   <span class="set-st" :class="stCfg.textOk ? 'ok' : ''" :title="'文字模型：' + (stCfg.textOk ? '已配置 ' + (store.cfg.text.model || '') : '未配置（纯文字题无法作答）')">💬 文字 {{ stCfg.textOk ? '✅' : '未配' }}</span>
   <span class="set-st" :class="stCfg.visionOk ? 'ok' : ''" :title="'视觉模型：' + (stCfg.visionOk ? '已配置 ' + (store.cfg.vision.model || '') : '未配置（发图/截图题无法识别）')">👁️ 视觉 {{ stCfg.visionOk ? '✅' : '未配' }}</span>
+  <span class="set-st" :class="stCfg.figOk ? 'ok' : ''" :title="'图形增强：' + (stCfg.figOk ? '已启用 ' + (store.cfg.fig.model || '') : '未启用（可选·不影响主问答）')">🖼 图增 {{ stCfg.figOk ? '✅' : '未配' }}</span>
+  <span class="set-st" :class="stCfg.rdOk ? 'ok' : ''" :title="'语音阅读讲稿：' + (stCfg.rdOk ? '已启用 ' + (store.cfg.rd.model || '') : '未启用（朗读直接读原文）')">🎙️ 语音阅读 {{ stCfg.rdOk ? '✅' : '关' }}</span>
   <span class="set-st" :title="'朗读引擎：' + stCfg.ttsLabel">🗣️ {{ stCfg.ttsLabel }}</span>
   <span class="set-st" :title="'当前萌宠角色：' + petSkin.char">🐾 {{ petSkin.char }}</span>
   <span class="set-st" :title="'数据位置：' + stCfg.dataLoc">💾 {{ stCfg.dataLoc }}</span>
@@ -1822,178 +2001,261 @@ onUnmounted(() => {
           <button v-for="n in setNav" :key="n.id" class="set-nav-b" @click="scrollSet(n.id)">{{ n.t }}</button>
         </div>
 
-<button class="set-group-hd" :class="{ on: setGroup === 'ai' }" @click="toggleSetGroup('ai')"><span class="sg-t">🧠 模型与 AI</span><span class="sg-desc">文字 / 视觉 / 图形增强</span><span class="sg-arrow">{{ setGroup === 'ai' ? '▾' : '▸' }}</span></button>
+<button class="set-group-hd" :class="{ on: setGroup === 'ai' }" @click="toggleSetGroup('ai')"><span class="sg-t">🧠 模型与 AI</span><span class="sg-desc">文本 / 视觉 / 图像增强 三类模型调度</span><span class="sg-arrow">{{ setGroup === 'ai' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'ai'" class="set-group-bd">
-<div id="set-api" class="sec-t">💬 文字模型（纯文字题 · 推荐 DeepSeek）</div>
-        <div class="sec-desc">纯文字题（常识 / 言语 / 数量 / 资料 / 判断）的 AI 大脑；推荐 DeepSeek，便宜且中文好。</div>
-        <div class="fld">
-          <label>提供商</label>
-          <select v-model="store.cfg.text.prov" @change="fillProv('text')">
-            <option value="ds">DeepSeek (纯文本·便宜)</option>
-            <option value="zhipu">智谱 GLM-4.6V (视觉)</option>
-            <option value="openai">OpenAI GPT-4o (视觉)</option>
-            <option value="qwen">通义 Qwen-VL (视觉)</option>
-            <option value="custom">自定义 API</option>
-          </select>
-        </div>
-        <div class="fld">
-          <label>API Key</label>
-          <input v-model="store.cfg.text.key" placeholder="sk-..." type="password" />
-        </div>
-        <div class="fld">
-          <label>API 地址</label>
-          <input v-model="store.cfg.text.url" />
-        </div>
-        <div class="fld">
-          <label>模型名称</label>
-          <input v-model="store.cfg.text.model" />
-        </div>
-        <div class="fld">
-          <label>🚀 对话快模型（提速，强烈建议）</label>
-          <input v-model="chatFastModel" placeholder="留空=跟随文字模型（思考模型较慢）；填 deepseek-chat 等非思考模型名，对话回复不再长时间思考、秒出答案（需与文字模型同一服务商/Key）" @change="saveChatFastModel()" />
-          <span class="ep-hint">DeepSeek 思考模型(v4-flash)答一道题常思考 1 分钟以上；填 deepseek-chat 后文字/图推题秒回。图片题若快模型不能识图，会自动用「图形增强」读图后交给快模型作答。</span>
-        </div>
-        <details class="guide">
-          <summary>🔑 如何获取 API Key（点开看详细教程）</summary>
-          <div class="guide-body">
-            <p>① 到对应平台注册并创建 API Key：</p>
-            <ul>
-              <li><b>DeepSeek（推荐，便宜中文好）</b>：<a href="https://platform.deepseek.com/" target="_blank" rel="noopener">platform.deepseek.com</a> → 登录 → API Keys → 创建 Key</li>
-              <li><b>智谱 GLM</b>：<a href="https://open.bigmodel.cn/" target="_blank" rel="noopener">open.bigmodel.cn</a> → API Keys → 创建（新用户有免费额度）</li>
-              <li><b>OpenAI</b>：<a href="https://platform.openai.com/" target="_blank" rel="noopener">platform.openai.com</a> → API keys</li>
-              <li><b>通义千问</b>：<a href="https://dashscope.aliyun.com/" target="_blank" rel="noopener">dashscope.aliyun.com</a> → API-KEY 管理</li>
-            </ul>
-            <p>② 把生成的 Key（形如 sk-…）粘贴到上方「API Key」输入框；</p>
-            <p>③ 点本弹窗底部「保存并测试」，顶部状态灯显示 <b>文字✅ 视觉✅</b> 即配置成功。</p>
-            <p>💡 Key 只保存在你自己浏览器的 localStorage，本应用无后端，不会上传到任何服务器。</p>
+        <div class="mk-bar">{{ registryInfo() }}</div>
+
+        <!-- ════════════ ① 文本大模型 ════════════ -->
+        <div id="set-api" class="mk-card">
+          <div class="mk-hd">
+            <div class="mk-tt">
+              <span class="mk-title">💬 文本大模型</span>
+              <span class="mk-desc">纯文字题（常识 / 言语 / 数量 / 资料 / 判断）的 AI 大脑；推荐 DeepSeek，便宜且中文好。</span>
+            </div>
+            <span class="mk-chip" :class="stCfg.textOk ? 'ok' : ''" :title="'当前：' + (store.cfg.text.prov || '') + ' / ' + (store.cfg.text.model || '')">{{ stCfg.textOk ? '✅ 已配置' : '⛔ 未配置' }}</span>
           </div>
-        </details>
-
-
-        <div id="set-vision" class="sec-t">👁️ 视觉模型（图片/截图题 · 默认 DeepSeek 视觉，可选智谱 GLM-5V / 通义 Qwen-VL）</div>
-        <div class="sec-desc">发图 / 截图题（图推、资料表格、数学公式）必须配它才能看图；DeepSeek 可直接复用同一个 Key。</div>
-        <div class="vis-tip">
-          📌
-          <b>截图/图片题必须配此模型才能看图</b>（图推图形、资料表格、数学公式）。启用步骤：①提供商选「DeepSeek（推荐，用同一个 Key，deepseek-v4-flash-vision-exp）」或「智谱 / 通义」②粘贴 Key ③点下方「保存并测试」。若发图仍无法识别，可到「图形增强」配免费视觉模型兜底。
-        </div>
-        <div class="fld">
-          <label>提供商</label>
-          <select v-model="store.cfg.vision.prov" @change="fillProv('vision')">
-            <option value="ds">DeepSeek (视觉·deepseek-v4-flash-vision-exp·推荐)</option>
-            <option value="zhipu">智谱 GLM-5V (视觉·glm-5v-turbo)</option>
-            <option value="openai">OpenAI GPT-4o (视觉)</option>
-            <option value="qwen">通义 Qwen-VL (视觉)</option>
-            <option value="custom">自定义 API</option>
-          </select>
-        </div>
-        <div class="fld">
-          <label>API Key</label>
-          <input
-            v-model="store.cfg.vision.key"
-            type="password"
-            placeholder="粘贴视觉模型的 Key（DeepSeek 用 DeepSeek Key）"
-          />
-        </div>
-        <div class="fld">
-          <label>API 地址</label>
-          <input v-model="store.cfg.vision.url" />
-        </div>
-        <div class="fld">
-          <label>模型名称</label>
-          <input v-model="store.cfg.vision.model" />
-        </div>
-        <div class="fld">
-          <label>自定义 System Prompt（留空用内置知识库）</label>
-          <textarea v-model="store.cfg.sys" rows="3"></textarea>
-        </div>
-        <div class="fld">
-          <label>
-            <input v-model="store.cfg.kb" type="checkbox" />
-            启用内置知识库增强
-          </label>
-        </div>
-        <div class="fld">
-          <label>
-            <input v-model="store.cfg.strm" type="checkbox" />
-            流式输出
-          </label>
-        </div>
-        <div class="fld">
-          <label>
-            <input v-model="store.cfg.ttsOn" type="checkbox" />
-            🔊 自动朗读 AI 回复（默认关 · 打开才会在回复后自动朗读，关=不耗 TTS 费用）
-          </label>
-        </div>
-        <div class="vis-tip">
-          💰 <b>省钱提示</b>：朗读引擎在下方「🗣️ 音色市场」里选——<b>Edge 免费神经语音（当前默认）</b>与<b>系统语音（完全免费）</b>不花钱；
-          智谱超拟人 / CosyVoice 为收费真人音色（按次计费）。重复朗读同一段内容会命中<b>本地音频缓存</b>，不重复合成。
-        </div>
-        <details class="guide">
-          <summary>🔑 如何获取 API Key（点开看详细教程）</summary>
-          <div class="guide-body">
-            <p>① 到对应平台注册并创建 API Key：</p>
-            <ul>
-              <li><b>DeepSeek（推荐，便宜中文好）</b>：<a href="https://platform.deepseek.com/" target="_blank" rel="noopener">platform.deepseek.com</a> → 登录 → API Keys → 创建 Key</li>
-              <li><b>智谱 GLM</b>：<a href="https://open.bigmodel.cn/" target="_blank" rel="noopener">open.bigmodel.cn</a> → API Keys → 创建（新用户有免费额度）</li>
-              <li><b>OpenAI</b>：<a href="https://platform.openai.com/" target="_blank" rel="noopener">platform.openai.com</a> → API keys</li>
-              <li><b>通义千问</b>：<a href="https://dashscope.aliyun.com/" target="_blank" rel="noopener">dashscope.aliyun.com</a> → API-KEY 管理</li>
-            </ul>
-            <p>② 把生成的 Key（形如 sk-…）粘贴到上方「API Key」输入框；</p>
-            <p>③ 点本弹窗底部「保存并测试」，顶部状态灯显示 <b>文字✅ 视觉✅</b> 即配置成功。</p>
-            <p>💡 Key 只保存在你自己浏览器的 localStorage，本应用无后端，不会上传到任何服务器。</p>
+          <div class="fld-row">
+            <div class="fld">
+              <label>服务商（自动填好 API 地址）</label>
+              <select v-model="store.cfg.text.prov" @change="onCatProv('text')">
+                <option v-for="(p, pk) in catProviders('text')" :key="pk" :value="pk">{{ p.label }}</option>
+              </select>
+            </div>
+            <div class="fld mk-model">
+              <label>模型（按发布时间 新→旧 排序）</label>
+              <select v-model="store.cfg.text.model" @change="saveCfg()">
+                <option v-for="m in catModels('text')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
+              </select>
+              <span class="ep-hint">换服务商若原模型不在其清单内，会自动切到该服务商最新模型。</span>
+            </div>
           </div>
-        </details>
-
-
-        <div id="set-fig" class="sec-t">🖼 图形理解增强（可选 · 独立开源模型 · 不影响上方文字/视觉模型）</div>
-        <div class="sec-desc">可选增强：用独立开源视觉模型把题目截图复刻成图贴进回复，辅助看懂原图，不影响主问答。</div>
-        <div class="vis-tip">
-          📌
-          <b>可选项</b>：发图问 图形推理 / 数量关系几何 / 资料分析图表 时，用这个
-          <b>独立的开源视觉模型</b> 把截图复刻成图贴进回复，帮你"看懂原图"。
-          不配置完全不影响现有功能；主问答仍走上方文字/视觉模型，互不干扰。
+          <div class="fld-row">
+            <div class="fld">
+              <label>API Key（仅存本地）</label>
+              <input v-model="store.cfg.text.key" placeholder="sk-…（不填则文本问答不可用）" type="password" @change="saveCfg()" />
+            </div>
+            <div class="fld">
+              <label>API 地址（一般无需改）</label>
+              <input v-model="store.cfg.text.url" @change="saveCfg()" />
+            </div>
+          </div>
+          <div class="fld">
+            <label>🚀 对话快模型（非思考/极速档 · 提速，强烈建议）</label>
+            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+              <select style="flex: 1 1 300px; min-width: 0" :value="chatFastModel" @change="chatFastModel = $event.target.value; saveChatFastModel()">
+                <option value="">（留空）跟随文字模型 · 可深度思考但较慢</option>
+                <option v-for="f in fastTextOptions()" :key="f.id" :value="f.id">{{ f.label }}{{ f.pub ? ' · 发布 ' + f.pub : '' }}{{ f.note ? ' · ' + f.note : '' }}</option>
+                <option v-if="fastHasCurrentCustom()" :value="chatFastModel">✏️ 自定义：{{ chatFastModel }}</option>
+              </select>
+              <button class="btn btn-gh" style="font-size: 12px" @click="fastCustomMode = !fastCustomMode; if (fastCustomMode) fastCustomName = fastHasCurrentCustom() ? chatFastModel : ''">{{ fastCustomMode ? '✕ 收起' : '✏️ 自定义' }}</button>
+            </div>
+            <input v-if="fastCustomMode" v-model="fastCustomName" class="mk-cust-in" style="margin-top: 6px" placeholder="输入同服务商的其它快模型名（需与文字模型同一服务商/Key 才能秒回）" @keyup.enter="applyFastCustom()" />
+            <span class="ep-hint">候选已按上方「文字模型」服务商自动给出（新→旧）；快速模式会用「同服务商+同 Key」的该模型，对话/图推题秒出答案。图片题若该快模型不能识图，会自动用主视觉或「图像增强」兜底。DeepSeek-V4 / Gemini 等思考模型较慢时建议选一个非思考档；留空=完全跟随文字模型。</span>
+          </div>
+          <div class="mk-act">
+            <button class="btn btn-gh" :class="{ busy: catUi.text.busy }" :disabled="catUi.text.busy" @click="testCat('text')">{{ catUi.text.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>
+            <span class="mk-stat" :class="catUi.text.code">{{ catUi.text.stat || '用所选 Key+模型 发一条最小请求，实时校验能否正常调用' }}</span>
+          </div>
+          <div class="mk-cust">
+            <input v-model="customInput.text" class="mk-cust-in" placeholder="➕ 模型清单里没有的新模型？直接输入模型名添加" @keyup.enter="addCustomModel('text')" />
+            <button class="btn btn-gh" @click="addCustomModel('text')">添加</button>
+          </div>
+          <div v-if="catUserModels('text').length" class="mk-cust-list">
+            <span v-for="m in catUserModels('text')" :key="m.id" class="mk-cust-chip">📌 {{ m.id }}<i title="移出自定义" @click="rmCustomModel('text', m.id)">✕</i></span>
+          </div>
         </div>
-        <div class="fld">
-          <label>
+
+        <!-- ════════════ ② 视觉大模型 ════════════ -->
+        <div id="set-vision" class="mk-card">
+          <div class="mk-hd">
+            <div class="mk-tt">
+              <span class="mk-title">👁️ 视觉大模型</span>
+              <span class="mk-desc">图片 / 截图题（图推图形、资料表格、数学公式）必须配此模型才能看图；DeepSeek 可直接复用同一个 Key。</span>
+            </div>
+            <span class="mk-chip" :class="stCfg.visionOk ? 'ok' : ''" :title="'当前：' + (store.cfg.vision.prov || '') + ' / ' + (store.cfg.vision.model || '')">{{ stCfg.visionOk ? '✅ 已配置' : '⛔ 未配置' }}</span>
+          </div>
+          <div class="vis-tip">
+            📌 <b>截图 / 图片题必须配此模型才能看图</b>。选好服务商与模型、粘贴 Key 后点下方「🧪 测试连通性」验证。若主视觉模型不识别，可再到「图像增强大模型」配免费模型兜底读图。
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label>服务商（视觉模型）</label>
+              <select v-model="store.cfg.vision.prov" @change="onCatProv('vision')">
+                <option v-for="(p, pk) in catProviders('vision')" :key="pk" :value="pk">{{ p.label }}</option>
+              </select>
+            </div>
+            <div class="fld mk-model">
+              <label>模型（按发布时间 新→旧 排序）</label>
+              <select v-model="store.cfg.vision.model" @change="saveCfg()">
+                <option v-for="m in catModels('vision')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
+              </select>
+              <span class="ep-hint">DeepSeek 用「同一个 DeepSeek Key」，模型自动带 deepseek-v4-flash-vision-exp。</span>
+            </div>
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label>API Key（仅存本地）</label>
+              <input v-model="store.cfg.vision.key" placeholder="sk-…（DeepSeek 可直接用文字模型的 Key）" type="password" @change="saveCfg()" />
+            </div>
+            <div class="fld">
+              <label>API 地址（一般无需改）</label>
+              <input v-model="store.cfg.vision.url" @change="saveCfg()" />
+            </div>
+          </div>
+          <div class="mk-act">
+            <button class="btn btn-gh" :class="{ busy: catUi.vision.busy }" :disabled="catUi.vision.busy" @click="testCat('vision')">{{ catUi.vision.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>
+            <span class="mk-stat" :class="catUi.vision.code">{{ catUi.vision.stat || '用所选视觉 Key+模型 发一条最小请求，实时校验能否正常调用' }}</span>
+          </div>
+          <div class="mk-cust">
+            <input v-model="customInput.vision" class="mk-cust-in" placeholder="➕ 模型清单里没有的新视觉模型？直接输入模型名添加" @keyup.enter="addCustomModel('vision')" />
+            <button class="btn btn-gh" @click="addCustomModel('vision')">添加</button>
+          </div>
+          <div v-if="catUserModels('vision').length" class="mk-cust-list">
+            <span v-for="m in catUserModels('vision')" :key="m.id" class="mk-cust-chip">📌 {{ m.id }}<i title="移出自定义" @click="rmCustomModel('vision', m.id)">✕</i></span>
+          </div>
+        </div>
+
+        <!-- ════════════ ③-1 语音阅读 · 讲稿改写（可选）════════════ -->
+        <div id="set-rd" class="mk-card">
+          <div class="mk-hd">
+            <div class="mk-tt">
+              <span class="mk-title">🎙️ 语音阅读大模型 <i class="mk-opt">可选</i></span>
+              <span class="mk-desc">朗读前先用它把题干/解析/理论卡改写成「口语化讲稿」再交给 TTS 朗读，听题更自然；不配置则照旧直接朗读原文。</span>
+            </div>
+            <span class="mk-chip" :class="stCfg.rdOk ? 'ok' : ''" :title="'语音阅读讲稿：' + (stCfg.rdOk ? '已启用 ' + (store.cfg.rd.model || '') : '未启用（直接朗读原文）')">{{ stCfg.rdOk ? '✅ 已启用' : '⛔ 默认关闭' }}</span>
+          </div>
+          <label class="fig-on">
+            <input v-model="store.cfg.rd.on" type="checkbox" @change="saveCfg()" />
+            启用「朗读讲稿」：读题 / 朗读解析 / 萌宠读当前内容 时先让该模型把文字改写为口语讲稿
+          </label>
+          <div class="fld-row">
+            <div class="fld">
+              <label>服务商（与文字模型同一套清单）</label>
+              <select v-model="store.cfg.rd.prov" @change="onCatProv('rd')">
+                <option v-for="(p, pk) in catProviders('rd')" :key="pk" :value="pk">{{ p.label }}</option>
+              </select>
+            </div>
+            <div class="fld mk-model">
+              <label>模型（新→旧；选便宜快的文本模型即可）</label>
+              <select v-model="store.cfg.rd.model" @change="saveCfg()">
+                <option v-for="m in catModels('rd')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
+              </select>
+              <span class="ep-hint">讲稿改写对模型要求不高，选该服务商便宜的模型即可省额度（如 DeepSeek-V4-Flash）。</span>
+            </div>
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label>API Key（独立于文字模型，可另配）</label>
+              <input v-model="store.cfg.rd.key" placeholder="sk-…（语音阅读专用 Key）" type="password" @change="saveCfg()" />
+            </div>
+            <div class="fld">
+              <label>API 地址（已按服务商自动填好，一般无需改）</label>
+              <input v-model="store.cfg.rd.url" @change="saveCfg()" />
+            </div>
+          </div>
+          <div class="mk-act">
+            <button class="btn btn-gh" :class="{ busy: catUi.rd.busy }" :disabled="catUi.rd.busy" @click="testCat('rd')">{{ catUi.rd.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>
+            <span class="mk-stat" :class="catUi.rd.code">{{ catUi.rd.stat || '用所选 Key+模型 发一条最小请求，校验能否用于讲稿改写' }}</span>
+          </div>
+          <div class="micro-tip" style="font-size: 11.5px; margin: 2px 0 0; line-height: 1.7">
+            💡 <b>小白提示</b>：开启后，朗读前会先用这个模型把干巴巴的题干/解析改写成"说话稿"（加语气、断句更顺），听感更像真人在讲题；它只是一个"改写器"，真人声音仍由上面的「朗读引擎」决定。想省钱就选该服务商<b>免费或最便宜的快模型</b>（如 DeepSeek-V4-Flash），与你的文字模型共用 Key 也行。
+          </div>
+          <div class="mk-cust">
+            <input v-model="customInput.rd" class="mk-cust-in" placeholder="➕ 模型清单里没有的新模型？直接输入模型名添加" @keyup.enter="addCustomModel('rd')" />
+            <button class="btn btn-gh" @click="addCustomModel('rd')">添加</button>
+          </div>
+          <div v-if="catUserModels('rd').length" class="mk-cust-list">
+            <span v-for="m in catUserModels('rd')" :key="m.id" class="mk-cust-chip">📌 {{ m.id }}<i title="移出自定义" @click="rmCustomModel('rd', m.id)">✕</i></span>
+          </div>
+        </div>
+
+        <!-- ════════════ ③ 图像增强大模型（可选） ════════════ -->
+        <div id="set-fig" class="mk-card">
+          <div class="mk-hd">
+            <div class="mk-tt">
+              <span class="mk-title">🖼 图像增强大模型 <i class="mk-opt">可选</i></span>
+              <span class="mk-desc">可选增强：用独立开源 / 免费视觉模型把题目截图复刻成图贴进回复，辅助看懂图推 / 几何 / 表格题；不配置不影响主问答。</span>
+            </div>
+            <span class="mk-chip" :class="stCfg.figOk ? 'ok' : ''" :title="'当前：' + (store.cfg.fig.prov || '') + ' / ' + (store.cfg.fig.model || '')">{{ stCfg.figOk ? '✅ 已启用' : '⛔ 未启用' }}</span>
+          </div>
+          <label class="fig-on">
             <input v-model="store.cfg.fig.on" type="checkbox" @change="saveCfg()" />
             启用图形理解增强（发图后自动把原图复刻成图附在回复里）
           </label>
+          <div class="fld-row">
+            <div class="fld">
+              <label>服务商（开源 / 本地 / 免费额度）</label>
+              <select v-model="store.cfg.fig.prov" @change="onCatProv('fig')">
+                <option v-for="(p, pk) in catProviders('fig')" :key="pk" :value="pk">{{ p.label }}</option>
+              </select>
+            </div>
+            <div class="fld mk-model">
+              <label>模型（新→旧排序；本地需先 ollama pull）</label>
+              <select v-model="store.cfg.fig.model" @change="saveCfg()">
+                <option v-for="m in catModels('fig')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
+              </select>
+              <span class="ep-hint">Ollama / LM Studio / Jan 本地模型无需 Key，填任意占位即可（如 ollama）。</span>
+            </div>
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label>API Key（本地模型可随便填）</label>
+              <input v-model="store.cfg.fig.key" placeholder="sk-… / ollama" type="password" @change="saveCfg()" />
+            </div>
+            <div class="fld">
+              <label>API 地址（本地：Ollama 11434 / LM Studio 1234 / Jan 1337）</label>
+              <input v-model="store.cfg.fig.url" placeholder="https://…/chat/completions" @change="saveCfg()" />
+            </div>
+          </div>
+          <div class="mk-act">
+            <button class="btn btn-gh" :class="{ busy: catUi.fig.busy }" :disabled="catUi.fig.busy" @click="testCat('fig')">{{ catUi.fig.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>
+            <span class="mk-stat" :class="catUi.fig.code">{{ catUi.fig.stat || '用所选开源视觉模型 发一条最小请求，实时校验能否正常调用' }}</span>
+          </div>
+          <div class="mk-cust">
+            <input v-model="customInput.fig" class="mk-cust-in" placeholder="➕ 本地刚拉下来的模型名？输入后即可在下拉里选" @keyup.enter="addCustomModel('fig')" />
+            <button class="btn btn-gh" @click="addCustomModel('fig')">添加</button>
+          </div>
+          <div v-if="catUserModels('fig').length" class="mk-cust-list">
+            <span v-for="m in catUserModels('fig')" :key="m.id" class="mk-cust-chip">📌 {{ m.id }}<i title="移出自定义" @click="rmCustomModel('fig', m.id)">✕</i></span>
+          </div>
+          <details class="guide">
+            <summary>🔑 图像增强 · 免费 / 本地方案怎么选</summary>
+            <div class="guide-body">
+              <p><b>🥇 完全免费 · 本地离线（无需任何 Key）</b>：① <b>Ollama</b>：安装 ollama.com → 终端执行 <code>ollama pull minicpm-v</code>（中文好，约 5GB）或 <code>ollama pull llama3.2-vision</code> → 服务商选「Ollama 本地」，模型自动可选，Key 随便填如 ollama；② <b>LM Studio</b>：lmstudio.ai → 下载 Qwen2.5-VL-7B → 启动本地服务（默认 1234）；③ <b>Jan</b>：jan.ai → 下载视觉模型（默认 1337）。</p>
+              <p><b>🥈 免费额度 · 注册即送</b>：④ <b>硅基流动 SiliconFlow</b>：cloud.siliconflow.cn → 注册 → API 密钥，默认 Qwen2.5-VL 免费额度够日常；⑤ <b>智谱 GLM-4V Flash</b>：open.bigmodel.cn（glm-4v-flash 有免费额度）；⑥ <b>通义 Qwen-VL</b>：bailian.console.aliyun.com（阿里云百炼控制台）· API 兼容地址 dashscope.aliyuncs.com/compatible-mode/v1。</p>
+              <p>💡 Key 只存本地浏览器；此模型仅用于“复刻原图”辅助理解，主问答仍走上方 文字/视觉 模型。</p>
+            </div>
+          </details>
         </div>
-        <div class="fld">
-          <label>提供商（开源模型）</label>
-          <select v-model="store.cfg.fig.prov" @change="fillFig()">
-            <option v-for="(v, k) in FIG_PROVIDERS" :key="k" :value="k">{{ v.n }}</option>
-          </select>
+
+        <!-- ════════════ 通用（三类共用的回复选项） ════════════ -->
+        <div class="fld" style="margin-top: 6px">
+          <label>🧠 自定义 System Prompt（留空用内置知识库人设）</label>
+          <textarea v-model="store.cfg.sys" rows="2"></textarea>
         </div>
-        <div class="fld">
-          <label>API Key（Ollama 本地可随便填如 ollama；硅基流动/智谱/通义填各自 Key）</label>
-          <input v-model="store.cfg.fig.key" placeholder="sk-...（Ollama 本地填 ollama 即可）" type="password" />
-        </div>
-        <div class="fld">
-          <label>API 地址（Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1 · Jan: http://localhost:1337/v1）</label>
-          <input v-model="store.cfg.fig.url" placeholder="https://…/chat/completions" />
-        </div>
-        <div class="fld">
-          <label>模型名称（开源视觉模型：minicpm-v / llama3.2-vision / qwen2.5-vl…）</label>
-          <input v-model="store.cfg.fig.model" placeholder="例如 minicpm-v 或 Qwen/Qwen2.5-VL-7B-Instruct" />
-        </div>
-        <div class="fld">
-          <button class="btn btn-gh" style="font-size: 12px" @click="figTest()">🧪 测试图形增强模型</button>
-          <span style="font-size: 12px; color: var(--text3); margin-left: 8px">{{ figTestStat }}</span>
+        <div class="fld-row" style="margin-bottom: 4px">
+          <div class="fld" style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap">
+            <label style="display: flex; gap: 6px; align-items: center"><input v-model="store.cfg.kb" type="checkbox" /> 启用内置知识库增强</label>
+            <label style="display: flex; gap: 6px; align-items: center"><input v-model="store.cfg.strm" type="checkbox" /> 流式输出</label>
+          </div>
         </div>
         <details class="guide">
-          <summary>🔑 免费开源方案怎么选（本地 0 成本 / 免费额度 / 主模型）</summary>
+          <summary>🔑 各家 API Key 去哪领（点开看官网入口）</summary>
           <div class="guide-body">
-            <p><b>🥇 完全免费 · 本地离线（无需任何 Key，装一次永久用）</b></p>
-            <p>① <b>Ollama</b>（最简单）：安装 <a href="https://ollama.com/" target="_blank" rel="noopener">ollama.com</a> → 终端执行 <code>ollama pull minicpm-v</code>（中文好，约 5GB）或 <code>ollama pull llama3.2-vision</code> → 保持 Ollama 运行 → 本应用提供商选「Ollama 本地」，地址 http://localhost:11434/v1，模型 minicpm-v，Key 可随便填如 ollama。</p>
-            <p>② <b>LM Studio</b>（图形界面，好上手）：安装 <a href="https://lmstudio.ai/" target="_blank" rel="noopener">lmstudio.ai</a> → 搜索下载视觉模型（如 Qwen2.5-VL-7B / minicpm-v）→ 启动本地服务（默认端口 1234）→ 本应用提供商选「LM Studio 本地」即可，不用填 Key。</p>
-            <p>③ <b>Jan</b>（另一款图形界面本地推理）：<a href="https://jan.ai/" target="_blank" rel="noopener">jan.ai</a> → 下载视觉模型 → 启动本地服务（默认端口 1337）→ 本应用提供商选「Jan 本地」。</p>
-            <p>💡 本地模型首次要下载几个 GB，之后完全离线、免费、隐私最安全；电脑 8G 内存可跑 7B 量化版。</p>
-            <p><b>🥈 免费额度 · 注册即送（不花钱，需 Key）</b></p>
-            <p>④ <b>硅基流动 SiliconFlow（推荐）</b>：<a href="https://cloud.siliconflow.cn/" target="_blank" rel="noopener">cloud.siliconflow.cn</a> → 注册 → API 密钥 → 创建 → 粘 Key。默认 Qwen2.5-VL（开源视觉模型），免费额度足够日常用。</p>
-            <p>⑤ <b>智谱 GLM-4V</b>（glm-4v-flash 有免费额度）：<a href="https://open.bigmodel.cn/" target="_blank" rel="noopener">open.bigmodel.cn</a> → API Keys → 创建。</p>
-            <p>⑥ <b>通义千问 Qwen-VL</b>（新用户有免费额度）：<a href="https://dashscope.aliyun.com/" target="_blank" rel="noopener">dashscope.aliyun.com</a> → API-KEY 管理。</p>
-            <p>💡 Key 只保存在你自己的浏览器 localStorage，本应用无后端；此模型仅用于"复刻原图"辅助理解，主问答仍走上方文字/视觉模型。</p>
+            <ul style="line-height: 1.9">
+              <li><b>DeepSeek</b>：platform.deepseek.com → API Keys → 创建（便宜、中文好）</li>
+              <li><b>智谱 GLM</b>：open.bigmodel.cn → API Keys（新用户送免费额度）</li>
+              <li><b>OpenAI</b>：platform.openai.com → API keys</li>
+              <li><b>通义千问 Qwen</b>：bailian.console.aliyun.com（百炼控制台）→ API-KEY 管理；OpenAI 兼容调用地址 https://dashscope.aliyuncs.com/compatible-mode/v1</li>
+              <li><b>豆包 Doubao（火山引擎）</b>：console.volcengine.com/ark → API Key</li>
+              <li><b>月之暗面 Kimi</b>：platform.moonshot.cn → API Key</li>
+              <li><b>阶跃星辰 Step</b>：platform.stepfun.com → API Key</li>
+              <li><b>Google Gemini</b>：aistudio.google.com/apikey → 免费额度（官方 OpenAI 兼容端点）</li>
+              <li><b>OpenRouter（聚合）</b>：openrouter.ai/keys → 一个 Key 可调 Claude / Gemini / DeepSeek 等</li>
+              <li><b>硅基流动 SiliconFlow（开源模型免费额度）</b>：cloud.siliconflow.cn → API 密钥</li>
+            </ul>
+            <p>② 把生成的 Key（形如 sk-…）粘到对应分类的「API Key」框；③ 点该分类「🧪 测试连通性」，显示 ✅ 即配置成功。</p>
+            <p>💡 Key 只保存在你自己浏览器的 localStorage，本应用无后端，不会上传到任何服务器。Claude / Gemini 等任何兼容 OpenAI 协议的接口都可用（服务商已内置常用模型，或点「➕ 手动添加」）。</p>
           </div>
         </details>
 
@@ -2037,10 +2299,44 @@ onUnmounted(() => {
         </div>
         <div class="tts-engine-grid">
           <button v-for="eng in TTS_ENGINES" :key="eng.id" class="tts-engine-card" :class="{ on: store.cfg.ttsMode === eng.id }" @click="setTtsMode(eng.id)">
-            <span class="te-name">{{ eng.name }}</span>
+            <span class="te-name">{{ eng.name }}<span v-if="eng.free" class="te-free">免费</span></span>
             <span class="te-tag">{{ eng.tag }}</span>
             <span class="te-desc">{{ eng.desc }}</span>
           </button>
+        </div>
+        <div class="mk-tip" style="border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 10px; padding: 10px 12px; margin: 8px 0">
+          <b style="font-size: 12.5px">📖 选哪个朗读引擎？（小白必读）</b>
+          <ul style="margin: 6px 0 0; padding-left: 18px; font-size: 11.5px; line-height: 1.85; color: var(--text2)">
+            <li>🆓 <b>完全免费、不想折腾 Key</b>：直接选「Edge 免费神经」或「系统语音」，开箱即用、0 成本，适合先体验。</li>
+            <li>🌟 <b>想要最像真人的效果（推荐）</b>：选「智谱 GLM-TTS」或「阿里百炼 Qwen3-TTS」，它们是语音大模型，有情绪有语气、几乎听不出机器味；按字数计费（读几万字才几分钱），<b>新人都有免费额度</b>。</li>
+            <li>🎨 <b>想克隆你自己的声音 / 用 CosyVoice2</b>：选「OpenAI 兼容」，自备 Key 与服务地址。</li>
+            <li>🐾 <b>让萌宠用专属声线</b>：去「趣味与陪伴 → 萌宠」给角色克隆/绑定音色即可，切到该角色自动换声。</li>
+            <li>💰 <b>怕超支</b>：开启下方「省钱护栏」，真人引擎每天有免费朗读额度，用完后自动退回免费 Edge，怎么读都不花冤枉钱。</li>
+          </ul>
+        </div>
+
+        <!-- 💰 真人朗读·省钱护栏（语音系统重构 v3.8.90） -->
+        <div style="border: 1px dashed rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.05); border-radius: 10px; padding: 10px 12px; margin: 10px 0 4px">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+            <b style="font-size: 13px; color: #34d399">💰 省钱护栏 · 真人朗读不超支</b>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px">
+              <input v-model="store.cfg.ttsGuard" type="checkbox" @change="saveCfg()" />
+              启用
+            </label>
+            <span style="font-size: 11.5px; color: var(--text3); flex: 1; min-width: 220px; line-height: 1.6">
+              真人引擎（智谱 GLM / CosyVoice）每日免费朗读 {{ (Number(store.cfg.ttsDayCap) || 20000) >= 10000 ? (Number(store.cfg.ttsDayCap) / 10000) + ' 万' : store.cfg.ttsDayCap }} 字，
+              用完后<b>自动退回免费 Edge</b> 继续读，绝不乱扣费；Edge / 系统语音永久免费、永不被拦。
+            </span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px">
+            <span style="font-size: 12px; color: var(--text2)">📊 今日真人朗读已用：<b style="color: var(--accent)">{{ ttsCharsToday() }}</b> 字</span>
+            <label style="font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 4px">
+              每日额度
+              <input v-model.number="store.cfg.ttsDayCap" type="number" min="1000" step="1000" style="width: 84px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px" @change="saveCfg()" />
+              字
+            </label>
+            <span style="font-size: 11.5px; color: var(--text3)">真人朗读成本约 ¥2 / 百万字量级（智谱/CosyVoice 类），日常几万字仅几分钱；额度用完自动退回免费 Edge，怎么用都不超支。</span>
+          </div>
         </div>
 
         <!-- ① 智谱 GLM-TTS（超拟人）-->
@@ -2081,6 +2377,58 @@ onUnmounted(() => {
         </div>
 
         <!-- ② OpenAI 兼容（CosyVoice2 等）-->
+        <div v-if="store.cfg.ttsMode === 'dash'">
+          <div class="sec-t" style="font-size: 13px">🍊 阿里百炼 Qwen3-TTS（廉价真人 · 实测可用）</div>
+          <div class="fld">
+            <label>通义 DashScope API Key（留空自动复用图形增强/视觉里的通义 Key）</label>
+            <input v-model="store.cfg.ttsDash.key" type="password" placeholder="sk-…（与千问/图形增强同一个 Key）" @change="saveCfg()" />
+            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+              官方价 <b>¥0.8/万字符</b>（≈0.08 元/千字），中文自然、支持指令式语气；Key 可在 <a href="https://bailian.console.aliyun.com" target="_blank" rel="noopener">bailian.console.aliyun.com</a> 领取。模型/端点已于 2026-09-02 真实 Key 实测通过。
+            </div>
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label>模型（按发布时间 最新→旧 排序）</label>
+              <select :value="dashModelIsCustom ? '__custom__' : store.cfg.ttsDash.model" @change="onDashModelChange($event)">
+                <option v-for="m in DASH_MODELS" :key="m.id" :value="m.id">{{ m.id }} · {{ m.pub }}（{{ m.note }}）</option>
+                <option value="__custom__">（自定义其他模型名…）</option>
+              </select>
+              <input v-if="dashModelIsCustom" v-model="store.cfg.ttsDash.model" placeholder="例如 qwen3-tts-instruct-flash" style="margin-top: 6px" @change="saveCfg(); savePetGlobalVoice()" />
+            </div>
+            <div class="fld">
+              <label>预设音色（共 {{ dashVoicesForModel(store.cfg.ttsDash.model).length }} 个，按模型自动筛选）</label>
+              <select v-model="store.cfg.ttsDash.voice" @change="saveCfg(); savePetGlobalVoice()">
+                <option v-for="v in dashVoicesForModel(store.cfg.ttsDash.model)" :key="v.id" :value="v.id">{{ v.emoji || '🎙️' }} {{ v.name }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="mk-sec" style="border-left: 3px solid #ff8a3d; padding: 6px 8px; margin: 6px 0; background: rgba(255,138,61,0.06)">
+            <div class="sec-t" style="font-size: 12.5px; color: #ff7a1a">🎨 自定义音色（自然语言 · instruct 模型实测可用）</div>
+            <div style="font-size: 11px; color: var(--text3); margin: 2px 0 5px">用一句话描述你想要的声线，例如「温柔知性的女生，语速稍慢，带一点笑意」。开启后优先于上方预设音色，可保存多个随时切换。</div>
+            <div class="fld-row">
+              <input v-model="store.cfg.ttsDash.voiceCustom" style="flex: 1" placeholder="例如：磁性低沉的老年男声，像讲古的先生" @input="saveCfg()" />
+              <input v-model="dashCustomName" style="width: 96px" placeholder="预设名" />
+              <button class="btn btn-pri" style="font-size: 12px" @click="saveDashCustomVoice()">💾 存为预设</button>
+            </div>
+            <div v-if="store.cfg.ttsDash.customVoices && store.cfg.ttsDash.customVoices.length" class="voice-market" style="margin-top: 6px">
+              <div v-for="(c, i) in store.cfg.ttsDash.customVoices" :key="c.id" class="voice-card" :class="{ on: store.cfg.ttsDash.voiceCustom === c.desc }" @click="applyDashCustom(c)">
+                <span style="font-size: 11px">🎨 {{ c.name }}</span>
+                <span style="font-size: 10px; color: var(--text3); display: block; margin-top: 2px">{{ c.desc }}</span>
+                <span class="vc-x" @click.stop="rmDashCustomVoice(i)">✕</span>
+              </div>
+            </div>
+            <div v-if="store.cfg.ttsDash.voiceCustom" style="font-size: 11px; color: #0a8f3c; margin-top: 4px">✅ 当前使用自定义音色：「{{ store.cfg.ttsDash.voiceCustom }}」</div>
+          </div>
+          <div class="fld">
+            <label>接口地址（默认即可）</label>
+            <input v-model="store.cfg.ttsDash.url" placeholder="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation" @change="saveCfg()" />
+          </div>
+          <div class="mk-act">
+            <button class="btn btn-gh" style="font-size: 12px" @click="previewVoice('dash', store.cfg.ttsDash.voice)">🧪 试听当前音色</button>
+            <span style="font-size: 11.5px; color: var(--text3)">额度/预算护栏同样适用（每日真人朗读额度用完后自动退回免费 Edge）。</span>
+          </div>
+        </div>
+
         <div v-if="store.cfg.ttsMode === 'openai'">
           <div class="sec-t" style="font-size: 13px">🎨 OpenAI 兼容引擎（CosyVoice2 真人级）</div>
           <div class="fld">
@@ -2363,12 +2711,14 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="sec-t">📅 备考冲刺</div>
+        <div class="sec-t">📅 备考冲刺（多考试倒计时）</div>
         <div class="fld">
-          <label>笔试目标日期（驾驶舱显示倒计时）</label>
-          <input v-model="store.cfg.examDate" type="date" @change="saveCfg()" />
+          <label>我的考试（国考 / 省考 / 事业单位…各自独立倒计时）</label>
+          <button class="btn btn-pri" style="width: 100%" @click="store.uiCtx.examMgr = true">
+            📋 考试管理（{{ (store.cfg.exams || []).length }} 个 · 当前：{{ (store.cfg.exams || []).find(e => e.id === store.cfg.activeExamId)?.name || '—' }}）
+          </button>
           <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
-            按 e.g. 2026-11-29 设置国考笔试日，🚀看板会实时倒计时。
+            支持添加省考、事业单位等自定义考试，分别设置笔试日期与独立倒计时；可编辑、删除、设为当前。国考为内置考试不可删除。
           </div>
         </div>
         <div class="sec-t">📤 导出偏好</div>
@@ -2604,6 +2954,14 @@ onUnmounted(() => {
               <button class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(bv.skinId)">🗑 解除</button>
             </div>
           </div>
+          <div v-if="store.cfg.ttsMode === 'dash' && !petIsLocked(petSkin.id)" style="margin-top: 8px; border-top: 1px dashed var(--line, rgba(128,128,128,.35)); padding-top: 8px">
+            <div style="font-size: 11px; color: var(--text3)">🍊 当前引擎为「阿里百炼」，可把现在选中的百炼音色（含自定义）绑定给『{{ petSkin.char }}』，做成 TA 的专属声线：</div>
+            <div style="display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap">
+              <span style="font-size: 12px">当前：<b>{{ store.cfg.ttsDash.voice || '默认' }}</b><span v-if="store.cfg.ttsDash.voiceCustom">（自定义：{{ store.cfg.ttsDash.voiceCustom }}）</span></span>
+              <button class="btn btn-pri" style="font-size: 11px" @click="bindDashToSkin(petSkin.id)">🔗 绑给『{{ petSkin.char }}』</button>
+              <button v-if="petSkinVoiceOf(petSkin.id).engine === 'dash'" class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(petSkin.id)">🗑 解除</button>
+            </div>
+          </div>
         </div>
         <div v-else class="fld" style="font-size: 11px; color: var(--text3)">🔒 该角色声音为内置克隆原声（{{ petSkinVoiceOf(petSkin.id).name }}），已锁定不可更改/重新克隆。想添加可自由定制的角色？点上方「➕ 新增自定义」。</div>
 
@@ -2626,6 +2984,27 @@ onUnmounted(() => {
         </div>
 
 
+</div>
+<button class="set-group-hd" :class="{ on: setGroup === 'ui' }" @click="toggleSetGroup('ui')"><span class="sg-t">🧩 界面自定义</span><span class="sg-desc">隐藏/显示主页板块与功能入口（DIY 布局）</span><span class="sg-arrow">{{ setGroup === 'ui' ? '▾' : '▸' }}</span></button>
+<div v-show="setGroup === 'ui'" class="set-group-bd">
+  <div id="set-ui" class="sec-t">🧩 界面自定义（DIY 你的主页）</div>
+  <div class="sec-desc">按需求自主隐藏或显示主界面的板块与细分功能入口（如萌宠、背景音乐），让界面更清爽。仅隐藏入口、<b>不删除任何功能</b>——隐藏后仍可从「更多菜单 / 链接」进入。</div>
+  <div class="ui-list">
+    <div v-for="e in uiEntries" :key="e.id" class="ui-row">
+      <div class="ui-meta">
+        <div class="ui-label">{{ e.label }}</div>
+        <div class="ui-desc">{{ e.desc }}</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" :checked="!uiHiddenOf(e.id)" @change="toggleUi(e.id)" />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+  <button class="btn btn-gh" style="margin-top: 10px" @click="resetUi()">↺ 恢复全部入口</button>
+  <div style="font-size: 11px; color: var(--text3); margin-top: 8px">
+    提示：隐藏某个板块后，它从底部导航消失；需要时可点上方「恢复全部入口」一键还原。
+  </div>
 </div>
 <button class="set-group-hd" :class="{ on: setGroup === 'account' }" @click="toggleSetGroup('account')"><span class="sg-t">🔐 账号与安全</span><span class="sg-desc">本地登录门 / 修改密码 / 退出 / 删除账号</span><span class="sg-arrow">{{ setGroup === 'account' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'account'" class="set-group-bd">
@@ -2869,9 +3248,9 @@ onUnmounted(() => {
           <div v-if="costStat.list[costOpen].note"><b>备注：</b>{{ costStat.list[costOpen].note }}</div>
         </div>
         <details class="guide" style="margin-top: 10px">
-          <summary>⚙️ 计价表（官方公开价已内置 · 元/百万 token；输入框为换算后的 元/千token=官方价÷1000，一般无需改）</summary>
+          <summary>⚙️ 计价表（2026-09 联网核验真实公开价：DeepSeek V4 峰谷 / 智谱 GLM-5·4.7 系列 / 通义 Qwen3 系列 / OpenAI GPT-5 系列 / Kimi K3·K2.6 / Gemini 3.x / 豆包 Seed-1.6-Flash / 朗读单价，均按官方价目页核验；美元模型按 ¥7 折算。单位：输入框=元/千 token = 官方价(元/百万)÷1000。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
           <div class="guide-body">
-            <div v-for="(pr, mk) in costPrices" :key="mk" class="cost-price-row">
+            <template v-for="(pr, mk) in costPrices" :key="mk"><div v-if="mk !== 'ttsPrices'" class="cost-price-row">
               <span class="cp-name">{{ mk === 'ttsPer1k' ? '朗读(元/千字)' : mk === 'cloneFee' ? '克隆(元/次)' : mk }}</span>
               <input v-if="mk === 'ttsPer1k' || mk === 'cloneFee'" v-model.number="costPrices[mk]" type="number" step="0.001" min="0" style="width: 90px" />
               <template v-else>
@@ -2879,7 +3258,7 @@ onUnmounted(() => {
                 <input v-model.number="costPrices[mk].out" type="number" step="0.001" min="0" style="width: 70px" title="输出价(元/千token = 官方元/百万 ÷ 1000)" />
               </template>
               <span class="cp-note">{{ pr.note || pr }}</span>
-            </div>
+            </div></template>
             <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
               <button class="btn btn-pri" style="font-size: 12px" @click="costSavePrices()">💾 保存计价表</button>
               <button class="btn btn-gh" style="font-size: 12px" @click="costResetPrices()">↩️ 恢复默认</button>
@@ -2951,7 +3330,7 @@ onUnmounted(() => {
           <div class="ob-body">
             <p>推荐 <b>DeepSeek</b>（便宜、中文好）。去平台创建 Key 后粘贴到下面：</p>
             <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; fillProv('text')">{{ p[1] }}</button>
+              <button v-for="p in [['ds','DeepSeek'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.text.prov === p[0] }" @click="store.cfg.text.prov = p[0]; onCatProv('text')">{{ p[1] }}</button>
             </div>
             <a class="ob-link" href="https://platform.deepseek.com/" target="_blank" rel="noopener">🔗 去 DeepSeek 创建 Key（选其它提供商则用对应平台）</a>
             <input v-model="store.cfg.text.key" class="ob-input" placeholder="粘贴 sk-... 开头的 API Key" type="password" @keydown.enter="testConn()" />
@@ -2969,7 +3348,7 @@ onUnmounted(() => {
           <div class="ob-body">
             <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>（deepseek-v4-flash-vision-exp）：</p>
             <div class="ob-prov">
-              <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; fillProv('vision')">{{ p[1] }}</button>
+              <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; onCatProv('vision')">{{ p[1] }}</button>
             </div>
             <input v-model="store.cfg.vision.key" class="ob-input" placeholder="视觉模型 Key（DeepSeek 可填和上面同一个）" type="password" @keydown.enter="testConn()" />
             <div class="ob-note">不配视觉模型也能用文字提问，只是发图/截图题无法识别。</div>
@@ -2984,12 +3363,12 @@ onUnmounted(() => {
         <template v-else-if="obStep === 3">
           <h3>③ 语音 & 考试日期（可选）</h3>
           <div class="ob-body">
-            <p>朗读让 AI 讲解"听得见"；考试日期让看板倒计时。</p>
+            <p>朗读让 AI 讲解"听得见"；设置笔试日期后，🚀看板与顶栏会显示实时倒计时。</p>
             <div class="ob-row">
               <button class="btn btn-gh" @click="ttsTest()">🔊 试听朗读</button>
-              <input v-model="store.cfg.examDate" type="date" class="ob-input" @change="saveCfg()" />
+              <button class="btn btn-pri" @click="store.uiCtx.examMgr = true">📅 设置考试日期（国考 / 省考…）</button>
             </div>
-            <div class="ob-note">笔试日如 2026-11-29（国考），可在设置里随时改。</div>
+            <div class="ob-note">可添加省考、事业单位等多个考试，各自独立倒计时；在 设置 → 考试管理 随时增删改。</div>
             <div class="pnl-btns">
               <button class="btn btn-gh" @click="obStep = 4">跳过 ▶</button>
               <button class="btn btn-pri" @click="obStep = 4">下一步 ▶</button>
@@ -3042,7 +3421,7 @@ onUnmounted(() => {
 
 
     <!-- 背景音乐浮动控件（只在「看板」界面显示，其余界面隐藏避免干扰） -->
-    <div v-if="store.tab === 'ck'" class="music-float" :class="{ on: musicOn }" :style="floatStyle('music')" title="背景音乐（仅看板界面显示）" @pointerdown="startFloatDrag($event, 'music')">
+    <div v-if="store.tab === 'ck' && !uiHiddenOf('music')" class="music-float" :class="{ on: musicOn }" :style="floatStyle('music')" title="背景音乐（仅看板界面显示）" @pointerdown="startFloatDrag($event, 'music')">
       <span class="mf-ic" @click.stop="floatClick('music')">{{ musicOn ? '🎵' : '🔇' }}</span>
       <span class="mf-name" @click.stop="floatClick('music')">{{ musicOn && musicList[musicIndex] ? musicList[musicIndex].name : '背景音乐' }}</span>
       <button class="mf-more" :class="{ open: musicPanel }" :title="musicPanel ? '收起控制面板' : '展开控制面板（上/下一曲·暂停播放·关闭打开）'" @click.stop="toggleMusicPanel()" @pointerdown.stop>{{ musicPanel ? '▾' : '▴' }}</button>
@@ -3085,7 +3464,7 @@ onUnmounted(() => {
       </div>
     </Transition>
     <!-- 萌宠 -->
-    <div class="pet-float" :style="floatStyle('pet')" title="我的萌宠：点击互动 · 按住可拖动" @click="floatClick('pet')" @pointerdown="startFloatDrag($event, 'pet')">
+    <div v-if="!uiHiddenOf('pet')" class="pet-float" :style="floatStyle('pet')" title="我的萌宠：点击互动 · 按住可拖动" @click="floatClick('pet')" @pointerdown="startFloatDrag($event, 'pet')">
       <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
       <PetAvatar :size="40" class="pet-emoji-av" />
       <span class="pet-mood">{{ petMood.emoji }}</span>
@@ -3096,7 +3475,7 @@ onUnmounted(() => {
       </div>
     </div>
         <!-- 萌宠智能助理面板（可拖拽小窗 · 不遮题） -->
-    <div v-if="petShow" class="pet-panel" :style="petPanelStyle">
+    <div v-if="petShow && !uiHiddenOf('pet')" class="pet-panel" :style="petPanelStyle">
       <div class="pp-head" title="按住可拖动到题目旁边" @pointerdown="startFloatDrag($event, 'pp')">
         <PetAvatar :size="46" />
         <div class="pet-id">
@@ -3190,4 +3569,7 @@ onUnmounted(() => {
         <button class="btn btn-gh" @click="tourShow = false">✕ 关闭</button>
       </div>
     </div>
+
+    <!-- 多考试倒计时管理弹窗（v3.8.69） -->
+    <ExamManager />
 </template>

@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { on as evOn, off as evOff } from '../utils/events'
-import { store } from '../store'
+import { store, getActiveExam, setActiveExam } from '../store'
 import { startAmbient, stopAmbient } from '../utils/ambient'
 
 const now = ref(Date.now())
@@ -16,9 +16,12 @@ function toggleAmb() {
   if (amb.value) startAmbient()
   else stopAmbient()
 }
+// 当前激活考试（多考试倒计时：切换后只看该考试的独立倒计时）
+const activeExam = computed(() => getActiveExam())
 // 显示"年月日"文本（天 小时 分 秒）
 function countdown() {
-  const target = new Date(store.cfg.examDate || '2026-11-29').getTime()
+  const act = getActiveExam()
+  const target = new Date((act && act.date) || store.cfg.examDate || '2026-11-29').getTime()
   const diff = Math.max(0, target - now.value)
   const d = Math.floor(diff / 86400000)
   const h = Math.floor((diff % 86400000) / 3600000)
@@ -32,6 +35,27 @@ function countdown() {
     pad: (x) => String(x).padStart(2, '0')
   }
 }
+// ===== 考试切换下拉（Teleport 到 body，避免被 .exam-bar 的 overflow:hidden 裁切）=====
+const showExams = ref(false)
+const exBtn = ref(null)
+const popStyle = ref({})
+const exams = computed(() => store.cfg.exams || [])
+function daysLeft(dateStr) {
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d)) return null
+    return Math.max(0, Math.ceil((d - Date.now()) / 86400000))
+  } catch (e) { return null }
+}
+function toggleExams() {
+  showExams.value = !showExams.value
+  if (showExams.value && exBtn.value) {
+    const r = exBtn.value.getBoundingClientRect()
+    popStyle.value = { top: (r.bottom + 8) + 'px', left: Math.max(8, r.left) + 'px' }
+  }
+}
+function pickExam(id) { setActiveExam(id); showExams.value = false }
+function openMgr() { showExams.value = false; store.uiCtx.examMgr = true }
 const plateNames = {
   all: '综合',
   luoji: '判断推理',
@@ -75,7 +99,11 @@ onUnmounted(() => {
   <div class="exam-bar">
     <div class="eb-item eb-count" title="距考试">
       <span class="eb-ic">⏳</span>
-      <span class="eb-lbl">考试倒计时</span>
+      <button ref="exBtn" class="eb-exam-btn" :title="'切换考试（当前：' + (activeExam ? activeExam.name : '考试') + '）'" @click="toggleExams()">
+        <span class="eb-dot" :style="{ background: activeExam ? activeExam.color : '#5cc8ff' }"></span>
+        <span class="eb-lbl">{{ activeExam ? activeExam.name : '考试' }}倒计时</span>
+        <span class="eb-caret" :class="{ up: showExams }">▾</span>
+      </button>
       <span class="eb-num hud-num">
         {{ countdown().pad(countdown().d) }}<em>天</em> {{ countdown().pad(countdown().h) }}<em>:</em>{{ countdown().pad(countdown().m) }}<em>:</em>{{ countdown().pad(countdown().s) }}
       </span>
@@ -96,6 +124,25 @@ onUnmounted(() => {
     </div>
     <div class="eb-scan" aria-hidden="true"></div>
   </div>
+
+  <!-- 考试切换下拉（Teleport 到 body，避免被 .exam-bar overflow:hidden 裁切） -->
+  <Teleport to="body">
+    <div v-if="showExams" class="eb-pop-mask" @click="showExams = false"></div>
+    <div v-if="showExams" class="eb-exam-pop" :style="popStyle">
+      <div class="eb-pop-hd">选择考试（各自独立倒计时）</div>
+      <button
+        v-for="ex in exams" :key="ex.id"
+        class="eb-pop-it" :class="{ on: activeExam && ex.id === activeExam.id }"
+        @click="pickExam(ex.id)"
+      >
+        <span class="eb-dot" :style="{ background: ex.color }"></span>
+        <span class="eb-pop-name">{{ ex.name }}</span>
+        <span class="eb-pop-d">剩 {{ daysLeft(ex.date) }} 天</span>
+        <span v-if="activeExam && ex.id === activeExam.id" class="eb-pop-check">✓</span>
+      </button>
+      <button class="eb-pop-mgr" @click="openMgr()">⚙️ 管理考试（添加/编辑/删除）</button>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -135,6 +182,43 @@ onUnmounted(() => {
   font-family: inherit;
 }
 .eb-count .eb-num { font-size: 15px; }
+.eb-count { position: relative; }
+/* 考试切换按钮 */
+.eb-exam-btn {
+  display: flex; align-items: center; gap: 5px; cursor: pointer;
+  background: transparent; border: none; padding: 2px 4px; border-radius: 8px;
+  color: var(--text2); font: inherit; font-size: 12px;
+}
+.eb-exam-btn:hover { background: rgba(255, 255, 255, 0.06); }
+.eb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px currentColor; }
+.eb-caret { font-size: 9px; opacity: 0.6; transition: transform 0.15s; }
+.eb-caret.up { transform: rotate(180deg); }
+/* 下拉面板（已 Teleport 到 body，用 fixed + 内联 top/left 定位） */
+.eb-exam-pop {
+  position: fixed; z-index: 1200;
+  width: 248px; max-width: 78vw;
+  background: #0d1726; border: 1px solid rgba(120, 200, 255, 0.28);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  padding: 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.eb-pop-hd { font-size: 11px; color: var(--text3); padding: 2px 6px 4px; }
+.eb-pop-it {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid transparent;
+  border-radius: 8px; padding: 7px 8px; color: var(--text2); font-size: 12.5px; text-align: left;
+}
+.eb-pop-it:hover { background: rgba(255, 255, 255, 0.08); }
+.eb-pop-it.on { border-color: rgba(80, 200, 255, 0.5); background: rgba(80, 200, 255, 0.1); }
+.eb-pop-name { flex: 1; font-weight: 600; color: var(--text1); }
+.eb-pop-d { font-size: 11px; color: var(--text3); }
+.eb-pop-check { color: var(--hud-cyan); font-weight: 700; }
+.eb-pop-mgr {
+  margin-top: 2px; cursor: pointer; border: 1px dashed rgba(80, 200, 255, 0.4);
+  background: rgba(80, 200, 255, 0.06); color: #bfe9ff; border-radius: 8px;
+  padding: 8px; font-size: 12px;
+}
+.eb-pop-mgr:hover { background: rgba(80, 200, 255, 0.14); }
+.eb-pop-mask { position: fixed; inset: 0; z-index: 1100; }
 .eb-amb {
   cursor: pointer;
   padding: 3px 8px;

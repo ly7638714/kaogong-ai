@@ -20,8 +20,12 @@ const D = () => ({
   ttsRate: 0.98,
   ttsPitch: null,
   ttsMode: 'edge', // 真人朗读引擎默认 edge=Edge免费神经语音（免key）；glm=智谱超拟人(收费) / openai=OpenAI兼容CosyVoice / sys=系统语音(完全免费本地)
+  ttsGuard: true, // 真人朗读「省钱护栏」（v3.8.90）：真人引擎每日免费字符额度用完自动退回免费 Edge；Edge/系统语音永不被拦
+  ttsDayCap: 20000, // 真人引擎每日免费字符额度（约 3-4 千字中文量级；超出自动退回 Edge）
   ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
   ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },
+  // 阿里百炼 TTS（v3.8.91，真实实测 qwen3-tts-instruct-flash 可用；¥0.8/万字符级）
+  ttsDash: { key: '', url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', voiceCustom: '', customVoices: [] },
   ttsEdgeVoice: 'zh-CN-XiaoxiaoNeural',
   voiceCustom: { hidden: {}, names: {} }, // 音色市场自定义：隐藏/重命名已有音色
   petVoice: true, // 萌宠语音朗读总开关（配合真人 TTS 引擎）
@@ -37,6 +41,17 @@ const D = () => ({
   fontFamily: 'default', // 全局字体：default=微软雅黑 / song=宋体 / hei=黑体 / kai=楷体 / fang=仿宋 / yuan=幼圆
   kgFx: 0.6, // 知识图谱光效强度：0=关闭(不晃眼/省电) / 0.5=柔和 / 1=全开；默认柔和防白天光污染
   examDate: '2026-11-29',
+  // ===== 多考试倒计时（v3.8.69 新增）：国考为内置不可删，其余自定义；互不冲突，各自独立倒计时 =====
+  exams: [
+    { id: 'gk', name: '国考', date: '2026-11-29', color: '#ff5c7c', builtin: true }
+  ],
+  activeExamId: 'gk',
+  // ===== 萌宠对话记忆库（v3.8.75 新增）：对话模式下自动记录问答，供"批量加错题"指令检索 =====
+  petChatLog: [],
+  // ===== 提问助手（v3.8.76 新增）：输入区实时识别板块/题型/意图并引导补全 =====
+  askAssist: true, // 总开关：false 时输入区助手条完全不渲染、不分析（回归到改动前行为）
+  pendingPlate: '', // 用户点选确认的板块（一次性：runChat 消费后清空），优先级高于自动识别
+  answerDepth: 'detail', // 回答深度：detail=详讲 / brief=简答 / flash=只秒杀
   obsidian: true,
   eyeMode: 'normal',
   hl: false,
@@ -58,9 +73,21 @@ const D = () => ({
   },
   webdav: { url: '', user: '', pass: '' },
   szFrom: '2025-10',
-  szTo: ''
+  szTo: '',
+  // ===== 界面自定义（v3.8.80 新增）：主界面板块/细分功能入口显隐开关（仅隐藏，不删除功能）=====
+  uiHidden: {},
+  // ===== 模型注册表用户自增（v3.8.84 新增）：{ text:{ ds:[{id,label,pub?}], ... }, vision:{...}, fig:{...} } 与新上市模型的兜底 =====
+  customModels: {},
+  // ===== 语音阅读·讲稿改写 LLM（v3.8.88 新增·可选）：朗读前先把原文改写成口语化讲稿再交给 TTS；未配置时退回直接朗读原文 =====
+  rd: {
+    on: false, // 总开关：默认关，打开并配好 Key 才走"改写后朗读"
+    prov: 'ds',
+    key: '',
+    url: 'https://api.deepseek.com/chat/completions',
+    model: 'deepseek-v4-flash'
+  }
 })
-export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null }, pendingAsk: '', pendingFocus: false })
+export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null, examMgr: false }, pendingAsk: '', pendingFocus: false })
 export function load() {
   try {
     const s = localStorage.getItem('xc_cfg')
@@ -134,6 +161,34 @@ export function load() {
     const nn = localStorage.getItem('xc_notes')
     if (nn) store.notes = JSON.parse(nn)
   } catch (e) {}
+  // ===== 多考试倒计时迁移（v3.8.69）：旧版只有单一 examDate → 升级为 exams 数组 =====
+  try {
+    if (!Array.isArray(store.cfg.exams) || !store.cfg.exams.length) {
+      // 旧用户：把原 examDate 作为内置国考；新用户：D() 已带默认国考
+      const legacy = store.cfg.examDate || '2026-11-29'
+      store.cfg.exams = [{ id: 'gk', name: '国考', date: legacy, color: '#ff5c7c', builtin: true }]
+    }
+    // 清理脏数据：确保每条考试有合法字段
+    store.cfg.exams = store.cfg.exams.map((e) => ({
+      id: e.id || 'c_' + Date.now() + Math.random().toString(36).slice(2, 6),
+      name: (e.name || '未命名考试').trim() || '未命名考试',
+      date: e.date || '2026-11-29',
+      color: e.color || '#5cc8ff',
+      builtin: !!e.builtin
+    }))
+    // 激活考试必须存在，否则回退到第一条
+    if (!store.cfg.exams.find((e) => e.id === store.cfg.activeExamId)) {
+      store.cfg.activeExamId = store.cfg.exams[0].id
+    }
+    // 让 examDate 镜像当前激活考试，兼容旧读取点/外部引用
+    const act = store.cfg.exams.find((e) => e.id === store.cfg.activeExamId) || store.cfg.exams[0]
+    store.cfg.examDate = act.date
+    saveCfg()
+  } catch (e) {}
+  // ===== 萌宠对话记忆库迁移（v3.8.75）：确保字段存在（旧用户升级） =====
+  try {
+    if (!Array.isArray(store.cfg.petChatLog)) store.cfg.petChatLog = []
+  } catch (e) {}
 }
 export const saveCfg = () => { safeSet(KEYS.CFG, store.cfg) }
 export const saveMsgs = () => {
@@ -163,6 +218,10 @@ export function isCompleteWrong(wq, extra = {}) {
   const opts = extractChoices(q)
   const hasImg = !!(wq.imgs && wq.imgs.length)
   if (q.length < 15) return { ok: false, reason: '内容过短，不是一道完整题目（可能误选了回复消息）' }
+  // 聊天导出的错题（chatWrong）：题干+选项完整且带错因说明即放行（答案可能需复盘补填）
+  if (extra.chatWrong && opts.length && (Array.isArray(wq.reasons) ? wq.reasons.length : (wq.reason || wq.note))) {
+    return { ok: true }
+  }
   // 无选项、无答案、无截图 → 典型的对话回复/非题目内容
   if (!opts.length && !letter && !hasImg) return { ok: false, reason: '这是对话回复/非题目内容，无法存入错题集' }
   // 无截图且无答案标记 → 无法确认是完整题目（对话出题卡 allowNoAnswer：题干+选项完整即视为完整题，答案可在复盘补填）
@@ -214,4 +273,125 @@ export function dedupeWrongs() {
 export const saveWqs = () => { safeSet(KEYS.WQS, store.wqs) }
 export const saveMyMem = () => { safeSet(KEYS.MY_MEM, store.myMem) }
 export const saveNotes = () => { safeSet(KEYS.NOTES, store.notes) }
+
+// ===== 多考试倒计时：管理方法（v3.8.69） =====
+// 取当前激活考试对象（兜底返回第一条 / null）
+export function getActiveExam() {
+  const list = store.cfg.exams || []
+  if (!list.length) return null
+  return list.find((e) => e.id === store.cfg.activeExamId) || list[0]
+}
+// 切换激活考试并同步 examDate 镜像
+export function setActiveExam(id) {
+  if (!store.cfg.exams.find((e) => e.id === id)) return
+  store.cfg.activeExamId = id
+  const act = getActiveExam()
+  if (act) store.cfg.examDate = act.date
+  saveCfg()
+}
+// 新增自定义考试（国考等内置不可在此新增；返回新对象）
+export function addExam({ name, date, color }) {
+  const list = store.cfg.exams || (store.cfg.exams = [])
+  const ex = {
+    id: 'c_' + Date.now() + Math.random().toString(36).slice(2, 6),
+    name: (name || '').trim() || '未命名考试',
+    date: date || '2026-11-29',
+    color: color || '#5cc8ff',
+    builtin: false
+  }
+  list.push(ex)
+  saveCfg()
+  return ex
+}
+// 更新某考试字段（名称/日期/颜色）；若更新的是激活考试则同步 examDate 镜像
+export function updateExam(id, patch) {
+  const ex = store.cfg.exams.find((e) => e.id === id)
+  if (!ex) return
+  Object.assign(ex, patch)
+  if (id === store.cfg.activeExamId) store.cfg.examDate = ex.date
+  saveCfg()
+}
+// 删除自定义考试（内置国考不可删）；若删的是激活项则回退到第一条
+export function removeExam(id) {
+  const list = store.cfg.exams
+  const ex = list.find((e) => e.id === id)
+  if (!ex || ex.builtin) return false
+  store.cfg.exams = list.filter((e) => e.id !== id)
+  if (store.cfg.activeExamId === id) {
+    store.cfg.activeExamId = store.cfg.exams[0] ? store.cfg.exams[0].id : ''
+    const act = getActiveExam()
+    if (act) store.cfg.examDate = act.date
+  }
+  saveCfg()
+  return true
+}
+
+// ===== 萌宠对话记忆库（v3.8.75）：对话模式下自动记录问答，供"批量加错题"指令检索 =====
+function todayStr(d = new Date()) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+// 压缩文本：去 HTML/多空白并截断，控制记忆库体积（localStorage 限额）
+function petCap(s, n = 1000) {
+  s = String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return s.length > n ? s.slice(0, n) + '…' : s
+}
+const PET_LOG_CAP = 500 // 记忆库上限，超出丢弃最早记录
+// 记录一条问答：q=用户提问，a=萌宠回复；meta={refId,bk,quiz}
+export function recordPetChat(q, a, meta = {}) {
+  try {
+    const log = store.cfg.petChatLog || (store.cfg.petChatLog = [])
+    // 同一消息（refId 相同）不重复记录（防止重渲染/重存导致重复）
+    const last = log[log.length - 1]
+    if (meta.refId && last && last.refId === meta.refId) return
+    log.push({
+      date: todayStr(),
+      ts: Date.now(),
+      q: petCap(q, 1200),
+      a: petCap(typeof a === 'string' ? a : (a && a.text) || '', 1200),
+      refId: meta.refId || null,
+      bk: meta.bk || '',
+      wrong: false,
+      reason: '',
+      quiz: null
+    })
+    if (log.length > PET_LOG_CAP) log.splice(0, log.length - PET_LOG_CAP)
+    saveCfg()
+  } catch (e) {}
+}
+// 标记某条对话为"错题"（结合作答错误原因）：按 refId 找到对应记录并填充结构化题目
+export function markPetChatWrong(refId, info = {}) {
+  try {
+    const log = store.cfg.petChatLog || (store.cfg.petChatLog = [])
+    let e = refId ? log.find((x) => x.refId === refId) : null
+    if (!e) {
+      // 兜底：没找到对应问答则新追加一条错题记录，保证不漏
+      e = { date: todayStr(), ts: Date.now(), q: petCap(info.ask || '', 1200), a: '', refId: refId || null, bk: info.bk || '', wrong: false, reason: '', quiz: null }
+      log.push(e)
+    }
+    e.wrong = true
+    e.reason = info.reason || ''
+    e.bk = info.bk || e.bk || ''
+    e.quiz = {
+      stem: String(info.stem || ''),
+      options: Array.isArray(info.options) ? info.options.map((o) => ({ k: o.k, t: String(o.t || '').replace(/<[^>]+>/g, ' ').slice(0, 300) })) : [],
+      answer: info.answer || '',
+      picked: info.picked || '',
+      correct: info.correct,
+      explain: String(info.explain || '').replace(/<[^>]+>/g, ' ').slice(0, 800)
+    }
+    if (log.length > PET_LOG_CAP) log.splice(0, log.length - PET_LOG_CAP)
+    saveCfg()
+    return e
+  } catch (e) {}
+}
+// 取"今天"的全部对话记录
+export function getTodaysPetChat() {
+  try {
+    const t = todayStr()
+    return (store.cfg.petChatLog || []).filter((x) => x.date === t)
+  } catch (e) { return [] }
+}
 

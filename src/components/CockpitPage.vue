@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { store } from '../store'
+import { store, getActiveExam, setActiveExam } from '../store'
 import { detectBanKuai, PLATE_MODE } from '../api'
 import { showToast } from '../utils/toast'
 import { safeGet, KEYS } from '../utils/storage'
@@ -14,10 +14,13 @@ const ck = computed(() => {
   const r = store.wqs.filter((x) => x.reviewed).length
   return { q, w, r, revRate: w ? Math.round((r / w) * 100) : 0 }
 })
+// 当前激活考试（多考试倒计时：看板只针对当前激活的那场考试）
+const activeExam = computed(() => getActiveExam())
+const activeDate = computed(() => (activeExam.value && activeExam.value.date) || store.cfg.examDate || '2026-11-29')
 // 备考倒计时
 const daysLeft = computed(() => {
   try {
-    const d = store.cfg.examDate ? new Date(store.cfg.examDate) : null
+    const d = activeDate.value ? new Date(activeDate.value) : null
     if (!d || isNaN(d)) return null
     return Math.max(0, Math.ceil((d - Date.now()) / 86400000))
   } catch (e) {
@@ -26,13 +29,21 @@ const daysLeft = computed(() => {
 })
 const examDateFmt = computed(() => {
   try {
-    const d = new Date(store.cfg.examDate || 0)
+    const d = new Date(activeDate.value || 0)
     if (isNaN(d)) return ''
     return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日'
   } catch (e) {
     return ''
   }
 })
+// 某考试剩余天数（用于切换 chips 角标）
+function daysLeftOf(dateStr) {
+  try {
+    const d = dateStr ? new Date(dateStr) : null
+    if (!d || isNaN(d)) return null
+    return Math.max(0, Math.ceil((d - Date.now()) / 86400000))
+  } catch (e) { return null }
+}
 // 板块分布
 const banKuai = computed(() => {
   const m = {}
@@ -58,7 +69,7 @@ function goto(t) {
 // 考试节点：按设置的笔试日期自动推算（报名/缴费为常见周期估算，以官方公告为准）
 const nodeAt = (offsetDays) => {
   try {
-    const d = store.cfg.examDate ? new Date(store.cfg.examDate) : null
+    const d = activeDate.value ? new Date(activeDate.value) : null
     if (!d || isNaN(d)) return null
     const x = new Date(d)
     x.setDate(x.getDate() + offsetDays)
@@ -72,7 +83,7 @@ const nodes = computed(() => {
     { t: '缴费（约）', d: nodeAt(-45) || '待定', i: '💳' },
     { t: '考前冲刺', d: nodeAt(-30) || '—', i: '🚀' },
     { t: '打印准考证', d: nodeAt(-7) || '考前一周', i: '🎫' },
-    { t: '📝笔试日', d: ex || store.cfg.examDate || '待定', i: '⏰', hot: true }
+    { t: '📝笔试日', d: ex || activeDate.value || '待定', i: '⏰', hot: true }
   ]
 })
 // 冲刺倒推计划：按剩余天数给每日刷题/复盘/套卷建议
@@ -320,11 +331,24 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
       <div class="ck-head">
         <div class="ck-title">🚀 学习驾驶舱</div>
         <div v-if="daysLeft != null" class="ck-sub">
-          距笔试还有
+          距 <b class="ck-exam-name" :style="{ color: activeExam ? activeExam.color : '' }">【{{ activeExam ? activeExam.name : '考试' }}】</b> 笔试还有
           <b>{{ daysLeft }}</b>
-          天（{{ examDateFmt }}，设置里可调）
+          天（{{ examDateFmt }}）
         </div>
-        <div v-else class="ck-sub">在设置 → 数据管理 里配置笔试日期可显示倒计时</div>
+        <div v-else class="ck-sub">在 设置 → 考试管理 里配置笔试日期可显示倒计时</div>
+      </div>
+      <!-- 考试切换 chips：各自独立倒计时 -->
+      <div class="ck-exams">
+        <button
+          v-for="ex in (store.cfg.exams || [])" :key="ex.id"
+          class="ck-exam-chip" :class="{ on: activeExam && ex.id === activeExam.id }"
+          :style="ex.id === (activeExam && activeExam.id) ? { borderColor: ex.color, color: ex.color } : {}"
+          @click="setActiveExam(ex.id)"
+        >
+          <span class="ck-chip-dot" :style="{ background: ex.color }"></span>
+          {{ ex.name }}
+          <span class="ck-chip-d">{{ daysLeftOf(ex.date) }}天</span>
+        </button>
       </div>
 
       <!-- 今日任务打卡 -->

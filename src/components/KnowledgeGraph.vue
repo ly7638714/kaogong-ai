@@ -699,4 +699,16 @@ watch(() => props.cards.length, () => {
 .kg-d-opts span { font-size: 11.5px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); border-radius: 6px; padding: 2px 8px; }
 .kg-d-ans { margin-top: 5px; color: #86efac; font-weight: 700; }
 .kg-d-acts { margin-top: 8px; }
+/* 手机/窄屏适配（≤900px）：画布降高给下方详情留空间；图例缩小避免遮挡画布 */
+@media (max-width: 900px) {
+  .kg-canvas-wrap { height: 46vh; min-height: 240px; }
+  .kg-hd { gap: 6px; }
+  .kg-tip { font-size: 11.5px; }
+  .kg-stat { font-size: 10.5px; }
+  .kg-legend { left: 6px; bottom: 6px; gap: 4px; max-width: 94%; }
+  .kg-lg { font-size: 9.5px; padding: 2px 6px; }
+  .kg-reset { width: 28px; height: 28px; font-size: 14px; right: 6px; top: 6px; }
+  .kg-tip-float { max-width: 150px; font-size: 11px; }
+  .kg-detail { padding: 8px 10px; }
+}
 </style>
