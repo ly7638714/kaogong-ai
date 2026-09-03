@@ -8,6 +8,14 @@
 
 ---
 
+## 最新状态与交接（2026-09-03）
+
+- **版本 v3.8.96**（package.json 与 src/version.js 已同步）；知识卡 437 张；三端（dist / 02_发布物 / 04_安卓）SHA256 零不一致。
+- 近两轮大功能：语音/TTS 重构（阿里百炼 Qwen3-TTS、Edge 免费、音频缓存）、模型配置下拉化、AI 出题多样性引擎、主题系统收尾与「对话文字渲染统一」等（详见 CHANGELOG.md）。
+- **给下一任深度开发代理的交接说明**：[`05_工程与产品评估/29_交接说明书_给DeepSeekHarness.md`](05_工程与产品评估/29_交接说明书_给DeepSeekHarness.md)（**项目全量交接**：版本轨迹与各贡献方、全量功能全景、架构/目录、经验教训、待办、门禁）；完整开发过程史见 [`05_工程与产品评估/30_开发过程全史.md`](05_工程与产品评估/30_开发过程全史.md)；工程报告索引见 [`05_工程与产品评估/README.md`](05_工程与产品评估/README.md)。
+- ⚠️ `npm test` 暂不可用：vitest 4.1.11 与 vite 5.4.21 版本冲突（见 29 号 §0/§7-2），修复建议降 vitest 至 ^2.1.x。
+
+---
 ## 一、项目定位与整体架构
 
 个人备考自用的行测智能助教 Web 应用（Vue3 + Vite + PWA），核心闭环：
@@ -33,7 +41,7 @@
 kaogong-review-skill-main/
 ├── 01_源码/             唯一活跃源码（Vue3+Vite+PWA）
 │   ├── src/
-│   │   ├── main.js / App.vue / store.js / styles.css / kb.js / api.js
+│   │   ├── main.js / App.vue / store.js / styles.css / version.js（kb.js / api.js 为旧入口，逻辑已迁 kb/ 与 api/）
 │   │   ├── components/
 │   │   │   ├── ChatPage.vue       对话（板块模式/选择题作答/图形增强/高效复盘/工具栏收起/顶栏搜索）
 │   │   │   ├── ExamPanel.vue      统一考场：⚡单题快练 / 🎲AI整卷出题 / 📂导入材料 / 📚错题集组卷
@@ -45,7 +53,8 @@ kaogong-review-skill-main/
 │   │   │   ├── DraftPad.vue       全局「✏️ 随手记」手写草稿（悬浮球/透明度/笔粗细颜色）
 │   │   │   ├── SolidTrain.vue     立体图推训练（空间重构/三视图/立体拼合，等轴测渲染）
 │   │   │   ├── PaperImport.vue    试卷导入（图片/PDF/Word/txt/tex 识别）
-│   │   │   └── CosmosScene.vue / ShelfScene.vue   3D 背景 / 3D 书柜
+│   │   │   ├── KnowledgeGraph.vue / Data3DPage.vue   3D 神经网络图谱 / 🌌3D数据
+│   │   │   └── CosmosScene.vue / ShelfScene.vue   仅供 🌌3D数据（全景背景已移除）/ 旧 3D 书柜
 │   │   └── utils/  renderMd / export(Word/PDF/MD/TeX/Typst/Obsidian/Anki) / quiz(出题解析)
 │   │             / logicVerify(真假话真值表硬校验) / chartMount(ECharts) / tts+ttsEngine(真人语音·gapless无缝) / pet(萌宠)
 │   │             / petKnowledge(萌宠功能百科) / dataTrainGen(资料速算本地生成器) / dataTrainLib(双师52卡知识库)
@@ -60,7 +69,7 @@ kaogong-review-skill-main/
 ├── 04_安卓/           HBuilderX 5+App 项目（web 资源已与最新构建同步）+ APK打包指南
 ├── archive_旧版本/    归档区（旧版源码/旧 skill 体系/APK 历史版本）
 ├── scripts/           发布同步脚本 sync-dist.ps1（一键构建+同步三端+重建zip；与 01_源码/scripts 开发验证脚本区分）
-├── README.md / 使用说明.md / 对话功能使用与开发说明.md / PROJECT_ROADMAP.md / CHANGELOG.md / LICENSE
+├── README.md / 使用说明.md / 对话功能使用与开发说明.md / CHANGELOG.md / LICENSE
 ```
 
 ---

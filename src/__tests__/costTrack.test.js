@@ -23,9 +23,10 @@ describe('AI 用量与花费追踪 costTrack', () => {
 
   it('calcCost 返回输入/输出/固定/合计明细', () => {
     const c = calcCost('deepseek-chat', 1000, 500)
-    expect(c.total).toBeCloseTo(0.001 * 1 + 0.002 * 0.5, 5)
-    expect(c.in).toBeCloseTo(0.001, 5)
-    expect(c.out).toBeCloseTo(0.001, 5)
+    // 2026-09 官方价（联网核验）：deepseek-chat = V4-Flash 非思考，输入 0.0015/输出 0.0045 元每千 token
+    expect(c.total).toBeCloseTo(0.0015 * 1 + 0.0045 * 0.5, 5)
+    expect(c.in).toBeCloseTo(0.0015, 5)
+    expect(c.out).toBeCloseTo(0.00225, 5)
     expect(c.fixed).toBe(0)
   })
 
@@ -64,9 +65,10 @@ describe('AI 用量与花费追踪 costTrack', () => {
     recordCost({ feature: 'tts', provider: 'glm', model: 'glm-tts', cost: 0.001, note: '10 字' })
     const s = costStats()
     expect(s.totalN).toBe(2)
-    expect(s.byFeat.chat).toBeCloseTo(0.003, 5)
+    // deepseek-chat 现价 in 0.0015 / out 0.0045 元每千：1K+1K = 0.0015+0.0045 = 0.006
+    expect(s.byFeat.chat).toBeCloseTo(0.006, 5)
     expect(s.byFeat.tts).toBeCloseTo(0.001, 5)
-    expect(s.byModel['deepseek-chat']).toBeCloseTo(0.003, 5)
+    expect(s.byModel['deepseek-chat']).toBeCloseTo(0.006, 5)
   })
 
   it('recordCost 无 usage 时按文本长度估算 token', () => {

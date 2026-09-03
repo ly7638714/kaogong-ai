@@ -3,7 +3,7 @@
     <div class="trial-card">
       <div class="trial-logo">🎓</div>
       <h1 class="trial-title">行测名师AI小助理</h1>
-      <p class="trial-sub">体验版 · 名额有限</p>
+      <p class="trial-sub">体验版 · 开放 {{ slots }} 个体验名额</p>
 
       <template v-if="expired">
         <div class="trial-state expired">
@@ -16,7 +16,7 @@
 
       <template v-else-if="!unlocked">
         <div class="trial-state">
-          <p class="trial-tip">请输入体验邀请码解锁使用（每个体验者使用自己的 API Key）</p>
+          <p class="trial-tip">本轮仅开放 {{ slots }} 个名额，先到先得（每个体验者使用自己的 API Key）</p>
           <input
             v-model="code"
             class="trial-input"
@@ -44,7 +44,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { trialExpired, trialLocked, trialUnlock, trialExpiresText } from '../utils/trial'
+import { trialExpired, trialLocked, trialUnlock, trialExpiresText, trialSlotsText } from '../utils/trial'
 
 const code = ref('')
 const err = ref(false)
@@ -52,6 +52,7 @@ const busy = ref(false)
 const unlocked = ref(false)
 const expired = ref(false)
 const expiresText = trialExpiresText()
+const slots = trialSlotsText() || '30'
 
 function doUnlock() {
   if (busy.value) return

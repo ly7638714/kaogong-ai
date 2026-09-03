@@ -33,6 +33,14 @@ import { store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, 
 import { on as evOn, off as evOff } from '../utils/events'
 import { activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
 import { analyzeFigImage, readQuestionFromImage, figCfg } from '../api/figEnhance'
+import { buildChatHistory, ensureImgNotesForHistory, lastImgTopics } from '../utils/imgMemory'
+import { probe, detectAskDir, taskShape } from '../utils/intentProbe'
+import { nextContext } from '../utils/askState'
+import { buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt } from '../utils/replyProtocol'
+import { retrieveDetailed } from '../kb/retrieveV2'
+import { normalizePlate } from '../kb/cards-index'
+import { verifyReply } from '../utils/replyVerify'
+let _lastAskCtx = null
 import { analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
 import { speakReadyText } from '../utils/speechScript'
@@ -582,8 +590,15 @@ async function runChat() {
   // ⚠️ v3.8.76 修正：原实现在末尾用 sys = buildSys(...) 重建，会把下方「出题/读图/快答」片段全部冲掉
   // 优先级：用户在提问助手里点选确认的板块（pendingPlate） > 自动识别（detectBanKuai）
   let _plate = ''
+  let _taskShape = null
   if (store.mode === 'all' && store.cfg.kb !== false) {
-    _plate = store.cfg.pendingPlate || detectBanKuai(curTxt) || ''
+    // P0-1b 换题/追问状态机：追问锁上一轮板块/细分；换题/刷新则重建并记忆
+    const _pr = probe(curTxt, { hasImg: curIsImg })
+    _taskShape = taskShape(curTxt, { imgRead: curFigRead || '' })
+    const _nx = _lastAskCtx ? nextContext(_lastAskCtx, _pr) : null
+    _plate = store.cfg.pendingPlate || (_nx && _nx.kind === 'followup' && _nx.plate6 ? _nx.plate6 : (_pr.plate6 || (_nx && _nx.plate6) || detectBanKuai(curTxt) || ''))
+    if (_nx && (_nx.kind === 'newQ' || _nx.kind === 'refresh')) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _nx.sub || _pr.sub, text: curTxt }
+    else if (!_nx) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _pr.sub, text: curTxt }
   }
   let sys = buildSys(_plate ? PLATE_MODE[_plate] || '' : undefined, curTxt)
   if (lastMsg && lastMsg._askQuiz) {
@@ -610,13 +625,16 @@ async function runChat() {
         }
         // ② 子意图片段（出题已由上方 _askQuiz 处理，避免重复下发）
         if (aa.intent !== '出题' && INTENT_SYS[aa.intent]) sys += INTENT_SYS[aa.intent]
+        // P0-2 分场景协议：补 askAssist 未细化的输出顺序（方法总结/变式/出题/讲解/对答案等）
+        try { const _sp = buildScenarioPrompt(curTxt, { hasImg: curIsImg, plate: _plate }); if (_sp) sys += _sp } catch (e) {}
         // ③ 上一题对比：把 curQ 喂进去，实现真正的"对比讲解"
         if (aa.intent === '对比' && store.curQ) {
           const q = store.curQ
           sys += '\n【上一题信息·供对比】板块=' + (q.plate || '未知') + ' 题型=' + (q.kind || '未知') + '\n题干：' + String(q.stem || '').slice(0, 300) + '\n正确答案：' + (q.answer || '未知')
         }
         // ④ 锚定本题：仅对真正在解题的意图追加（出题/概念/秒杀不适用）
-        if (aa.intent === '求解' || aa.intent === '判错解释' || aa.intent === '对比') sys += ANCHOR_PROTOCOL
+        const _anchorOk = !_taskShape || (_taskShape.kind !== 'batchN' && _taskShape.kind !== 'genericHow')
+        if (_anchorOk && (aa.intent === '求解' || aa.intent === '判错解释' || aa.intent === '对比')) sys += ANCHOR_PROTOCOL
       }
     } catch (e) {}
     // ⑤ 回答深度
@@ -624,54 +642,49 @@ async function runChat() {
     if (dep) sys += dep
     // pendingPlate 一次性生效：消费后立即清空，不污染后续提问
     if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+    // P-A 任务形态：排序流程 / 批答纪律（仅确认场景追加，泛问不额外加码）
+    try {
+      if (_taskShape && _taskShape.sort) { const _sp2 = sortScenarioPrompt(); if (_sp2) sys += _sp2 }
+      if (_taskShape && _taskShape.kind === 'batchN' && _taskShape.n > 1) sys += batchScenarioPrompt(_taskShape.n)
+      // P-B 判型先行：仅深单题(言语/判断等主观判断题型)启用，批答/泛问不加码
+      if (_taskShape && _taskShape.kind === 'deepOne' && !_taskShape.sort && /(言语理解|判断推理|图形推理|定义判断|类比推理)/.test(_plate || '')) { const _tp = typeFirstPrompt(); if (_tp) sys += _tp }
+      if (_taskShape && _taskShape.kind === 'deepOne') { const _hp = honestyPrompt(); if (_hp) sys += _hp }
+    } catch (e) {}
   }
   // 质量优先：历史尽量完整保留（不激进省 token），保障「解决具体提问」不缺上文。
   const visOk = supportsVision(replyC)
+  // P-① 方法卡命中透明化：算出本次命中卡并给模型“引用纪律”，回复脚注让用户核对是否真按卡作答
+  let _hitNote = ''
+  try {
+    const _pp6 = normalizePlate(_plate || detectBanKuai(curTxt) || '')
+    const _hits = retrieveDetailed(_pp6, curTxt, 3)
+    if (_hits.length) {
+      _hitNote = '📚 依据卡：' + _hits.map((x) => '[' + x.card.plate + '·' + x.card.type + ']' + (x.strong ? '✓' : '')).join(' ')
+      sys += '\n【引用纪律】凡按已蒸馏方法作答，请在解析开头写出处卡名（如〔言语·中心理解·转折结构〕）；若某一步不是卡内方法，请明说“此处为通用推理”，不得冒充卡内方法。'
+    } else {
+      _hitNote = '📚 提示：未匹配到已蒸馏方法，以下按通用思路作答，请谨慎核对'
+    }
+  } catch (e) {}
   const _AICAP = 4000 // 单条 assistant 回答最多发送字符
   const _HIS = 20 // 最多 20 条
   const _BUDGET = 35000 // 历史总字符预算，超出才丢更早
-  const history = []
-  let cum = 0
-  // 批次5-P5-2 历史图片瘦身：仅最近一轮用户消息发 image_url，更早轮次用 OCR 文本/占位
-  let imgSent = false
-  for (let i = store.msgs.length - 1; i >= 0 && history.length < _HIS; i--) {
-    const m = store.msgs[i]
-    let item = null
+  // P-M 图文记忆：当前模型不可看图时，若最近一张截图缺文字纪要则补读一次并固化（追问/换模型不失忆）
+  if (!visOk && typeof figCfg === 'function') {
     try {
-      if (m.role === 'assistant') {
-        const t = typeof m.content === 'string' ? m.content.trim() : ''
-        if (!t || /^[❌⚠️⏳🔄🎯✍️]+/.test(t)) continue
-        item = { role: m.role, content: t.slice(0, _AICAP) }
-      } else {
-        if (typeof m.content === 'string') {
-          if (!(m.content || '').trim()) continue
-          item = { role: m.role, content: m.content }
-        } else if (m.content && ((m.content.text || '').trim() || (m.content.imgs && m.content.imgs.length))) {
-          const parts = []
-          if (m._curImgRead) {
-            parts.push({ type: 'text', text: '【图片内容】' + m._curImgRead })
-          } else if ((m.content.text || '').trim()) {
-            parts.push({ type: 'text', text: m.content.text })
-            // 仅最新一条用户消息携带图片（更早轮次跳过，避免 payload 随历史图数翻倍）
-            if (visOk && Array.isArray(m.content.imgs) && !imgSent) {
-              for (const u of m.content.imgs) {
-                if (u && /^(data:image|https?:\/\/)/i.test(String(u))) parts.push({ type: 'image_url', image_url: { url: u } })
-              }
-              imgSent = true
-            }
-          } else {
-            parts.push({ type: 'text', text: '[用户发送了一张图片]' })
-          }
-          item = { role: m.role, content: parts }
-        }
+      const fc = figCfg()
+      if (fc) {
+        const chg = await ensureImgNotesForHistory(store.msgs, (d, t) => readQuestionFromImage(d, t))
+        if (chg.changed) saveMsgs()
       }
     } catch (e) {}
-    if (!item) continue
-    const clen = typeof item.content === 'string' ? item.content.length : 800
-    if (cum + clen > _BUDGET && history.length > 0) break
-    cum += clen
-    history.unshift(item)
   }
+  // P-M 统一历史组装：旧图纪要转文字注入、仅最新一条带图消息附 image_url、纯图无文字也可带图
+  const history = buildChatHistory(store.msgs, { limit: _HIS, budget: _BUDGET, maxAiChars: _AICAP, visOk })
+  // P-M 截图题目目录注入：支持“第N题/第二题/上一题”指代，不要求用户重发截图
+  try {
+    const topics = lastImgTopics(store.msgs, 6)
+    if (topics.length) sys += '\n【本会话最近看过的截图题目】\n' + topics.join('\n') + '\n（用户若说“第N题/上一题/这道”即指以上题目，直接据此作答，勿要求重发截图）'
+  } catch (e) {}
   live.value = { text: '', think: '', thinkOpen: false }
   scroll()
   try {
@@ -688,7 +701,16 @@ async function runChat() {
     // 高效复盘指引：模型已按 SYS 输出则以模型为准；缺失时按板块本地复盘库兜底
     const review = buildReview(full, detectBanKuai(curTxt), curTxt)
     const finalContent = review ? full + '\n\n' + review : full
-    addMsg({ role: 'assistant', content: finalContent })
+    // P1-1b 回复自查（replyVerify 五查）：不污染正文，高危(选非方向)才提示
+    try {
+      const _vr = verifyReply({ question: curTxt, reply: full, plate6: detectBanKuai(curTxt) || '', askDir: detectAskDir(curTxt) })
+      if (!_vr.pass && _vr.warnings.length) {
+        console.warn('[replyVerify]', _vr.warnings)
+        if (_vr.warnings.some((x) => x.includes('选非'))) showToast('⚠ 自查提示：' + _vr.warnings[0], 'warn')
+      }
+    } catch (e) {}
+    const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '')
+    addMsg({ role: 'assistant', content: _withSrc })
     // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
     if (sentImgs.length && shouldFigEnhance(curTxt, lastMsg && lastMsg._imgType)) {
       const lastAi = store.msgs[store.msgs.length - 1]

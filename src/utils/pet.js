@@ -5,6 +5,11 @@ import { speak, stopSpeak, speaking } from './tts'
 import { chatOnce, supportsVision, setCostCtx } from '../api/client'
 import { SYS, KB } from '../kb'
 import { petFeatureText, petDetectUi, DATA_TRAIN_INDEX } from './petKnowledge'
+import { renderCards } from '../kb/retrieve'
+import { retrieveDetailed } from '../kb/retrieveV2'
+import { confusableHints } from './intentProbe'
+import { profileLine } from './petProfile'
+import { kbFlowHead } from './kbFlow'
 import { speakReadyText } from './speechScript'
 
 const KEY = 'xc_pet'
@@ -480,8 +485,19 @@ export function petBuildKnowledge(plate) {
   let body = String(SYS || '').slice(0, 2600)
   const kbKey = PLATE_KB_MAP[plate]
   const kb = kbKey && KB[kbKey] ? String(KB[kbKey]) : ''
-  if (kb) body += '\n\n【' + plate + ' 专项·名师方法论】\n' + kb.slice(0, 2000)
+  if (kb) body += '\n\n【' + plate + ' 专项·流程要点】\n' + kbFlowHead(kb, 700)
   return body
+}
+// P2：方法与主对话同源——按提问注入方法卡(V2 强命中)+易混提示（萌宠不与主对话各讲一套）
+function petKbHits(plate, text) {
+  let s = ''
+  try {
+    const hits = retrieveDetailed(plate || '', text || '', 3)
+    if (hits.length) s = '\n\n【本题方法卡（严格按卡内步骤与术语作答）】\n' + renderCards(hits.map((x) => x.card))
+    const conf = confusableHints(plate || '', text || '')
+    if (conf.length) s += '\n\n【易混提示·作答前先判别】' + conf.join('\n')
+  } catch (e) {}
+  return s
 }
 // 用户个人记忆库（常识/时政/成语/实词/笔记…）
 function petMemCompact() {
@@ -495,6 +511,7 @@ export function petPersona() {
   const plate = petDetectPlate()
   const kb = petBuildKnowledge(plate)
   const mem = petMemCompact()
+  const weakLine = profileLine(store.wqs || [], 2)
   const skin = petSkin.value
   const custom = skin && skin.custom ? (petCustomData(skin.id) || {}) : null
   const skinName = custom ? (custom.name || '自定义人物') : (skin ? skin.name : '')
@@ -516,7 +533,7 @@ export function petPersona() {
     dataIdx +
     qcNote +
     '\n\n【用户个人记忆库（作答可引用，用户积累的常识/时政/成语/实词/笔记）】\n' + mem +
-    '\n\n【当前上下文】当前板块：' + (plate || '综合') + '；用户累计提问 ' + s.asks + ' 次、问答 ' + s.answers + ' 次、错题 ' + s.wrongs + ' 道、已复盘 ' + s.reviewed + ' 道、连续打卡 ' + s.streak + ' 天，目标行测 ' + goal + ' 分。' +
+    '\n\n【当前上下文】当前板块：' + (plate || '综合') + '；用户累计提问 ' + s.asks + ' 次、问答 ' + s.answers + ' 次、错题 ' + s.wrongs + ' 道、已复盘 ' + s.reviewed + ' 道、连续打卡 ' + s.streak + ' 天，目标行测 ' + goal + ' 分' + (weakLine ? '；' + weakLine : '') + '。' +
     '\n\n【回答要求】语气亲切有温度，可用少量 emoji；用户问功能/入口时按【本项目功能百科】准确回答；讲题时先判题型，再按上面名师方法论分步（考点结构→正确项逻辑→干扰项陷阱→结论），表达口语化、讲透为止（100-300字）；聊天/规划/鼓励类回复保持简短（60-150字）；涉及老师方法只讲真实公认内容，不确定就如实说明；自然地结合用户数据鼓励，不罗列数据。'
 }
 export async function petAsk(text, opts = {}) {
@@ -531,15 +548,27 @@ export async function petAsk(text, opts = {}) {
     if (!c) throw new Error('未配置文字模型 Key（设置 → 模型）')
     const ctx = petBuildQContext(store.curQ)
     const userMsg = ctx ? '【当前题目上下文】\n' + ctx + '\n\n（如果用户问“当前这道题/这道题/这个”之类，优先结合上面的题目上下文回答）\n\n用户问题：' + t : t
+    // P2 图文记忆：追问提到截图/题时，为最近一张无纪要的图补读文字并固化（萌宠不丢图）
+    try {
+      if (/(图|题|这个|那个|第二|上一|刚才|上面|这题)/.test(t)) {
+        const lu = [...petChat.value].reverse().find((m) => m && m.role === 'user' && m.img && !m._readText)
+        if (lu) {
+          const { figCfg, readQuestionFromImage } = await import('../api/figEnhance')
+          const fc = figCfg()
+          if (fc) { const fr = await readQuestionFromImage(lu.img, ''); if (fr && fr.ok) lu._readText = (fr.text || '') + (fr.fig ? '\n【图形特征】' + fr.fig : '') }
+        }
+      }
+    } catch (e) {}
     // 记忆模式：带上最近对话历史（不含刚入列的这条），萌宠不再“失忆”
     const msgs = [{ role: 'system', content: petPersona() }]
     const hist = petChat.value.slice(-12, -1)
     for (const m of hist) {
-      const mt = String(m.text || '').replace(/<[^>]+>/g, ' ').trim()
+      const mt = m && m.img ? (m._readText ? '【图片内容】' + m._readText : String(m.text || '').replace(/<[^>]+>/g, ' ').trim()) : String(m.text || '').replace(/<[^>]+>/g, ' ').trim()
       if (!mt) continue
       msgs.push({ role: m.role === 'pet' ? 'assistant' : 'user', content: mt.slice(0, 1200) })
     }
-    msgs.push({ role: 'user', content: userMsg })
+    const kbHits = petKbHits(petDetectPlate(), t)
+    msgs.push({ role: 'user', content: (kbHits ? kbHits + '\n\n' : '') + userMsg })
     if (typeof setCostCtx === 'function') setCostCtx('pet')
   const reply = await chatOnce(c, msgs, 1200, 60000)
     const r = String(reply || '').trim() || '这个我一时说不好，换个方式问问我？'
@@ -585,7 +614,8 @@ export async function petAskImage(imgDataUrl, text = '', opts = {}) {
   const img = await petCompressImage(String(imgDataUrl || ''))
   const t = String(text || '').trim()
   if (!img || !/^data:image\//.test(img)) { petBubbleTip('图片读取失败，请重试'); return '' }
-  petChat.value.push({ role: 'user', text: (t ? t + ' ' : '') + '🖼[图片]', img, ts: Date.now() })
+  const petImgU = { role: 'user', text: (t ? t + ' ' : '') + '🖼[图片]', img, ts: Date.now() }
+  petChat.value.push(petImgU)
   if (petChat.value.length > 60) petChat.value = petChat.value.slice(-60)
   petChatBusy.value = true
   bubble.value = '👀 让我看看这张图…'
@@ -593,7 +623,7 @@ export async function petAskImage(imgDataUrl, text = '', opts = {}) {
     let reply = ''
     const vis = store.cfg.vision && String(store.cfg.vision.key || '').trim() ? { ...store.cfg.vision } : null
     if (vis && supportsVision(vis)) {
-      const userMsg = t || '请仔细看这张图，帮我解答或分析图中内容。'
+      const userMsg = petKbHits(petDetectPlate(), t || '图片题') + '\n\n' + (t || '请仔细看这张图，帮我解答或分析图中内容。')
       const msgs = [
         { role: 'system', content: petPersona() },
         { role: 'user', content: [{ type: 'text', text: userMsg }, { type: 'image_url', image_url: { url: img } }] }
@@ -606,7 +636,9 @@ export async function petAskImage(imgDataUrl, text = '', opts = {}) {
         petBubbleTip('🖼 正在用图形增强模型读图…')
         const fr = await readQuestionFromImage(img, t)
         if (fr && fr.ok) {
-          const ask = '（用户发来一张图片，已由读图模型提取）图片内容：' + (fr.text || '') + (fr.fig ? '\n【图形特征】' + fr.fig : '') + '\n\n请结合图片解答或分析。'
+          petImgU._readText = (fr.text || '') + (fr.fig ? '\n【图形特征】' + fr.fig : '')
+          const kbPre = petKbHits(petDetectPlate(), t || '图片题')
+          const ask = (kbPre ? kbPre + '\n\n' : '') + '（用户发来一张图片，已由读图模型提取）图片内容：' + (fr.text || '') + (fr.fig ? '\n【图形特征】' + fr.fig : '') + '\n\n请结合图片解答或分析。'
           const c = petFastCfg()
           if (!c) throw new Error('未配置文字模型 Key')
           const msgs = [{ role: 'system', content: petPersona() }, { role: 'user', content: ask }]

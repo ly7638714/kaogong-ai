@@ -1,7 +1,7 @@
 {
   "name": "xingce-ai-assistant",
   "private": true,
-  "version": "3.8.96",
+  "version": "3.8.97",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -33,7 +33,7 @@
     "prettier": "^3.9.6",
     "vite": "^5.3.3",
     "vite-plugin-pwa": "^0.20.0",
-    "vitest": "^4.1.11"
+    "vitest": "^2.1.9"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

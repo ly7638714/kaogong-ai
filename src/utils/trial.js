@@ -4,7 +4,8 @@
 const CFG = {
   enabled: import.meta.env.VITE_TRIAL_MODE === 'true',
   code: String(import.meta.env.VITE_TRIAL_CODE || '').trim(),
-  expires: String(import.meta.env.VITE_TRIAL_EXPIRES || '').trim()
+  expires: String(import.meta.env.VITE_TRIAL_EXPIRES || '').trim(),
+  slots: String(import.meta.env.VITE_TRIAL_SLOTS || '').trim()
 }
 const LS_KEY = 'xc_trial_unlocked_v1'
 
@@ -17,6 +18,10 @@ function parseExpires() {
   // ISO 带 T/时区 直接解析；纯日期 'YYYY-MM-DD' 做兼容替换
   const d = raw.includes('T') ? new Date(raw) : new Date(raw.replace(/-/g, '/'))
   return d.getTime()
+}
+export function trialSlotsText() {
+  if (!CFG.enabled || !CFG.slots) return ''
+  return String(CFG.slots)
 }
 export function trialExpiresText() {
   const t = parseExpires()
