@@ -10,6 +10,21 @@ export function downloadBlob(blob, n) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000)
 }
 
+
+// v3.8.182 PDF 截图式打印：把一组渲染好的 PNG(dataURL) 排成多页打印
+export function printImages(title, pages) {
+  const w = window.open('', '_blank')
+  if (!w) throw new Error('浏览器拦截了新窗口，请允许弹窗后重试')
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>' + String(title || '导出').replace(/[<>&"]/g, '') + '</title>' +
+    '<style>@page{size:A4;margin:10mm}body{margin:0;background:#fff;text-align:center}.pg{page-break-after:always}.pg img{max-width:100%;height:auto;display:block;margin:0 auto}</style></head><body>' +
+    (pages || []).map((src, i) => '<div class="pg"><img src="' + src + '" alt="p' + (i + 1) + '"/></div>').join('') +
+    '</body></html>'
+  w.document.open()
+  w.document.write(html)
+  w.document.close()
+  setTimeout(() => { try { w.focus(); w.print() } catch (e) {} }, 600)
+}
+
 export function downloadText(text, n, mime) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain;charset=utf-8' }))

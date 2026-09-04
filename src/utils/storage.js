@@ -5,6 +5,8 @@ export const KEYS = {
   MY_MEM: 'xc_my_mem', NOTES: 'xc_notes', PAPERS: 'xc_papers',
   PAPER_RESULTS: 'xc_paper_results', EP_PAPERS: 'xc_ep_papers',
   EP_QUIZCOL: 'xc_ep_quizcol', EP_RESULTS: 'xc_ep_results', QUIZ_COL: 'xc_quiz_col',
+  ATTEMPTS: 'xc_attempts', // 作答事件流（35号批次1-B）：统一作答明细，驱动难度校准/薄弱点加权/Elo
+  FLAG_QS: 'xc_flag_qs', // 疑题反馈（37号 正确性加固B）：用户认为有问题的题，用于降权/人工复核
   COST: 'xc_cost', SRS: 'xc_srs', STUDY: 'xc_study', PET: 'xc_pet',
   TASKS: 'xc_tasks', QUIZ_LOG: 'xc_quiz_log', DATA: 'xc_data',
   STREAK: 'xc_streak', WQ_REASONS: 'xc_wq_reasons', EXAM_INFO: 'xc_exam_info',
@@ -21,7 +23,8 @@ export const KEYS = {
   DRAFT_FAB_ON: 'xc_draft_fab_on', DRAFT_OPACITY: 'xc_draft_opacity',
   GLOBAL_FAB: 'xc_global_fab', CHAT_TOOLS: 'xc_chat_tools',
   BL_POS: 'xc_bl_pos', ONBOARDED: 'xc_onboarded', GUIDED: 'xc_guided',
-  GUIDES_OFF: 'xc_guides_off'
+  GUIDES_OFF: 'xc_guides_off',
+  PENDING_PAPER: 'xc_pending_paper' // 组卷断点续出：完整性拦截/中途中断后保留的成功题草稿
 }
 export function safeGet(key, fallback) {
   try {

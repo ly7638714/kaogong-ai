@@ -2,6 +2,7 @@ import { qualityMatrixText } from './qualityMatrix'
 // 智能训练：板块映射 + 出题/变式/诊断 系统提示词
 import { SYS } from '../kb'
 import { buildProfessorPrompt, SUB_PROFILE } from './professor'
+import { kpointEnumText } from '../utils/kpointLib' // 35号批次1-A：考点枚举取值约束
 const QUIZ_SYS = '你是资深公考命题专家，精通行测各板块（言语/判断/数量/资料/常识/政治）真题命题规律与命题人陷阱设计。'
 
 
@@ -73,15 +74,25 @@ export function buildQuizSys(opts = {}) {
   const prof = buildProfessorPrompt(plate, difficulty, variant)
   let qmText = ''
   try { qmText = qualityMatrixText(plate, variant) } catch (e) {}
+  let kpEnum = ''
+  try { kpEnum = kpointEnumText(plate) } catch (e) {}
+  const kpHint = kpEnum
+    ? '\n\n【考点自标（最后单独一行，仅元数据不算正文）】在【正确答案】行之后，最后再单独输出一行：\n【考点】<大类>·<细分>\n取值必须来自本板块枚举之一：' + kpEnum + '\n必须与本题实际考核知识点一致；无法命中枚举时允许以「·综合」兜底，禁止留空、禁止输出考点讲解。'
+    : ''
+  // 35号批次2-A：难度校准注入（由调用方按题类实测正确率算出，纯文本追加在结尾，零新 API 调用）
+  const calib = opts.calib || ''
   return (
     QUIZ_SYS +
     '\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n【本次任务·模拟出题（命题专家模式）】\n' +
     prof +
     '\n\n【本次出题输出要求（严格，只出题勿多写）】\n' +
     '只输出题目本体：题干（含【问法】单独一行，真题提问方式）+ 4 个选项（A. … B. … C. … D. …）+ 单独一行【正确答案】X。\n' +
-    '绝不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。\n' +
+    '绝不要输出解析/考点讲解/秒杀规律/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题；唯一的考点例外见文末【考点自标】）。\n' +
     '图推/几何/立体/统计图题必须在题干【图形】区输出标准 SVG 代码块（```svg …```）承载真实图形，紧接一行【问法】。\n' +
-    '若本题为逻辑判断·真假话：在末尾单独追加【验证数据】一行 JSON（{"exprs":[...],"trueCount":n,"opts":[...],"ans":"X"}），供程序真值表硬校验，必须与题目完全一致。' + (qmText ? '\n\n' + qmText : '')
+    '若本题为逻辑判断·真假话：在末尾单独追加【验证数据】一行 JSON（{"exprs":[...],"trueCount":n,"opts":[...],"ans":"X"}），供程序真值表硬校验，必须与题目完全一致。' +
+    (qmText ? '\n\n' + qmText : '') +
+    kpHint +
+    (calib ? '\n\n' + calib : '')
   )
 }
 

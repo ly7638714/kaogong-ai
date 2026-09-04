@@ -1,8 +1,10 @@
 <script setup>
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
-import { toRefs, computed } from 'vue'
+import { toRefs, computed, watch } from 'vue'
 import { SUB_DICT } from '../utils/askAssist'
+import { SUB_VARIANTS } from './examData' // 题型池与 AI出题共用同一张表（板块/细分→题型 一一对应）
+import { richMd } from '../utils/wrongText' // 错题渲染净化（字面换行/空svg围栏修复后再渲染）
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -23,14 +25,55 @@ const {
   subjList
 } = toRefs(props.ctx)
 // 当前板块下的题型选项（供题型筛选下拉）
+// 与 AI出题 ②细分板块 一致：言语 细分=片段阅读/篇章阅读，题型池用 SUB_VARIANTS[言语理解]
+function variantPoolOf(subj) {
+  if (!subj) return null
+  if (subj === '片段阅读' || subj === '篇章阅读') return SUB_VARIANTS['言语理解'] || null
+  const p = SUB_VARIANTS[subj]
+  return p && p.length ? p : null
+}
 const subOpts = computed(() => {
-  if (!fSubj.value) return []
-  const m = SUB_DICT[fSubj.value] || {}
-  return Object.keys(m)
+  if (fSubj.value) {
+    const pool = variantPoolOf(fSubj.value)
+    if (pool && pool.length) return pool
+    const m = SUB_DICT[fSubj.value] || {}
+    const keys = Object.keys(m)
+    if (keys.length) return keys
+  }
+  // 未选细分板块：跨板块列出现有错题的真实题型（与列表筛选同口径 wrongTypeOf）
+  const s = new Set()
+  ;((props.ctx.store && props.ctx.store.wqs) || []).forEach((q) => { if (q) { const t = props.ctx.wrongTypeOf && props.ctx.wrongTypeOf(q); if (t) s.add(t) } })
+  return [...s].sort()
+})
+// 组内细分板块（只列有错题的；六大板块→细分板块 两级）
+const groupSubs = computed(() => {
+  const push = (n) => { if (n && !list.includes(n)) list.push(n) }
+  const list = []
+  const all = (WRONG_GROUPS || [])
+  const g = all.find((x) => x.label === fGroup.value)
+  if (!g) {
+    // 未选板块：列出全部细分板块（组内细分 ∪ 实际存在的板块/别名），支持“跨板块直选细分”
+    all.forEach((xg) => (xg.subs || []).forEach(push))
+    ;(subjList.value || []).forEach((s) => { const gg = all.find((x) => x.label === s || (x.subs || []).includes(s)); if (gg) push(s) })
+    return list
+}
+  const groupOf = (s) => { const gg = all.find((x) => x.label === s || (x.subs || []).includes(s)); return gg ? gg.label : '' }
+  ;(g.subs || []).forEach(push)
+  ;(subjList.value || []).forEach((s) => { if (groupOf(s) === g.label) push(s) })
+  return list.filter((n) => (subjList.value || []).includes(n) || (g.subs || []).includes(n) || n === g.label)
+})
+
+// 细分板块被直接选中时（即使板块=全部），自动反同步其所属大板块，保证筛选语义与下拉一致
+watch(fSubj, (v) => {
+  if (!v) return
+  const all = (WRONG_GROUPS || [])
+  const g = all.find((x) => x.label === v || (x.subs || []).includes(v))
+  if (g && fGroup.value !== g.label) fGroup.value = g.label
 })
 
 const {
   PAGE,
+  fGroup, WRONG_GROUPS,
   dedupeNow,
   jumpTo,
   loadMore,
@@ -63,13 +106,20 @@ const {
       <!-- 筛选 + 快速定位 -->
       <div id="wqFilters" class="wq-filters">
         <input v-model="kw" class="wq-search" placeholder="🔍 搜题干 / 选项 / 答案 / 错因 / 秒杀 / 笔记…" />
-        <select v-model="fSubj">
-          <option value="">全部板块</option>
-          <option v-for="s in subjList" :key="s" :value="s">{{ s }}</option>
+<select v-model="fGroup" title="先选六大板块">
+          <option value="">全部板块（六大板块）</option>
+          <option v-for="g in WRONG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
+          <option v-if="fGroup && !WRONG_GROUPS.some((g) => g.label === fGroup)" :value="fGroup">◉ {{ fGroup }}</option>
         </select>
-        <select v-model="fSub" :disabled="!fSubj" title="先选板块再筛题型">
+        <select v-model="fSubj" title="细分板块：不选板块时可跨板块直选细分（选后自动归位所属大板块）">
+          <option value="">全部细分板块（不选板块=跨全部板块筛细分）</option>
+          <option v-for="s in groupSubs" :key="s" :value="s">{{ s }}</option>
+          <option v-if="fSubj && !groupSubs.includes(fSubj)" :value="fSubj">⏺ {{ fSubj }}</option>
+        </select>
+        <select v-model="fSub" title="题型：选了细分板块则列该板块题型；否则跨板块按题型筛">
           <option value="">全部题型</option>
           <option v-for="s in subOpts" :key="s" :value="s">{{ s }}</option>
+          <option v-if="fSub && !subOpts.includes(fSub)" :value="fSub">⏺ {{ fSub }}</option>
         </select>
         <select v-model="fRev">
           <option value="all">全部状态</option>
@@ -116,7 +166,7 @@ const {
           <div v-if="(q.imgs || []).length" class="wq-thumb">
             <img :src="q.imgs[0]" alt="原题截图" />
           </div>
-          <div class="wq">{{ q.question }}</div>
+          <div class="wq" v-html="richMd(String(q.question || ''))"></div>
           <div v-if="q.reasons && q.reasons.length" class="wr">
             <span v-for="r in q.reasons" :key="r">{{ r }}</span>
           </div>

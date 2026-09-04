@@ -1,0 +1,227 @@
+{
+  "_meta": {
+    "source": "public/zhenti 真题库（index.json 顺序）",
+    "rule": "按步长均匀抽样每板块固定10题，永不更换",
+    "note": "真题库未收录政治理论独立板块；判断推理未分细分子板块",
+    "counts": {
+      "常识判断": 505,
+      "言语理解": 1024,
+      "数量关系": 341,
+      "判断推理": 1013,
+      "资料分析": 700
+    },
+    "generatedAt": "2026-09-04"
+  },
+  "anchors": {
+    "常识判断": [
+      {
+        "paper": "2017-fushu-t2ii",
+        "n": 1
+      },
+      {
+        "paper": "2018-fushu-12ff",
+        "n": 17
+      },
+      {
+        "paper": "2019-dishi-69qn",
+        "n": 13
+      },
+      {
+        "paper": "2021-fushu-16x4",
+        "n": 9
+      },
+      {
+        "paper": "2022-dishi-arfp",
+        "n": 5
+      },
+      {
+        "paper": "2023-dishi-ay69",
+        "n": 1
+      },
+      {
+        "paper": "2024-fushu-17hb",
+        "n": 17
+      },
+      {
+        "paper": "2024-guizhou-plmh",
+        "n": 13
+      },
+      {
+        "paper": "2025-guizhou-ldyl",
+        "n": 19
+      },
+      {
+        "paper": "2026-guizhou-h6ap",
+        "n": 20
+      }
+    ],
+    "言语理解": [
+      {
+        "paper": "2017-fushu-t2ii",
+        "n": 21
+      },
+      {
+        "paper": "2018-fushu-12ff",
+        "n": 55
+      },
+      {
+        "paper": "2019-dishi-69qn",
+        "n": 48
+      },
+      {
+        "paper": "2021-fushu-16x4",
+        "n": 42
+      },
+      {
+        "paper": "2022-dishi-arfp",
+        "n": 36
+      },
+      {
+        "paper": "2023-dishi-ay69",
+        "n": 29
+      },
+      {
+        "paper": "2024-dishi-b4ws",
+        "n": 23
+      },
+      {
+        "paper": "2025-fushu-17o2",
+        "n": 40
+      },
+      {
+        "paper": "2026-fushu-17us",
+        "n": 37
+      },
+      {
+        "paper": "2026-guizhou-h6ap",
+        "n": 46
+      }
+    ],
+    "数量关系": [
+      {
+        "paper": "2017-fushu-t2ii",
+        "n": 61
+      },
+      {
+        "paper": "2018-fushu-12ff",
+        "n": 74
+      },
+      {
+        "paper": "2020-fushu-16qd",
+        "n": 62
+      },
+      {
+        "paper": "2021-fushu-16x4",
+        "n": 74
+      },
+      {
+        "paper": "2022-xingzheng-lhp9",
+        "n": 62
+      },
+      {
+        "paper": "2023-xingzheng-1na1",
+        "n": 65
+      },
+      {
+        "paper": "2024-xingzheng-q1aa",
+        "n": 68
+      },
+      {
+        "paper": "2025-dishi-bbnc",
+        "n": 72
+      },
+      {
+        "paper": "2026-fushu-17us",
+        "n": 76
+      },
+      {
+        "paper": "2026-guizhou-h6ap",
+        "n": 60
+      }
+    ],
+    "判断推理": [
+      {
+        "paper": "2017-fushu-t2ii",
+        "n": 76
+      },
+      {
+        "paper": "2018-dishi-6304",
+        "n": 73
+      },
+      {
+        "paper": "2020-fushu-16qd",
+        "n": 79
+      },
+      {
+        "paper": "2021-fushu-16x4",
+        "n": 114
+      },
+      {
+        "paper": "2022-dishi-arfp",
+        "n": 107
+      },
+      {
+        "paper": "2023-dishi-ay69",
+        "n": 104
+      },
+      {
+        "paper": "2024-dishi-b4ws",
+        "n": 104
+      },
+      {
+        "paper": "2025-dishi-bbnc",
+        "n": 81
+      },
+      {
+        "paper": "2026-fushu-17us",
+        "n": 102
+      },
+      {
+        "paper": "2026-guizhou-h6ap",
+        "n": 90
+      }
+    ],
+    "资料分析": [
+      {
+        "paper": "2017-fushu-t2ii",
+        "n": 116
+      },
+      {
+        "paper": "2018-dishi-6304",
+        "n": 129
+      },
+      {
+        "paper": "2020-dishi-adym",
+        "n": 126
+      },
+      {
+        "paper": "2022-dishi-arfp",
+        "n": 124
+      },
+      {
+        "paper": "2023-xingzheng-1na1",
+        "n": 122
+      },
+      {
+        "paper": "2024-guizhou-plmh",
+        "n": 99
+      },
+      {
+        "paper": "2025-dishi-bbnc",
+        "n": 117
+      },
+      {
+        "paper": "2025-guizhou-ldyl",
+        "n": 105
+      },
+      {
+        "paper": "2026-dishi-bidw",
+        "n": 122
+      },
+      {
+        "paper": "2026-guizhou-h6ap",
+        "n": 110
+      }
+    ]
+  }
+}

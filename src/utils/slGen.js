@@ -193,6 +193,56 @@ const GENS = [
       explain: `总人数必须是 ${b} 的倍数（${a}/${b}×总人数须为整数），只有 ${total} 满足。`,
       cardId: 'sl-zc'
     }
+  },
+  // 10 浓度问题（构造性可算：浓度=盐/(盐+水)）
+  (seed, rnd) => {
+    const salt = 3 + Math.floor(rnd() * 12)
+    const water = 12 + Math.floor(rnd() * 40)
+    const c = Math.round((salt / (salt + water)) * 1000) / 10
+    if (c <= 0 || c >= 100) return null
+    const raw = [c, Math.round((water / (salt + water)) * 1000) / 10, Math.round((salt / water) * 1000) / 10, c + 5]
+    const opts = raw.map((x) => (x <= 0 || x >= 100 ? null : x + '%')).filter(Boolean)
+    if (opts.length !== 4 || !distinct(opts)) return null
+    const sh = SHUFFLE(opts, 0, rnd)
+    return {
+      stem: '将 ' + salt + ' 克盐完全溶解在 ' + water + ' 克水中（体积近似相加），所得盐水的浓度约为（　）。',
+      opts: sh.opts, answer: sh.answer,
+      explain: '浓度=盐/(盐+水)=' + salt + '/' + (salt + water) + '=' + c + '%。',
+      cardId: 'sl-nd'
+    }
+  },
+  // 11 年龄问题（年龄差不变，最小整数倍年数程序求解）
+  (seed, rnd) => {
+    const kid = 2 + Math.floor(rnd() * 12)
+    const diff = 20 + Math.floor(rnd() * 10)
+    const dad = kid + diff
+    let n = -1
+    for (let t = 1; t <= 30; t++) { if ((dad + t) % (kid + t) === 0) { n = t; break } }
+    if (n <= 0) return null
+    const opts = [n, n + 1, n + 2, Math.max(1, n - 1)]
+    if (!distinct(opts)) return null
+    const sh = SHUFFLE(opts, 0, rnd)
+    return {
+      stem: '父亲今年 ' + dad + ' 岁，儿子今年 ' + kid + ' 岁。至少再过多少年，父亲的年龄是儿子年龄的整数倍？',
+      opts: sh.opts.map(fmt), answer: sh.answer,
+      explain: '年龄差 ' + diff + ' 岁不变；需 (' + dad + '+n) 是 (' + kid + '+n) 的整数倍，最小正整数 n=' + n + '。',
+      cardId: 'sl-nl'
+    }
+  },
+  // 12 抽屉原理·最不利（保证同色：颜色数+1）
+  (seed, rnd) => {
+    const colors = ['黑', '白', '红']
+    const cnt = colors.map(() => 2 + Math.floor(rnd() * 6))
+    const opts = [colors.length + 1, colors.length, colors.length + 2, Math.max(2, colors.length - 1)]
+    if (!distinct(opts)) return null
+    const sh = SHUFFLE(opts, 0, rnd)
+    const txt = colors.map((c, i) => c + '球 ' + cnt[i] + ' 个').join('、')
+    return {
+      stem: '袋中有 ' + txt + '，形状大小完全相同。至少摸出多少个球，才能保证其中有两个球颜色相同？',
+      opts: sh.opts.map(fmt), answer: sh.answer,
+      explain: '最不利情形：前 3 个恰好各一种颜色；第 4 个必与其中之一同色（抽屉原理），答案 ' + (colors.length + 1) + '。',
+      cardId: 'sl-zd'
+    }
   }
 ]
 
@@ -204,13 +254,40 @@ export function genSlQuestion(seed) {
       const q = GENS[Math.floor(rnd() * GENS.length)](s + i, rnd)
       if (q && q.opts && distinct(q.opts) && q.opts.length === 4) {
         const explain = q.explain + '\n\n📌 本题为本地训练生成（构造性答案，非真题）' + (SL_CARD_NAMES[q.cardId] ? ' · 对应知识卡：' + SL_CARD_NAMES[q.cardId] : '')
-        return { stem: q.stem, options: q.opts, answer: q.answer, explain, cardId: q.cardId, variant: '本地题库' }
+        return { stem: q.stem, options: q.opts.map((t, i) => ({ k: 'ABCD'[i], t: String(t) })), answer: q.answer, explain, cardId: q.cardId, variant: '本地题库' }
       }
     } catch (e) { /* 换种子重试 */ }
   }
   return null
 }
 
+
+// 细分题型→本地族（在库内则本地确定性出题：构造性答案正确、陷阱可控、场景真实；不在库返回 null 走 AI）
+const VARIANT_BANK = {
+  '工程问题': ['sl-gc'],
+  '行程问题': ['sl-xc'],
+  '概率问题': ['sl-gl'],
+  '容斥问题': ['sl-rc'],
+  '利润问题': ['sl-jlr'],
+  '经济利润': ['sl-jlr'],
+  '排列组合': ['sl-pl'],
+  '几何问题': ['sl-jh'],
+  '最值问题': ['sl-zd'],
+  '和差倍比': ['sl-hcb']
+}
+export function genSlQuestionFor(variant) {
+  const ids = VARIANT_BANK[String(variant || '')]
+  if (!ids || !ids.length) return null
+  const base = (Date.now() % 99991) + Math.floor(Math.random() * 1000)
+  for (let k = 0; k < 40; k++) {
+    const q = genSlQuestion(base + k * 131)
+    if (q && ids.includes(q.cardId)) {
+      q.variant = String(variant)
+      return q
+    }
+  }
+  return null
+}
 // 知识卡名映射（对应 src/kb/cards-shuliang.js 的 sl-* 卡）
 const SL_CARD_NAMES = {
   'sl-fc': '方程思想', 'sl-hcb': '和差倍比', 'sl-jjq': '基期计算（百化分）', 'sl-zll': '增长量（百化分）',

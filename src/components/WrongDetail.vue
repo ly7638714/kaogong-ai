@@ -1,8 +1,9 @@
 <script setup>
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
-import { toRefs } from 'vue'
-import { downloadMdScreenshot } from '../utils/capture'
+import { toRefs, computed } from 'vue'
+import { richMd, snippet } from '../utils/wrongText' // 错题渲染净化
+import { downloadMdScreenshot, downloadLiveScreenshot } from '../utils/capture'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -59,7 +60,8 @@ const {
   del,
   downloadImg,
   gotoChat,
-  md,
+  openRedo,
+  repairFig,
   openRelated,
   openRename,
   removeReason,
@@ -81,12 +83,31 @@ const {
 } = props.ctx
 
 // 错题详情：完整题目 / 完整解析 截图导出
-function capWrongQuestion() {
+// 图推错题若入库时图形缺失（仅占位符）→ 提示一键本地重建
+const missingFig = computed(() => {
+  const q = store.wqs && store.wqs[cur.value]
+  if (!q) return false
+  if (String(q.subject || '') !== '图形推理') return false
+  const txt = String(q.question || q.q || q.stem || '')
+  return !/<svg|```svg|\[ECHARTS\]|<img|!\[/.test(txt)
+})
+async function capWrongQuestion() {
   const wq = store.wqs[cur.value]
   if (!wq) return
+  // v3.8.170 优先所见即所得：截取详情页真实渲染的题目节点（题干/图形/选项完整、主题一致）
+  const live = document.querySelector('.ov.show .paper-q')
+  const title = '行测 · 错题原题'
+  const sub = (wq.subject || '未分类') + (wq.time ? ' · ' + wq.time : '')
+  const name = '错题原题_' + (cur.value + 1)
+  if (live) {
+    try { const ok = await downloadLiveScreenshot(live, { title, sub, name }); if (ok) return } catch (e) {}
+  }
+  // 回退：按完整原文渲染导出（材料题组解析不出选项时用 raw 全文）
   const opts = (paperView.value.opts || []).map((o) => o.k + '. ' + o.t).join('\n\n')
-  const md = (paperView.value.stem || wq.question || '') + (opts ? '\n\n' + opts : '')
-  downloadMdScreenshot({ title: '行测 · 错题原题', sub: (wq.subject || '未分类') + (wq.time ? ' · ' + wq.time : ''), md, name: '错题原题_' + (cur.value + 1) })
+  const hasOpts = (paperView.value.opts || []).length
+  const srcMd = hasOpts ? (paperView.value.stem || wq.question || '') : String(wq.question || wq.q || wq.stem || '')
+  const md = srcMd + (opts ? '\n\n' + opts : '')
+  downloadMdScreenshot({ title, sub, md, name })
 }
 function capWrongExplain() {
   const wq = store.wqs[cur.value]
@@ -116,6 +137,7 @@ function capWrongExplain() {
           <div class="pnl-sub">
             {{ store.wqs[cur].subject || '未分类' }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
+            <span class="wq-goto" title="以答题界面（可作答+即时判题）重做本题" @click.self.stop="openRedo()">✍️ 答题界面重做</span>
             <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>
             <span class="wq-goto" @click.self.stop="ankiPush()">🃏 推到 Anki</span>
           </div>
@@ -130,10 +152,15 @@ function capWrongExplain() {
               @click="viewImg(im)"
             />
           </div>
-          <div class="paper-q">
-            <div class="paper-stem" v-html="md(paperView.stem)"></div>
+                    <div v-if="missingFig" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:rgba(255,180,0,.12);border:1px solid rgba(255,180,0,.5);color:#f5b842;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12.5px">
+            ⚠️ 该题入库时未保存图形（只有占位符）。可本地一键重建（图形/选项/答案，确定性零额度）：
+            <button class="btn btn-pri" style="padding:4px 12px" @click="repairFig()">🛠 重建本题</button>
+            <button class="btn btn-gh" style="padding:4px 12px" @click="gotoChat()">↩ 回原对话看原图</button>
+          </div>
+<div class="paper-q">
+            <div class="paper-stem" v-html="richMd(paperView.stem)"></div>
             <div v-if="paperView.opts.length" class="paper-opts">
-              <div v-for="o in paperView.opts" :key="o.k" class="paper-opt">{{ o.k }}. {{ o.t }}</div>
+              <div v-for="o in paperView.opts" :key="o.k" class="paper-opt"><b>{{ o.k }}.</b> <span v-html="richMd(String(o.t || ''))"></span></div>
             </div>
           </div>
           <div class="wq-cap-acts">
@@ -243,7 +270,7 @@ function capWrongExplain() {
               <div class="related-hd">🔗 同类错题（同板块·同错因 {{ relatedQs.length }}）—— 连看吃透</div>
               <div v-for="(rq, ri) in relatedQs" :key="ri" class="related-it" @click="openRelated(rq.i)">
                 <span class="related-sub">{{ rq.x.subject }}</span>
-                <span class="related-q">{{ (rq.x.question || '').replace(/<[^>]+>/g, ' ').slice(0, 60) }}</span>
+                <span class="related-q">{{ snippet((rq.x.question || ''), 60) }}</span>
                 <span class="related-w">错 {{ rq.x.wrongCount || 1 }} 次</span>
               </div>
             </div>
@@ -272,7 +299,7 @@ function capWrongExplain() {
       <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeImg()">✕ 关闭</button>
     </div>
   </div>
-  <div v-if="vtShow" class="ov redo-ov show" style="z-index: 320" @click.self="vtClose()">
+  <div v-if="vtShow" class="ov redo-ov show" style="z-index: 500" @click.self="vtClose()">
     <div class="pnl redo-pnl">
       <h3>🔁 变式训练
         <span v-if="vtMode === 'do'" class="vt-prog">{{ vtIdx + 1 }} / {{ vtQueue.length }}</span>
@@ -308,7 +335,7 @@ function capWrongExplain() {
           </div>
           <div class="redo-subj">{{ vtQ.subject }} · {{ vtQ.source === 'ai' ? 'AI 变式' : '错题集同类' }}</div>
           <div class="paper-q">
-            <div class="paper-stem" v-html="md(vtQ.stem)"></div>
+            <div class="paper-stem" v-html="richMd(vtQ.stem)"></div>
             <div v-if="(vtQ.options || []).length >= 2" class="paper-opts">
               <button
                 v-for="o in vtQ.options"
@@ -316,7 +343,7 @@ function capWrongExplain() {
                 class="paper-opt"
                 :class="{ sel: vtPick === o.k }"
                 @click="vtChoose(o.k)"
-              >{{ o.k }}. {{ o.t }}</button>
+              >{{ o.k }}. <span v-html="richMd(String(o.t || ''))"></span></button>
             </div>
             <div v-else class="redo-btns">
               <button class="btn btn-pri" :class="{ sel: vtPick === '对' }" @click="vtChoose('对')">✅ 我答对了</button>
@@ -343,11 +370,11 @@ function capWrongExplain() {
           <div class="vt-r-hd" @click="vtToggleOpen(i)">
             <span class="vt-r-no">{{ i + 1 }}</span>
             <span class="vt-r-badge" :class="vtResultOf(i)">{{ vtResultOf(i) === 'ok' ? '✓' : '✗' }}</span>
-            <span class="vt-r-q">{{ q.stem.slice(0, 70) }}</span>
+            <span class="vt-r-q">{{ snippet((q.stem || ''), 70) }}</span>
             <span class="vt-r-mine">我选 {{ vtAnswers[i] }} · 答案 {{ q.answer }}</span>
           </div>
           <div v-if="vtOpen[i]" class="vt-r-detail">
-            <div class="vt-r-ex">{{ q.explain }}</div>
+            <div class="vt-r-ex" v-html="richMd(String((q && q.explain) || ''))"></div>
             <button v-if="vtResultOf(i) === 'no' && q.source === 'ai'" class="btn btn-pri" @click="vtAddWrong(i)">📌 加入错题集</button>
             <span v-else-if="vtResultOf(i) === 'no'" class="cr-tip">错题集同类题已在错题本中</span>
           </div>
@@ -356,7 +383,7 @@ function capWrongExplain() {
         <div class="vt-step6" :class="{ hard: vtAllWrong }">
           <div class="vt-step6-t">📌 第 6 步 · 回到原题深度巩固 <span class="cr-tip">记骨架，不记答案</span></div>
           <div class="paper-q">
-            <div class="paper-stem" v-html="md(coreOrigMd)"></div>
+            <div class="paper-stem" v-html="richMd(coreOrigMd)"></div>
           </div>
           <div v-if="coreCard" class="core-card">
             <div class="core-hd">🧠 {{ coreCard.subject }} · 记忆核心要点（{{ coreCard.tag }}）</div>
@@ -379,7 +406,7 @@ function capWrongExplain() {
             </div>
             <div v-for="(q, i) in vtQueue" :key="i" class="vt-c-col">
               <div class="vt-c-hd">🔁 变式{{ i + 1 }}</div>
-              <div class="vt-c-q">{{ q.stem.slice(0, 240) }}</div>
+              <div class="vt-c-q">{{ snippet((q.stem || ''), 240) }}</div>
             </div>
           </div>
           <button class="btn btn-pri" :disabled="vtCmpBusy" @click="vtDeepCompare()">{{ vtCmpBusy ? '⏳ 对比中…' : '🧠 AI 横向比较复盘' }}</button>

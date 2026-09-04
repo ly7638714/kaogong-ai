@@ -1,4 +1,5 @@
 <script setup>
+import { richMd } from '../utils/wrongText'
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
 import { toRefs } from 'vue'
@@ -35,7 +36,7 @@ const {
     <div class="pnl redo-pnl">
       <h3>✍️ {{ (redoQ.redoHistory || []).length ? '三刷' : '二刷' }}重做 <span class="redo-timer">⏱ {{ fmtT(redoT) }}</span></h3>
       <div class="redo-subj">{{ store.wqs[cur].subject || '未分类' }}</div>
-      <div class="redo-q">{{ store.wqs[cur].question }}</div>
+      <div class="redo-q" v-html="richMd(String((store.wqs[cur] || {}).question || ''))"></div>
       <div v-if="(store.wqs[cur].imgs || []).length" class="wq-imgs">
         <img v-for="(im, j) in store.wqs[cur].imgs" :key="j" class="wq-img" :src="im" />
       </div>
@@ -49,7 +50,7 @@ const {
             :class="{ picked: redoPick === o.k, right: redoPick === o.k && o.k === redoAnswer, wrong: redoPick === o.k && o.k !== redoAnswer }"
             @click="submitByChoice(o.k)"
           >
-            <span class="qk">{{ o.k }}</span><span class="qt">{{ o.t }}</span>
+            <span class="qk">{{ o.k }}</span><span class="qt" v-html="richMd(String(o.t || ''))"></span>
           </button>
         </div>
         <div v-else class="redo-btns">

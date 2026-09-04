@@ -1,16 +1,18 @@
 <script setup>
 
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted, nextTick } from 'vue'
 import { store, saveWqs, addWrong, dedupeWrongs } from '../store'
 import { showToast } from '../utils/toast'
 import { useAi } from '../utils/useAi'
-import { emit as evEmit } from '../utils/events'
 const { run: aiRun } = useAi()
 import { safeGet, safeSet, KEYS } from '../utils/storage'
 import { exportObsidianMd, copyObsidianWrong, exportAnkiCsv } from '../utils/export'
 import { chatOnce, supportsVision } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
 import { renderMd } from '../utils/renderMd'
+import { mountCharts } from '../utils/chartMount' // 统计图(ECharts)：错题详情/重做/卡片等视图渲染后也要挂载
+import { cleanTextKeepFigures } from '../utils/wrongText'
+import { genTutuQuestion } from '../utils/tutuGen' // 图推缺失图形时的本地确定性重建
 const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
@@ -40,13 +42,13 @@ function loadVault() {
 loadVault()
 function saveVaultPapers() { safeSet(KEYS.PAPERS, qcPapers.value) }
 function saveVaultQuiz() { safeSet(KEYS.QUIZ_COL, qcQuiz.value) }
-function redoPaper(p) { evEmit('xc-open-paper-data', p) }
+function redoPaper(p) { store.pendingOpenPaper = p || null }
 function redoQuizCol(c) {
   const p = {
     id: Date.now() + Math.random(), name: '二刷 · ' + c.subject, ts: Date.now(),
     questions: [{ subject: c.subject, difficulty: c.difficulty, variant: c.variant, stem: c.stem, options: (c.options || []).map((o) => ({ ...o })), answer: c.answer, explain: c.explain || '', designer: c.designer || '', picked: null, correct: null, timeout: false, err: false }]
   }
-  evEmit('xc-open-paper-data', p)
+  store.pendingOpenPaper = p
 }
 function downloadText(t, n) {
   const a = document.createElement('a')
@@ -84,6 +86,7 @@ function reasonsFor(subject) {
 }
 // 筛选状态
 const fSubj = ref(''),
+  fGroup = ref(''), // 六大板块分组筛选（判断推理=图推/定义/类比/逻辑 等）
   fRev = ref('all'),
   fReason = ref(''),
   fSub = ref('') // 题型（板块下的具体子类，如 论证推理→加强/削弱）筛选
@@ -91,6 +94,24 @@ const ALL_SUBJ = [
   '判断推理', '言语理解', '资料分析', '数量关系', '常识判断', '政治理论',
   '定义判断', '类比推理', '图形推理'
 ]
+// 错题筛选分组：六大板块 → 细分板块（与出题 SIX_GROUPS 同构）
+const WRONG_GROUPS = [
+  { label: '判断推理', subs: ['图形推理', '定义判断', '类比推理', '逻辑判断'] },
+  { label: '言语理解', subs: ['片段阅读', '篇章阅读'] }, // 与 AI出题 ②细分板块 同构（旧数据无细分时归 言语理解 整体）
+  { label: '数量关系', subs: ['数量关系'] },
+  { label: '资料分析', subs: ['资料分析'] },
+  { label: '常识判断', subs: ['常识判断'] },
+  { label: '政治理论', subs: ['政治理论'] },
+]
+watch(fGroup, (v) => {
+  const g = WRONG_GROUPS.find((x) => x.label === v)
+  if (!g) { fSubj.value = ''; fSub.value = ''; return }
+  // 题型强弱分布 chips 点击已自带「板块 + 细分」：若细分仍属于本组（或等于组名），不要覆盖，避免“点了没反应”
+  const inside = fSubj.value && (fSubj.value === g.label || (g.subs || []).includes(fSubj.value))
+  if (inside) return
+  const subs = g.subs.filter((s) => subjList.value.includes(s))
+  if (subs.length === 1) { fSubj.value = subs[0]; fSub.value = '' } else { fSubj.value = ''; fSub.value = '' }
+})
 const subjList = computed(() => {
   // 固定全部板块（含暂未收纳的），确保能查看/筛选各板块错题集
   const s = new Set(ALL_SUBJ)
@@ -107,6 +128,16 @@ const stats = computed(() => {
     r = store.wqs.filter((q) => q.reviewed).length
   return { t, rev: r, pend: t - r }
 })
+// 错题→细分板块（六大板块口径，与 AI出题一致）：新记录带 q.subx；旧记录按 subject 归位
+//  - 言语理解 组的细分=片段阅读/篇章阅读；历史数据只有 subject=言语理解，无细分信息 → 归 言语理解（整体）
+function wrongSubOf(q) {
+  if (!q) return ''
+  if (q.subx) return q.subx
+  const s = String(q.subject || q.plate || '')
+  if (s === '言语理解') return '言语理解'
+  return s
+}
+// ===== 题型强弱分布（Request D Part 1）：把错题按板块→题型细分并统计 =====
 // ===== 题型强弱分布（Request D Part 1）：把错题按板块→题型细分并统计 =====
 // 优先用已存的 q.sub；旧错题无 sub 时实时用 detectSubType 推断（不修改原数据）。
 function wrongTypeOf(q) {
@@ -159,6 +190,9 @@ const typeStats = computed(() => {
 })
 // 题型筛选：点题型看板 → 设板块+题型筛选并滚动到列表；再点取消
 function setTypeFilter(plate, sub) {
+  // 同步板块分组：让顶部三连筛选与看板 chips 状态一致（chips 直接给细分/题型，组由板块反查）
+  const g = WRONG_GROUPS.find((x) => x.label === plate || (x.subs || []).includes(plate))
+  fGroup.value = g ? g.label : ''
   fSubj.value = plate
   fSub.value = sub
   kw.value = ''
@@ -169,6 +203,7 @@ function setTypeFilter(plate, sub) {
   }, 60)
 }
 function clearTypeFilter() {
+  fGroup.value = ''
   fSubj.value = ''
   fSub.value = ''
   pageN.value = 1
@@ -180,7 +215,7 @@ const PAGE = 20
 const pageN = ref(1)
 const filtered = computed(() => {
   let list = store.wqs.filter((q) => {
-    if (fSubj.value && (q.subject || '未分类') !== fSubj.value) return false
+    if (fSubj.value && wrongSubOf(q) !== fSubj.value) return false
     if (fRev.value === 'rev' && !q.reviewed) return false
     if (fRev.value === 'pend' && q.reviewed) return false
     if (fReason.value && !(q.reasons || []).includes(fReason.value)) return false
@@ -207,7 +242,7 @@ function jumpTo() {
   openRaw(store.wqs.indexOf(filtered.value[n - 1]))
   jumpN.value = ''
 }
-function resetFilters() { fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; fSub.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
+function resetFilters() { fGroup.value = ''; fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; fSub.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
 // 一键去重：完全相同的错题只保留一道
 function dedupeNow() {
   const n = dedupeWrongs()
@@ -552,10 +587,10 @@ const origStem = computed(() => {
 function wrongToVt(wq) {
   const choices = extractChoices(wq.question || '')
   return {
-    stem: String(wq.question || wq.q || wq.stem || '').replace(/<[^>]+>/g, ' ').trim(),
+    stem: cleanTextKeepFigures(wq.question || wq.q || wq.stem || ''),
     options: choices,
     answer: (choices.length >= 2 ? answerLetter(wq.answer || '') : String(wq.answer || '').trim().toUpperCase()) || 'A',
-    explain: String(wq.explain || wq.analysis || '') + (wq.method ? '\n⚡ 秒杀：' + wq.method : ''),
+    explain: String(wq.explain || wq.analysis || '') + (wq.designer ? '\n🧠 命题意图与陷阱：' + wq.designer : '') + (wq.method ? '\n⚡ 秒杀：' + wq.method : ''),
     source: 'lib', subject: wq.subject || '未分类'
   }
 }
@@ -751,18 +786,18 @@ async function vtDeepCompare() {
 }
 // 卷面化：题干与选项拆分（错题详情像卷子一样展示：题干问法 + 每选项独占一行）
 function splitPaper(text) {
-  const t = String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  // 复盘题干分区：保留 svg 围栏与表格换行（cleanTextKeepFigures），只按行首选项标记切分题干/选项
+  const t = cleanTextKeepFigures(text)
   const opts = extractChoices(t)
-  if (!opts.length) return { stem: t, opts: [] }
-  let stem = t
-  for (const o of opts) {
-    const m = stem.indexOf(o.k + '.')
-    const m2 = stem.indexOf(o.k + '．')
-    const m3 = stem.indexOf(o.k + '、')
-    const idx = [m, m2, m3].filter((x) => x >= 0).sort((a, b) => a - b)[0]
-    if (idx >= 0 && idx < stem.length - 2) { stem = stem.slice(0, idx).trim(); break }
-  }
-  stem = stem.replace(/\s+([A-D])[.、．]\s*$/, '').trim()
+  const lineRe = /^\s*[*_`]*\s*([A-D])[.、．:：]/
+  const lines = t.split('\n')
+  let first = -1
+  for (let i = 0; i < lines.length; i++) { if (lineRe.test(lines[i])) { first = i; break } }
+  let stem = ''
+  if (first > 0) stem = lines.slice(0, first).join('\n')
+  else if (first === 0) { const mm = t.match(/([A-D])[.、．:：]/); stem = mm ? t.slice(0, mm.index) : '' }
+  else stem = t
+  stem = String(stem || '').replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim()
   return { stem: stem || t, opts }
 }
 const paperView = computed(() => {
@@ -797,7 +832,7 @@ async function ankiPush() {
   if (!q) return
   try {
     const front = (q.question || '').slice(0, 1000)
-    const back = ['答案：' + (q.answer || '未填'), q.method ? '秒杀：' + q.method : '', q.note ? '笔记：' + q.note : ''].filter(Boolean).join('\n')
+    const back = ['答案：' + (q.answer || '未填'), q.designer ? '命题意图：' + q.designer : '', q.method ? '秒杀：' + q.method : '', q.note ? '笔记：' + q.note : ''].filter(Boolean).join('\n')
     const id = await ankiAddNote(front, back, q.subject)
     showToast('✅ 已推到 Anki 卡组「行测AI」（id ' + id + '）', 'success')
   } catch (e) {
@@ -986,13 +1021,36 @@ function parseByField(txt) {
 
 // R4：把全部状态/方法/常量聚合成一个 reactive ctx，注入 7 个子组件
 // 子组件用 toRefs(props.ctx) 暴露状态、直接解构暴露方法/常量，模板逐字搬入，避免双向绑定错位。
+// 图推错题入库时图形缺失 → 本地确定性重建（零额度）：保留复盘信息，替换题目/选项/答案
+function repairFig() {
+  const q = store.wqs[cur.value]
+  if (!q) { showToast('未找到该错题', 'error'); return }
+  const lq = genTutuQuestion(Math.floor(Math.random() * 90000) + 1)
+  if (!lq || !lq.stem || !(lq.options || []).length) { showToast('本地重建失败，请稍后重试', 'error'); return }
+  const before = String(q.question || q.q || q.stem || '')
+  q.question = String(lq.stem || '') + '\n\n' + (lq.options || []).map((o) => (o && o.k ? o.k + '. ' : '') + String((o && o.t) || '')).join('\n')
+  q.answer = '正确答案 ' + String(lq.answer || '') + (q.answer ? '（原记录：' + q.answer + '）' : '')
+  q.explain = q.explain || lq.explain || ''
+  q.subx = q.subx || '图形推理'
+  q.vx = q.vx || String(lq.variant || '') || ''
+  q.fixedFig = (q.fixedFig || 0) + 1
+  saveWqs()
+  showToast('✅ 已用本地确定性题库重建本题（图形/选项/答案）', 'success')
+  return before !== q.question
+}
+
+// v3.8.159：错题各视图（详情/答题重做/变式/抽认卡/今日优先）内含统计图时，渲染完成后挂载 ECharts
+watch([show, cur, rep, redo, cardShow, cardIdx, focusShow, vtShow, vtMode, vtIdx, pageN],
+  () => { nextTick(() => { try { mountCharts(document.querySelector('.page.on')) } catch (e) {} }) },
+  { flush: 'post' })
+
 const wrongCtx = reactive({
   PAGE, addCustomReason, aiBusy, aiGuideBusy, aiPolishBusy, aiPolishReason,
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
   cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
   cur, customReason, dedupeNow, del, delVaultPaper, delVaultQuiz,
-  downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj,
+  downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
   masteryOf, md, openCards, openIdx, openRedo, openRelated,
@@ -1000,14 +1058,14 @@ const wrongCtx = reactive({
   qcPapers, qcQuiz, reasonBoxOpen, reasonList, reasonModal, redo,
   redoAnswer, redoChoices, redoFeedback, redoHasChoice, redoHistory, redoPaper,
   redoPick, redoQ, redoQuizCol, redoResult, redoT, relatedQs,
-  removeReason, renameInput, rep, resetFilters, reviewGaps, save,
+  removeReason, renameInput, rep, resetFilters, repairFig, reviewGaps, save,
   setTypeFilter, show, shown, shownTotal, sortBy, startVariant, stats,
-  store, subjList, submitByChoice, submitRedo, todayFocus, toggleReason,
+  store, subjList, WRONG_GROUPS, submitByChoice, submitRedo, todayFocus, toggleReason,
   typeStats, vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
   vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,
   vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
   vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow,
-  vtStartDo, vtSubmit, vtToggleOpen, wrongTypeOf
+  vtStartDo, vtSubmit, vtToggleOpen, wrongSubOf, wrongTypeOf
 })
 </script>
 

@@ -1,8 +1,11 @@
 <script setup>
 // R3-③d：配置区子组件（从 ExamPanel.vue 的 config 阶段模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 ExamPanel 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
-import { ref, watch, toRefs } from 'vue'
+import { ref, watch, toRefs, computed } from 'vue'
 import { zhentiTypes } from '../data/zhenti'
+import { EXTRA_VARIANTS } from './examData' // 实测反馈③：自选下拉“更多/创新题型”同源扩展池
+import { readAttempts } from '../utils/attemptLog'
+import { loadPending, clearPending } from '../utils/pendingPaper' // 深化·断点续出：中断组卷草稿横幅 // 35号批次3-B：补短解锁进度
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -13,7 +16,7 @@ const {
   singleVariant, singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType,
   autoNext, imgs, textFiles, qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit,
   onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx,
-  selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates
+  selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates, retryInfo
 } = toRefs(props.ctx)
 
 // 常量 / 方法（函数与数组不被 reactive 解包，保持原引用）
@@ -21,16 +24,33 @@ const {
   TEMPLATES, SUBJECTS, SIX_GROUPS, zhentiSecs, store,
   onTemplate, templateTotal, moduleRefSec, rmRow, addRow, saveFastGenModel, saveCfg,
   onSingleGroup, onSinglePlate, setDirText, toggleZhentiPlate, toggleWrongSel, toggleFold,
-  openPaper, delPaper, startRedo, delQuizCol, clearQuizCol, onFiles, rmImg, rmTxt, fmt, cancel, start
+  openPaper, delPaper, startRedo, delQuizCol, clearQuizCol, onFiles, rmImg, rmTxt, fmt, cancel, start, retryGo, retryDismiss, resumePending
 } = props.ctx
 
 // 真题题型分布（B4：规则打标 sidecar，零成本）
 const zhentiTy = ref(null)
+// 深化·断点续出：中断组卷草稿（刷新/关闭后仍可恢复）
+const pendingDraft = ref(null)
+function refreshDraft() { try { pendingDraft.value = loadPending() } catch (e) { pendingDraft.value = null } }
+refreshDraft()
+function discardDraft() { try { clearPending() } catch (e) {} refreshDraft() }
+// 实测反馈③：把「不限」轮换池里的扩展/创新题型折叠进自选下拉（optgroup 分组，点选即固定该题型）
+const extraVars = computed(() => { try { const base = Array.isArray(singleVars.value) ? singleVars.value : []; return (EXTRA_VARIANTS[singlePlate.value] || []).filter((x) => !base.includes(x)) } catch (e) { return [] } })
 watch(srcMode, async (v) => {
   if (v === 'zhenti' && !zhentiTy.value) {
     zhentiTy.value = await zhentiTypes().catch(() => null)
   }
 }, { immediate: true })
+
+// 35号批次3-B：🎯 补短模式（薄弱点加权组卷）——冷启动门槛 板块累计作答 ≥30 才可开启（doc 35 §3.2）
+const attemptsN = computed(() => { try { return (readAttempts() || []).length } catch (e) { return 0 } })
+const strengthenUnlock = computed(() => attemptsN.value >= 30)
+const remainN = computed(() => Math.max(0, 30 - attemptsN.value))
+function toggleStrengthen(v) {
+  if (v && !strengthenUnlock.value) { return }
+  store.cfg.strengthen = !!v
+  saveCfg()
+}
 </script>
 
 <template>
@@ -44,6 +64,25 @@ watch(srcMode, async (v) => {
       <button class="fp-b" :class="{ on: srcMode === 'morning' }" @click="srcMode = 'morning'">🌅 晨练包</button>
       <button class="fp-b" :class="{ on: srcMode === 'weekRedo' }" @click="srcMode = 'weekRedo'">📅 每周重做</button>
     </div>
+    <!-- 深化·续出：组卷残缺被拦截后 → 保留已出成功题、只补失败题的横幅 -->
+    <div v-if="retryInfo" class="ep-note" style="margin: 6px 0; padding: 8px 10px; border: 1px dashed #e0a63c; background: #fff8e6">
+      ⚠️ 上次组卷有 <b>{{ retryInfo.n }}</b> 题出题失败，已被拦截（避免残缺卷作答）；已出成功的 <b>{{ retryInfo.ok }}</b> 题<b>全部保留</b>，可只补失败题：{{ retryInfo.summary }}
+      <div v-if="retryInfo.reasons && retryInfo.reasons.length" style="margin-top: 4px; color: var(--text3, #8a8a8a); max-height: 96px; overflow: auto">
+        失败原因：<template v-for="(rs, ri) in retryInfo.reasons" :key="ri"><span style="display:block; margin-top:2px">· {{ rs }}</span></template>
+      </div>
+      <div style="margin-top: 6px">
+        <button class="fp-b on" style="font-weight: 700" @click="retryGo()">🔄 只补失败 {{ retryInfo.n }} 题（保留 {{ retryInfo.ok }} 题）</button>
+        <button class="fp-b" style="margin-left: 6px" @click="retryDismiss()">✕ 放弃此卷，重新配置</button>
+      </div>
+    </div>
+    <!-- 深化·断点续出：上次中断/拦截的组卷草稿（刷新后仍在），可一键恢复并只补失败题 -->
+    <div v-if="!retryInfo && pendingDraft" class="ep-note" style="margin: 6px 0; padding: 8px 10px; border: 1px dashed #4a90d9; background: #eef5fd">
+      💾 发现一组中断的出卷草稿：<b>{{ pendingDraft.name }}</b> —— 已出成功 <b>{{ pendingDraft.ok }}</b> 题、失败 <b>{{ pendingDraft.n }}</b> 题（{{ pendingDraft.summary }}），保存于 {{ new Date(pendingDraft.savedAt).toLocaleString('zh-CN', { hour12: false }) }}
+      <div style="margin-top: 6px">
+        <button class="fp-b on" style="font-weight: 700" @click="resumePending()">▶️ 从上次中断处继续（保留 {{ pendingDraft.ok }} 题）</button>
+        <button class="fp-b" style="margin-left: 6px" @click="discardDraft()">✕ 丢弃此草稿</button>
+      </div>
+    </div>
     <div v-if="srcMode === 'morning'" class="ep-note">🌅 每日晨练包：资料速算 5 题（真题材料）+ 常识速测 5 题 + 错题本未复盘 5 题（二刷），一键生成 15 题组合卷。</div>
 
     <div class="ep-param" style="margin: 10px 0 2px">
@@ -52,6 +91,55 @@ watch(srcMode, async (v) => {
         📋 仿真考试答题卡模式（填涂姓名/考场/准考证号 + 2B铅笔逐题填涂，交卷后统一看答案与解析）
       </label>
       <span class="ep-hint">关闭 = 恢复「答完即时看对错 + 萌宠错因分析」原体验（单题快练更轻快）；开启 = 先答卷再交卷，仿真真实考试</span>
+    </div>
+
+    <div v-if="srcMode === 'ai'" class="ep-param" style="margin: 8px 0 2px">
+      <label>
+        <input type="checkbox" :checked="!!(store.cfg && store.cfg.strengthen)" :disabled="!strengthenUnlock" @change="toggleStrengthen($event.target.checked)" />
+        🎯 补短模式（组卷向薄弱考点加权，λ = 0.6）
+      </label>
+      <span v-if="!strengthenUnlock" class="ep-hint">还需累计作答 {{ remainN }} 题后解锁——补短需要足够作答数据标定薄弱点，样本不足不给加权（宁不给数，不给没根据的数）</span>
+      <span v-else class="ep-hint">开启后整卷题量 = 真题考频 × (1 + 0.6·薄弱度)：答得差的变体多出，答得好的让位；各板块作答不足 30 时自动退化为纯考频分配</span>
+    </div>
+
+    <div class="ep-param" style="margin: 4px 0 2px">
+      <label>
+        <input type="checkbox" :checked="!!(store.cfg && store.cfg.blueprintRag)" @change="store.cfg.blueprintRag = $event.target.checked; saveCfg()" />
+        📚 真题蓝本 RAG（few-shot 学结构 · 出题默认关）
+      </label>
+      <span class="ep-hint">开启后出题前按同板块/题型检索 2 道近年真题作骨架参考（只学考点切入/干扰结构，禁止照抄——生成后程序做连续 12 字重合检测，违规自动重出）。代价：每题约 +0.4~0.7k token，属可选 AI 功能，默认关闭以守住默认路径零成本红线</span>
+    </div>
+
+    <div class="ep-param" style="margin: 2px 0 2px">
+      <label>
+        <input type="checkbox" :checked="!!(store.cfg && store.cfg.dualCheck)" @change="store.cfg.dualCheck = $event.target.checked; saveCfg()" />
+        🔍 双模型互检（第二厂商复核唯一性 · 默认关）
+      </label>
+      <span class="ep-hint">开启后每道 AI 出题在过闸基础上，用「图增强模型」配置里的独立厂商模型（若存在且与出题模型不同）再做一次唯一解复核；未通过即重出。代价：每题 +1 次快模型调用（计入 costTrack），仅在有独立复核模型时建议开启</span>
+    </div>
+
+    <div class="ep-param" style="margin: 2px 0 2px">
+      <label>
+        <input type="checkbox" :checked="!!(store.cfg && store.cfg.keepSame)" @change="store.cfg.keepSame = $event.target.checked; saveCfg()" />
+        🎯 同类连做（单题快练·答错钉住同考点巩固 · 默认关）
+      </label>
+      <span class="ep-hint">开启后单题快练答错 → 下一题仍出同考点/题型（换素材不换考点）直到答对；连续答对 3 题 → 自动换下一考点。用于把“错题打击”下沉到单题练习（doc35 §5.3）</span>
+    </div>
+
+    <div class="ep-param" style="margin: 2px 0 2px">
+      <label>
+        <input type="checkbox" :checked="!!(store.cfg && store.cfg.preferLocalDet)" @change="store.cfg.preferLocalDet = $event.target.checked; saveCfg()" />
+        🎛️ 本地优先（确定性出题 · 推荐开启）
+      </label>
+      <span class="ep-hint">开启后单题快练“自由练（不限题型）”的 图推/数量/政治 直接用本地确定性生成器（答案程序可重算、零错题、零额度）；需要具体题型的 AI 题不受影响。追求“无错题”建议开启</span>
+    </div>
+
+    <div class="ep-param" style="margin: 2px 0 2px">
+      <label style="display: flex; align-items: center; gap: 6px">
+        ⏱️ 单题时间预算（秒/题）
+        <input v-model.number="store.cfg.genTimeoutSec" type="number" min="10" max="90" style="width: 64px" @change="store.cfg.genTimeoutSec = Math.max(10, Math.min(90, Number(store.cfg.genTimeoutSec) || 45)); saveCfg()" />
+      </label>
+      <span class="ep-hint">默认 45 秒：每次出题/重试/质检共用该预算，超预算自动止损（最多重试 2 次 → 本地回退或拦截残缺卷）。用思考模型嫌慢时：降到 40-45 并把“出题并发”调到 ≤2，整卷时长更可控；不想要残缺卷就保持默认拦截</span>
     </div>
 
     <div v-if="srcMode === 'ai'" class="ep-block">
@@ -176,6 +264,29 @@ watch(srcMode, async (v) => {
           出题严格质检（生成后二次验证 唯一解/恰一正确/无逻辑谬误，更稳但略慢）
         </label>
       </div>
+      <div class="ep-param" style="margin: 2px 0 2px">
+        <label>
+          <input type="checkbox" :checked="!!(store.cfg && store.cfg.fastAutoQC)" @change="store.cfg.fastAutoQC = $event.target.checked; saveCfg()" />
+          🛡️ 快模型自动质检（默认开：用「出题快模型 / 图形快模型」时，即使上面严格质检被关，也保留一次 AI 复核兜底，防快出降质；追极限速度可关）
+      <div class="ep-param" style="margin: 2px 0 2px">
+        <label>
+          <input type="checkbox" :checked="!!(store.cfg && store.cfg.deepPlan)" @change="store.cfg.deepPlan = $event.target.checked; saveCfg()" />
+          🧠 深度命题两段式（默认关：先让子命题人设计本题坑点/数据结构/干扰项错解，再按设计成题——言语·逻辑·判断类质感更强；每题 +1 次短请求、略慢）
+      <div class="ep-param" style="margin: 2px 0 2px">
+        <label style="display:flex; align-items:center; gap:6px">
+          命题质感：
+          <select class="tb-sel" style="width:auto" :value="(store.cfg && store.cfg.propStyle) || 'standard'" @change="store.cfg.propStyle = $event.target.value; saveCfg()">
+            <option value="standard">标准（现默认）</option>
+            <option value="strong">强陷阱（贴近真题卷面·坑更密）</option>
+            <option value="gentle">入门友好（干扰平实直白）</option>
+          </select>
+        </label>
+        <span class="ep-hint">影响题干/材料/选项的“挖坑密度与难度观感”；对数量/资料仍强制 答案唯一可复算</span>
+      </div>
+        </label>
+      </div>
+        </label>
+      </div>
     </div>
 
     <div v-if="srcMode === 'single'" class="ep-block">
@@ -198,6 +309,9 @@ watch(srcMode, async (v) => {
         <select v-model="singleVariant" class="tb-sel">
           <option value="不限">不限（自动轮换）</option>
           <option v-for="v in singleVars" :key="v" :value="v">{{ v }}</option>
+          <optgroup label="✨ 更多常考/创新题型（=「不限」轮换池同源）">
+            <option v-for="v in extraVars" :key="'x' + v" :value="v">{{ v }}</option>
+          </optgroup>
         </select>
         <span class="ep-hint">该细分板块下的子题型，由对应「子命题人」精准出题</span>
       </div>
@@ -263,7 +377,7 @@ watch(srcMode, async (v) => {
           <option value="chart">图形材料（柱状/折线/饼图）</option>
           <option value="mixed">综合混合（文字+表格+图形）</option>
         </select>
-        <span class="ep-hint">组量选 5/10/15/20 时按真题模式出「完整材料 + 每5题一组」（第5题为综合分析题）；选 1 题则出单题。材料会尽量绘制成 SVG 表格/图表。</span>
+        <span class="ep-hint">组量选 5/10/15/20 时按真题模式出「完整材料 + 每5题一组」（第5题为综合分析题）；选 1 题则出单题。材料类型选「图形/混合」时**必定配真图**：优先 AI+图增强模型绘制；未配置或绘制失败时自动用内置确定性统计图（柱/折线/饼）兜底，不再出现“选了图形材料却只有文字”。</span>
       </div>
       <div class="ep-param">
         <label>
@@ -384,7 +498,7 @@ watch(srcMode, async (v) => {
       </div>
       <div v-if="openPapers" class="ep-list-scroll">
         <div v-for="(p, i) in papers" :key="p.id" class="ep-paper">
-          <button class="ep-paper-btn" @click="openPaper(p)">{{ p.name }} · {{ p.questions.length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
+          <button class="ep-paper-btn" title="打开原卷（题目已保存，直接作答/重刷，不再重新出题）" @click="openPaper(p)">📄 {{ p.name }} · {{ p.questions.length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
           <button class="ep-x" @click="delPaper(i)">×</button>
         </div>
         <div class="ep-note">共 {{ papers.length }} 卷（全部保留，可滚动查看）</div>

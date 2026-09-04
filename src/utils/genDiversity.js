@@ -83,6 +83,37 @@ export function domainsFor(plate) {
   return DOMAIN_POOL[plate] || []
 }
 
+
+// ===== ③ 单题「同类不重出」：题型级短记忆 =====
+// 与上面“题干头防撞(素材级)”互补：这里记住最近出过的题型，自由轮换时先排除最近 3 个
+// 同题型，确保连刷不“同一题型连撞”；池子太小时自动放宽回退。
+const VARIANT_RECENT_N = 3
+export function recentVariants(plate) {
+  try { const mem = readMem(); return ((mem.variants && mem.variants[plate]) || []).slice() } catch (e) { return [] }
+}
+function rememberVariant(plate, v) {
+  if (!plate || !v) return
+  try {
+    const mem = readMem()
+    const mv = mem.variants || (mem.variants = {})
+    const arr = mv[plate] || []
+    arr.unshift(String(v))
+    mv[plate] = [...new Set(arr)].slice(0, VARIANT_RECENT_N)
+    writeMem(mem)
+  } catch (e) {}
+}
+// 从池中挑一个“最近未出过的题型”并记入短记忆；无可用则随机回退
+export function freshVariant(plate, pool, n) {
+  const p = (Array.isArray(pool) ? pool : []).map((x) => String(x)).filter(Boolean)
+  if (!p.length) return ''
+  const recent = new Set(recentVariants(plate).slice(0, Math.max(1, Number(n) || VARIANT_RECENT_N)))
+  const fresh = p.filter((x) => !recent.has(x))
+  const bag = fresh.length ? fresh : p
+  const chosen = bag[Math.floor(Math.random() * bag.length)]
+  rememberVariant(plate, chosen)
+  return chosen
+}
+
 // ===== 防撞记忆（开放 + 最近题干头）：记真实出过的题，不记我们预判的"域" =====
 export function recentHeads(plate) {
   try {

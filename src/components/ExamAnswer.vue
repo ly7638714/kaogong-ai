@@ -16,7 +16,7 @@ const {
 
 // 方法
 const {
-  go, retryGen, pick, selfMark, variantToChat, enhanceExplain, openDesigner,
+  go, retryGen, pick, selfMark, enhanceExplain, openDesigner,
   backToConfig, cancel, saveWrongs, finish, nextSingle, askFinish, prevQ, nextQ,
   fmt, savePaperMode
 } = props.ctx
@@ -121,7 +121,7 @@ function capExamExplain() {
       <div v-if="marks[cur] && marks[cur].ok !== undefined && !marks[cur].timeout" class="quiz-result" :class="marks[cur].ok ? 'ok' : 'no'">
         {{ marks[cur].ok ? '✅ 回答正确' : (marks[cur].blank ? '⬜ 未作答（已按错计）' : (marks[cur].self ? '❌ 还没掌握，已计错' : '❌ 回答错误，正确答案 ' + q.answer)) }}
       </div>
-      <button class="btn btn-gh" title="一键出考点相同、素材全新的变式题（串联对话页）" @click="variantToChat(qi)">🔁 变式检验</button>
+      
       <!-- 解析：答完（无论对错）→ 有解析直接显示；没有则显示醒目的「📖 查看解析」按钮，点击生成/打开 -->
       <div v-if="marks[cur] && marks[cur].ok !== undefined && (q.analysis || q.explain || q.aiEnhancing)" class="sim-explain" v-html="qExplainHtml"></div>
       <div v-else-if="marks[cur] && marks[cur].ok !== undefined" class="designer-btn-row">

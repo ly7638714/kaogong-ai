@@ -66,6 +66,15 @@ function extractOptions(text) {
   return opts.sort((a, b) => a.k.localeCompare(b.k))
 }
 
+// 判断是否为「叫我出题/做练习」类请求（用户明确要求生成练习题作答）；
+// 真实提问（这题怎么做/为什么选D/解析…/发截图求解）必须返回 false，避免把解析误包装成可点选项卡
+export function isQuizAsk(text) {
+  const t = String(text || '').trim()
+  if (!t) return false
+  if (!/(帮|请|让|可不可以|能不能|给|来|出|练|做)/.test(t)) return false
+  return /(帮我出|给我出|能不能出|出一(道|题)|出几道|出个题|出道题|出题|来一(道|题)|来几(道|题)|来道题|来几道|练(一|几)题|练习(?!册)(一|几|道|题)?|做(一|几)道(题)?|帮我(来|弄)(一)?道题)/.test(t)
+}
+
 // 判断是否「真·题目」而非解析/复盘长文：避免把带 A-D 选项的讲解误判成可点作答卡片
 export function looksLikeQuiz(text) {
   const t = String(text || '')
@@ -112,6 +121,9 @@ export function parseQuiz(text) {
     stem = m ? String(text).slice(0, m.index).replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim() : ''
   }
   if (!stem) return null
+  // 35号批次1-A：剔除【考点】元数据行（若模型把考点行误放在题干区，不得污染题干）
+  stem = stem.split('\n').filter((l) => !/^【考点】/.test(String(l).trim())).join('\n').trim()
+  if (!stem) return null
 
   // 解析区：从"答案解析/解析"标题到结尾
   const explainIdx = lines.findIndex((l) => /^#{1,6}\s*(✅\s*)?(答案解析|解析|答案详解)/.test(l.trim()))
@@ -124,7 +136,15 @@ export function parseQuiz(text) {
     explain = explain.slice(0, dm.index).trim()
   }
 
-  return { stem, options: opts, answer, explain, designer }
+  return { stem, options: opts, answer, explain, designer, kpoint: parseKpoint(text) }
+}
+
+// 35号批次1-A：从 AI 输出提取【考点】自标（无标记返回空串，不抛错）
+export function parseKpoint(text) {
+  if (!text) return ''
+  const m = String(text).match(/【考点】\s*[:：]?\s*([^\n【】]+)/)
+  if (!m) return ''
+  return m[1].trim()
 }
 
 // 出题提示词尾部追加片段：要求输出答案标记，便于解析成可点选项

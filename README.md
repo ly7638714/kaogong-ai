@@ -14,6 +14,7 @@
 - 近两轮大功能：语音/TTS 重构（阿里百炼 Qwen3-TTS、Edge 免费、音频缓存）、模型配置下拉化、AI 出题多样性引擎、主题系统收尾与「对话文字渲染统一」等（详见 CHANGELOG.md）。
 - **给下一任深度开发代理的交接说明**：[`05_工程与产品评估/29_交接说明书_给DeepSeekHarness.md`](05_工程与产品评估/29_交接说明书_给DeepSeekHarness.md)（**项目全量交接**：版本轨迹与各贡献方、全量功能全景、架构/目录、经验教训、待办、门禁）；完整开发过程史见 [`05_工程与产品评估/30_开发过程全史.md`](05_工程与产品评估/30_开发过程全史.md)；工程报告索引见 [`05_工程与产品评估/README.md`](05_工程与产品评估/README.md)。
 - ⚠️ `npm test` 暂不可用：vitest 4.1.11 与 vite 5.4.21 版本冲突（见 29 号 §0/§7-2），修复建议降 vitest 至 ^2.1.x。
+- 🔄 **重建 dist 后必须重启预览**：`vite preview` 启动时缓存 dist/index.html——每次 rebuild/sync 后跑 `powershell -ExecutionPolicy Bypass -File scripts/restart-preview-5199.ps1` 并硬刷新(Ctrl+F5)，否则 :5199 显示的仍是旧构建（“感觉没同步”的根因）。
 
 ---
 ## 一、项目定位与整体架构

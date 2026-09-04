@@ -690,9 +690,28 @@ export function genTutuQuestion(seed) {
       : form === 'cube' ? CUBE_FAMILIES[hf % CUBE_FAMILIES.length]
       : GROUP_FAMILIES[hf % GROUP_FAMILIES.length]
     const q = buildQuestion(family, form, s)
-    if (q) return q
+    if (q && uniqueOpts(q)) return q
   }
   return null
+}
+
+// 37号 门禁：四选项语义文本（剥标签/代码块/空白/大小写）必须两两不同——相同外观/相同标注的选项会破坏唯一单选
+function semKey(o) {
+  return String(o.t || o || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[\s\u3000]+/g, '')
+    .toLowerCase()
+}
+function uniqueOpts(q) {
+  const seen = new Set()
+  for (const o of (q.options || [])) {
+    const key = semKey(o)
+    if (!key) continue
+    if (seen.has(key)) return false
+    seen.add(key)
+  }
+  return true
 }
 
 function buildQuestion(family, form, seed) {

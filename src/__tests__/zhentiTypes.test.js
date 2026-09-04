@@ -8,7 +8,7 @@ describe('public/zhenti/types.json 打标完整性', () => {
   const types = JSON.parse(readFileSync(join(dir, 'types.json'), 'utf8'))
 
   it('覆盖全部卷与全部题号', () => {
-    const jsonFiles = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json' && f !== 'types.json')
+    const jsonFiles = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json' && f !== 'types.json' && f !== 'kpoint-index.json') // kpoint-index.json 为本项目蓝本RAG辅助产物（非真题卷）
     let total = 0
     for (const f of jsonFiles) {
       const paper = JSON.parse(readFileSync(join(dir, f), 'utf8'))
@@ -26,7 +26,7 @@ describe('public/zhenti/types.json 打标完整性', () => {
   })
 
   it('summary 与源卷逐题重算一致', () => {
-    const jsonFiles = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json' && f !== 'types.json')
+    const jsonFiles = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'index.json' && f !== 'types.json' && f !== 'kpoint-index.json') // kpoint-index.json 为本项目蓝本RAG辅助产物（非真题卷）
     const re = {}
     let total = 0
     for (const f of jsonFiles) {

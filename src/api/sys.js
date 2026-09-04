@@ -4,7 +4,7 @@ import { SYS, KB } from '../kb'
 import { retrieveCards, renderCards } from '../kb/retrieve'
 import { retrieveDetailed } from '../kb/retrieveV2'
 import { confusableHints } from '../utils/intentProbe'
-import { kbFlowHead, isMethodOverview } from '../utils/kbFlow'
+import { kbFlowHead, kbFlowFallback, isMethodOverview } from '../utils/kbFlow'
 
 export function buildSys(extraMode, question) {
   let sp = (store.cfg.sys || '').trim()
@@ -13,7 +13,9 @@ export function buildSys(extraMode, question) {
     const kbText = (extraMode && KB[extraMode]) ? KB[extraMode] : (KB[store.mode] || '')
     const q0 = String(question || '')
     const useFull = !q0.trim() || isMethodOverview(q0)
-    sp = SYS + (kbText ? (useFull ? kbText : kbFlowHead(kbText)) : '')
+    // S2：优先“手工精校流程”（板块顶部被风格段占据时兜底），否则用 kbFlowHead v2（剥横幅、保留答题流程段）
+    const hdr = kbFlowFallback(extraMode || store.mode || '') || kbFlowHead(kbText)
+    sp = SYS + (kbText ? (useFull ? kbText : hdr) : '')
     if (kbText && !useFull) sp += '\n【流程执行·按步作答】先说出正在执行该板块流程第几步（如言语①定题型→②定结构→③主题词→④对比择优→⑤答案），再逐步走完并落到本题，禁止跳步直接给结论。'
     // 批次7·S1+retrieveV2：按板块+题干检索方法卡注入（V2 强命中优先；无命中退回旧检索避免噪音）
     try {

@@ -1,6 +1,6 @@
 /* global indexedDB */
 import { store } from '../store'
-import { stripSecrets } from './stripSecrets'
+import { collectText } from './dataBackup'
 
 let dirHandle = null
 let dirName = ''
@@ -17,10 +17,17 @@ function saveHandle(h) {
   } catch (e) {}
 }
 export async function pickDataFolder() {
-  if (!window.showDirectoryPicker) throw new Error('当前浏览器不支持选择文件夹，请用 Chrome/Edge 桌面版，或改用「下载备份」')
-  dirHandle = await window.showDirectoryPicker()
+  if (!window.showDirectoryPicker) throw new Error('当前环境不支持“选文件夹”（请用 Chrome/Edge 桌面浏览器，或改用 📦导出全部数据/WebDAV 云同步）')
+  try {
+    dirHandle = await window.showDirectoryPicker()
+  } catch (e) {
+    const m = String((e && e.message) || e || '')
+    if (/abort/i.test(m)) throw new Error('选择被取消或浏览器拦截（user aborted）。若一点开就自动关闭，请改用 📦导出全部数据 或 Chrome/Edge 桌面版重试', { cause: e })
+    throw new Error('文件夹选择失败：' + (m || '未知原因'), { cause: e })
+  }
   dirName = dirHandle.name
   saveHandle(dirHandle)
+  startAutoFolderBackup()
   return dirName
 }
 async function getDir() {
@@ -52,23 +59,13 @@ export async function getFolderName() {
 export async function saveAllDataToFolder() {
   const h = await getDir()
   if (!h) throw new Error('请先「选择保存文件夹」')
-  const data = {
-    app: '行测名师AI小助理',
-    ts: Date.now(),
-    // 批次3补课：本地文件夹备份同样剔除 API Key / 密码（与 WebDAV/导出JSON 三路一致）
-    cfg: stripSecrets(store.cfg),
-    msgs: store.msgs,
-    wqs: store.wqs,
-    myMem: store.myMem,
-    notes: store.notes
-  }
   const write = async (name, content, type) => {
     const fh = await h.getFileHandle(name, { create: true })
     const w = await fh.createWritable()
     await w.write(new Blob([content], { type }))
     await w.close()
   }
-  await write('行测AI数据备份.json', JSON.stringify(data, null, 2), 'application/json')
+  await write('行测AI数据备份.json', collectText(), 'application/json') // v3.8.178 全量（设置/对话/错题/知识库/战绩/出题历史等，密钥打码）
   // 附带错题 Markdown
   const wqMd = ['# 行测错题集', ''].concat(
     store.wqs.map((q, i) => `${i + 1}. 【${q.subject || '未分类'}】${q.question || ''}\n   答案：${q.answer || '未填'}\n   错因：${(q.reasons || []).join('、') || '—'}`)
@@ -81,3 +78,16 @@ export async function saveAllDataToFolder() {
   await write('行测知识库积累.md', kbMd, 'text/markdown')
   return dirName || h.name
 }
+
+// v3.8.179 自动备份：选过一次文件夹后，每 45 秒把全量数据静默写入该文件夹（错题/设置/对话等）+ 附带 Markdown
+let _autoTimer = null
+export function startAutoFolderBackup() {
+  if (_autoTimer) return
+  _autoTimer = setInterval(async () => {
+    try { await saveAllDataToFolder() } catch (e) {}
+  }, 45000)
+}
+// 下次启动自动恢复（此前已授权并保存过文件夹句柄）
+setTimeout(() => {
+  getDir().then((h) => { if (h) startAutoFolderBackup() }).catch(() => {})
+}, 1600)

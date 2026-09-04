@@ -1,6 +1,7 @@
 // intentProbe —— 轻量意图/易混判别探测（P0-1；纯函数、可与 askAssist 互补）
 import { detectBanKuai } from '../api/detect'
 import { normalizePlate } from '../kb/cards-index'
+import { isQuizAsk } from './quiz'
 
 // 问法方向：选是 / 选非
 export function detectAskDir(text) {
@@ -13,8 +14,9 @@ export function detectAskDir(text) {
 // 子意图：出题/变式/对答案/错因/辨析/方法/讲解/其他
 export function detectIntent(text) {
   const t = String(text || '')
-  if (/出一?道|来一?道|出题|让我(做|选|答)|做(一|几)道|直接选|给我出|有选项/.test(t)) return 'quiz'
+  // 变式/再来一题优先于出题；出题仅限“叫我出题/练题”（真实题不判 quiz，避免被包装成选项卡）
   if (/变式|再来一题|换一题|再出一题|类似的题/.test(t)) return 'variant'
+  if (isQuizAsk(t)) return 'quiz'
   if (/选[A-D][a-d]?[，,]|我选|答案是|对吗|对不对|是不是选|判.*对错|对错/.test(t)) return 'verify'
   if (/为什么错|错在哪|错因|掉[坑进]|哪里错|为何错|分析.*错/.test(t)) return 'error'
   if (/和上一题|与上一题|两题|对比|比较|辨析|区别|差异|哪个更|选哪个|到底选/.test(t)) return 'compare'

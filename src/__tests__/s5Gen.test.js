@@ -2,7 +2,8 @@ import { describe, test, expect } from 'vitest'
 import { genSlQuestion } from '../utils/slGen'
 import { genZzQuestion } from '../utils/zzGen'
 
-const shapeOk = (q) => q && q.stem && q.options?.length === 4 && /^[A-D]$/.test(q.answer) && q.explain && new Set(q.options).size === 4
+// 37号 规范形态：options 为 [{k,t}]（k∈A-D）且 4 项内容互异
+const shapeOk = (q) => q && q.stem && Array.isArray(q.options) && q.options.length === 4 && q.options.every((o) => o && /^[A-D]$/.test(o.k) && typeof o.t === 'string' && o.t) && /^[A-D]$/.test(q.answer) && q.explain && new Set(q.options.map((o) => o.t)).size === 4
 
 describe('S5·数量关系本地生成器（种子化）', () => {
   test('同种子同题（可复现）', () => {
@@ -29,7 +30,7 @@ describe('S5·数量关系本地生成器（种子化）', () => {
         const m = q.stem.match(/之和为 (\d+)，甲比乙多 (\d+)/)
         const sum = +m[1], diff = +m[2]
         const big = (sum + diff) / 2
-        expect(q.options[('ABCD'.indexOf(q.answer))]).toBe(String(big))
+        expect(q.options['ABCD'.indexOf(q.answer)].t).toBe(String(big))
         found++
       }
     }

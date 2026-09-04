@@ -18,6 +18,16 @@ if (import.meta.env.VITE_TRIAL_MODE === 'true') {
       createApp(TrialGate).mount('#app')
     } else {
       app.mount('#app')
+      // ===== 到期看门狗（仅试用版）：试用期一过，20 秒内自动锁定 =====
+      // 覆盖"跨零点持续打开不关闭"的场景：到点后自动刷新，刷新后 trialExpired() 为真 → 显示已结束页
+      const watchdog = () => {
+        if (trialExpired()) { try { location.reload() } catch (e) {} }
+      }
+      setInterval(watchdog, 20000)
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) watchdog()
+      })
+      window.addEventListener('focus', watchdog)
     }
   })
 } else {

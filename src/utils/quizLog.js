@@ -49,6 +49,22 @@ export function genLogStats(plate, variant, limit = 30) {
   return { total, fail: fail.length, topReasons: top, totalAttempts }
 }
 
+// 35号批次5(2/3)：某次出卷的质检汇总（出卷质量报告用）——统计 fromTs 之后的出题日志
+// 返回 { gen, retried(曾重出题数), attempts(总生成次数), failed, reasonsTop }
+export function recentGenStats(fromTs) {
+  const list = read().filter((x) => !fromTs || (x.t || 0) >= fromTs)
+  const gen = list.length
+  const failed = list.filter((x) => !x.ok).length
+  const retried = list.filter((x) => (x.attempts || 1) > 1).length
+  const attempts = list.reduce((a, x) => a + (x.attempts || 1), 0)
+  const reasonMap = {}
+  list.filter((x) => !x.ok).forEach((x) => {
+    ;(x.reasons || []).forEach((r) => { const k = String(r || '').slice(0, 40); reasonMap[k] = (reasonMap[k] || 0) + 1 })
+  })
+  const reasonsTop = Object.entries(reasonMap).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, n]) => r + '(' + n + '次)')
+  return { gen, retried, attempts, failed, reasonsTop }
+}
+
 // 生成「历史质检学习提示」：注入出题/质检提示词，让 AI 规避过去常犯的错
 export function genLogHint(plate, variant) {
   try {

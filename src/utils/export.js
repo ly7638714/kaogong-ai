@@ -1,5 +1,6 @@
 /* global btoa */
-import { downloadText, downloadBlob, printPdf, pdfHtml } from './export/writers'
+import { downloadText, downloadBlob, printPdf, pdfHtml, printImages } from './export/writers'
+import { snapshotMd } from './capture'
 import { exportMdDocx, buildDocx, itemsToParagraphs, itemsToTables } from './export/docx'
 export { downloadText, downloadBlob, printPdf, pdfHtml } from './export/writers'
 export { stripMd, escHtml, mdToParagraphs, buildDocx, exportItemsDocx, exportMdDocx, itemsToParagraphs, itemsToTables } from './export/docx'
@@ -363,6 +364,35 @@ async function qLinesImg(qq, i, ms, separate) {
 // paper: { name, questions:[{subject,stem,options,answer,explain,analysis}] }
 // marks: 每题的 { ok, pick, timeout }
 // meta:  { score, rate, sec, moduleStats:[{subject,total,ok}] }
+// v3.8.182 把导出条目(items)按小节拼成 Markdown 页
+function itemsToMdPages(items) {
+  const pages = []
+  let cur = { title: '', md: '' }
+  const flush = () => { if (cur.md.trim()) pages.push(cur); cur = { title: '', md: '' } }
+  const mdTable = (tb) => {
+    if (!tb) return ''
+    const head = (tb.head || []).join(' | ')
+    const sep = (tb.head || []).map(() => '---').join(' | ')
+    const rows = (tb.rows || []).map((r) => '| ' + r.join(' | ') + ' |').join('\n')
+    return '| ' + head + ' |\n| ' + sep + ' |\n' + rows + '\n\n'
+  }
+  ;(items || []).forEach((it) => {
+    if (!it) return
+    if (it.type === 'h') { flush(); cur.title = String(it.text || ''); return }
+    if (it.type === 'table') { cur.md += mdTable(it); return }
+    if (it.type === 'msg' || it.type === 'p') { cur.md += String(it.text || '') + '\n\n'; return }
+  })
+  flush()
+  return pages
+}
+async function exportPdfShots(title, pages) {
+  const shots = []
+  for (const pg of pages) {
+    try { shots.push(await snapshotMd(pg.md, { title: pg.title || title })) } catch (e) {}
+  }
+  if (!shots.length) { printPdf(title, []); return }
+  printImages(title, shots)
+}
 export async function exportPaper(paper, marks, meta, format, polish, separate) {
   const ms = marks || []
   const isBlank = (i) => { const m = ms[i] || {}; return !!(m.blank || (m.timeout && !m.pick)) }
@@ -381,7 +411,7 @@ export async function exportPaper(paper, marks, meta, format, polish, separate) 
     if (format === 'md') { downloadText(polished, pTitle + '.md', 'text/markdown;charset=utf-8'); showToast('✅ 已导出 AI 排版 Markdown', 'success'); return }
     if (format === 'tex') { downloadText(mdToTex(polished), pTitle + '.tex', 'application/x-tex;charset=utf-8'); showToast('✅ 已导出 AI 排版 LaTeX', 'success'); return }
     if (format === 'typ') { downloadText(mdToTyp(polished), pTitle + '.typ', 'text/plain;charset=utf-8'); showToast('✅ 已导出 AI 排版 Typst', 'success'); return }
-    if (format === 'pdf') { printPdf(pTitle, [{ type: 'msg', role: 'ai', text: polished }]); return }
+    if (format === 'pdf') { await exportPdfShots(pTitle, [{ title: pTitle, md: polished }]); return }
     await exportMdDocx(pTitle, polished)
     return
   }
@@ -436,7 +466,7 @@ export async function exportPaper(paper, marks, meta, format, polish, separate) 
       const anas2 = qs.map((qq, i) => { const ana = qq.explain || qq.analysis || ''; return ana ? { type: 'p', text: '【' + (i + 1) + '题解析】' + String(ana).replace(/\s+/g, ' ').trim() } : null }).filter(Boolean)
     if (anas2.length) { items.push({ type: 'h', text: '📖 解析' }); items.push(...anas2) }
   }
-  if (format === 'pdf') printPdf(title, items)
+  if (format === 'pdf') { await exportPdfShots(title, itemsToMdPages(items)); return }
   else if (hasSvg) {
     // docx 无法内嵌图片：含 SVG 图形题的卷子降级导出 .doc（pdfHtml 会把 markdown 图片渲染成 <img>）
     downloadText(pdfHtml(title, items), title + '.doc', 'application/msword')

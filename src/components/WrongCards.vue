@@ -1,4 +1,5 @@
 <script setup>
+import { richMd } from '../utils/wrongText'
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
 import { toRefs } from 'vue'
@@ -24,7 +25,7 @@ const {
       <template v-if="cardQueue[cardIdx]">
         <div class="card-front">
           <div class="redo-subj">{{ cardQueue[cardIdx].subject || '未分类' }}</div>
-          <div class="redo-q">{{ cardQueue[cardIdx].question }}</div>
+          <div class="redo-q" v-html="richMd(String((cardQueue[cardIdx] || {}).question || ''))"></div>
           <div v-if="(cardQueue[cardIdx].imgs || []).length" class="wq-imgs">
             <img v-for="(im, j) in cardQueue[cardIdx].imgs" :key="j" class="wq-img" :src="im" />
           </div>

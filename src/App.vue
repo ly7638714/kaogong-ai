@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { store, saveCfg, saveWqs, saveMsgs, saveMyMem, saveNotes } from './store'
+import { store, saveCfg, saveWqs, saveMsgs, saveNotes } from './store'
 import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
 import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
 import { PLATE_MODE } from './api'
@@ -19,7 +19,6 @@ import Data3DPage from './components/Data3DPage.vue'
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
 import { emit as evEmit } from './utils/events'
-import { stripSecrets } from './utils/stripSecrets'
 import { getErrorLog, clearErrorLog } from './utils/errorLog'
 import { APP_VERSION } from './version'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
@@ -28,6 +27,8 @@ import { webdavUpload, webdavDownload } from './utils/webdav'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
+import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
+import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice } from './utils/pet'
 const tabs = [
@@ -890,6 +891,21 @@ function goKb(it) {
 
 // ===== 数据保存到本地文件夹 =====
 const dirLabel = ref('')
+const nativeOn = ref(false)
+const nativePath = ref('')
+const isNative = detectNative()
+if (isNative) { try { nativePath.value = nativeBackupPath() } catch (e) {} }
+if (isNative) { nativeOn.value = !!startNativeAutoBackup() } // 原生环境默认开启自动写入 Download
+async function nativeNow() {
+  try {
+    await nativeWriteFile('行测AI备份.json', JSON.stringify({ app: 'xingce', v: 2, t: Date.now(), data: (function () { const d = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('xc_')) d[k] = localStorage.getItem(k) } return d })() }))
+    showToast('✅ 已原生写入：' + (nativePath.value || 'Download/行测AI备份.json'), 'success')
+  } catch (e) { showToast('❌ 原生写入失败：' + ((e && e.message) || e), 'error') }
+}
+function nativeToggle() {
+  if (nativeOn.value) { stopNativeAutoBackup(); nativeOn.value = false; showToast('已停用自动原生备份', 'info') }
+  else { nativeOn.value = !!startNativeAutoBackup(); if (nativeOn.value) showToast('✅ 已启用：每 45 秒自动写入 ' + (nativePath.value || 'Download/行测AI备份.json'), 'success') }
+}
 async function pickDir() {
   try {
     const name = await pickDataFolder()
@@ -1511,27 +1527,20 @@ function setFontFamily() {
   applyFontFamily()
 }
 // ===== 全部用户数据一键导出 / 导入（跨设备/防丢失） =====
+async function shareData() {
+  try {
+    const ok = await shareBackup()
+    if (ok) { showToast('✅ 已调起系统保存/分享（请选择存放位置或发送给文件管理）', 'success') }
+    else { downloadBackup(); showToast('✅ 已下载备份 JSON（手机可在下载目录找到并移动/发送）', 'success') }
+  } catch (e) { showToast('分享失败：' + ((e && e.message) || e), 'error') }
+}
 function exportAllData() {
-  const all = {}
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)
-    if (k && k.startsWith('xc_')) {
-      try {
-        let val = localStorage.getItem(k)
-        // 安全加固（批次3.2）：配置含 API Key/WebDAV 密码 → 打码后导出，结构保留、密钥不落盘
-        if (k === 'xc_cfg') { try { val = JSON.stringify(stripSecrets(JSON.parse(val || '{}'))) } catch (e) {} }
-        all[k] = val
-      } catch (e) {}
-    }
+  try {
+    downloadBackup()
+    showToast('✅ 已导出全部数据（含设置；API Key/密码已打码，导入后自动保留本机现有密钥）', 'success')
+  } catch (e) {
+    showToast('导出失败：' + ((e && e.message) || e), 'error')
   }
-  const blob = new Blob([JSON.stringify({ app: 'xingce', v: 2, t: Date.now(), data: all }, null, 2)], { type: 'application/json' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  const d = new Date()
-  a.download = '行测助手-全部数据备份-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json'
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000)
-  showToast('✅ 已导出全部数据（API Key 等敏感字段已打码，导入后需重新填写）', 'success')
 }
 function importAllData(ev) {
   const f = ev.target.files && ev.target.files[0]
@@ -1540,16 +1549,10 @@ function importAllData(ev) {
   rd.onload = () => {
     try {
       const d = JSON.parse(rd.result)
-      let items = null
-      if (d && d.data && (d.v === 2 || d.app === 'xingce')) items = d.data
-      else if (d && typeof d === 'object') items = d // 兼容旧格式（key->value）
-      let n = 0
-      for (const k in items) {
-        if (k.startsWith('xc_')) { try { localStorage.setItem(k, items[k]); n++ } catch (e) {} }
-      }
+      const n = restoreAll(d)
       showToast('✅ 已导入 ' + n + ' 项数据，即将刷新', 'success')
       setTimeout(() => location.reload(), 900)
-    } catch (e) { showToast('❌ 备份文件无效', 'error') }
+    } catch (e) { showToast('❌ 备份文件无效：' + ((e && e.message) || e), 'error') }
   }
   rd.readAsText(f)
   ev.target.value = ''
@@ -1611,6 +1614,25 @@ function ttsTest() {
   })
 }
 // ===== WebDAV 云同步 =====
+const wdTpl = (kind) => {
+  const w = (store.cfg.webdav = store.cfg.webdav || {})
+  const user = String(w.user || '').trim()
+  if (kind === 'jianguo') {
+    w.url = 'https://dav.jianguoyun.com/dav/行测AI备份.json'
+    wdStat.value = '已填入坚果云地址。请填 用户名（邮箱）与官网「安全选项」生成的应用密码，然后点 ⬆️ 上传。'
+    showToast('☁️ 已填入坚果云模板；密码请用官网“应用密码”', 'info')
+  } else if (kind === 'nextcloud') {
+    w.url = 'https://你的主机/remote.php/dav/files/' + (user || '你的用户名') + '/行测AI备份.json'
+    wdStat.value = '请把地址里的“你的主机”“你的用户名”改成你的真实值（保持 /行测AI备份.json 结尾）。'
+    showToast('🏠 已填入 Nextcloud 模板，请把主机与用户名替换成真实的', 'info')
+  } else {
+    w.url = ''
+    wdStat.value = '自定义：完整地址形如 https://dav.jianguoyun.com/dav/行测AI备份.json（以 .json 结尾）'
+    showToast('✍️ 请输入完整 WebDAV 文件地址（.json 结尾）', 'info')
+  }
+  saveCfg()
+}
+
 const wdBusy = ref(false)
 const wdStat = ref('')
 async function wdUp() {
@@ -1631,27 +1653,17 @@ async function wdDown() {
   wdStat.value = '下载中…'
   try {
     const d = await webdavDownload()
-    if (!d || !d.app) throw new Error('备份文件格式不对')
-    store.cfg = Object.assign(store.cfg, d.cfg || {})
-    store.msgs = (d.msgs || []).slice(-200)
-    store.wqs = d.wqs || []
-    store.myMem = d.myMem || []
-    store.notes = d.notes || []
-    saveCfg()
-    saveMsgs()
-    saveWqs()
-    saveMyMem()
-    saveNotes()
-    wdStat.value = '✅ 已恢复备份（' + (d.ts ? new Date(d.ts).toLocaleString() : '') + '）'
-    showToast('☁️ 已从 WebDAV 恢复备份', 'success')
+    if (!d || (!d.data && !d.app)) throw new Error('备份文件格式不对')
+    const n = restoreAll(d)
+    wdStat.value = '✅ 已恢复 ' + n + ' 项数据（' + (d.ts ? new Date(d.ts).toLocaleString() : '') + '），即将刷新'
+    showToast('☁️ 已从 WebDAV 恢复备份（' + n + ' 项）', 'success')
+    setTimeout(() => location.reload(), 900)
   } catch (e) {
-    wdStat.value = '❌ ' + e.message
+    wdStat.value = '❌ ' + ((e && e.message) || e)
   } finally {
     wdBusy.value = false
   }
 }
-
-
 function resetAll() {
   if (!confirm('确认清空所有本地数据（设置/错题/对话）？此操作不可恢复')) return
   localStorage.clear()
@@ -2758,19 +2770,28 @@ onUnmounted(() => {
         <div id="set-data" class="sec-t">💾 数据保存位置（本地文件夹）</div>
         <div class="sec-desc">数据保存位置与迁移：本地文件夹 / 导出导入备份 / WebDAV 云同步 / 时政范围。</div>
         <div class="fld">
-          <label>电脑端：选择文件夹后，可一键把全部数据保存进去</label>
+          <label>电脑端（桌面 Chrome/Edge）：选择文件夹后，可一键/自动把全部数据保存进去；手机端浏览器无“选文件夹写权限”，请用下方「📱 手机端保存/分享备份」或 WebDAV</label>
           <div class="exp-choices">
             <button class="btn btn-gh" @click="pickDir()">📁 选择保存文件夹</button>
-            <button class="btn btn-pri" @click="saveDataDir()">💾 保存全部数据</button>
+            <button class="btn btn-pri" @click="saveDataDir()">💾 保存全部数据</button><button class="btn btn-pri" @click="saveDataDir()">💾 保存全部数据</button>
+          <template v-if="isNative">
+            <div style="font-size: 11px; color: var(--hud-cyan); margin-top: 6px">📱 检测到原生安卓(HBuilderX)：全量备份可自动写入 <b>{{ nativePath || '手机 Download/行测AI备份.json' }}</b></div>
+            <div class="exp-choices">
+              <button class="btn btn-pri" @click="nativeNow()">📱 立即原生备份</button>
+              <button class="btn btn-gh" @click="nativeToggle()">{{ nativeOn ? '⏸ 停用自动原生备份' : '▶ 启用自动原生备份(45s)' }}</button>
+            </div>
+          </template>
           </div>
           <div v-if="dirLabel" style="font-size: 11px; color: var(--hud-cyan); margin-top: 4px">已选择文件夹：{{ dirLabel }}</div>
           <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
             保存后会写入：数据备份.json / 错题集.md / 知识库积累.md。手机端或浏览器不支持选文件夹时，用上方「⬇️ 导出备份(JSON)」下载到手机，可自行移动到任意文件夹。所有数据默认存在本机 localStorage，不会上传。
+            <br/>✅ 选成功后即开启<b>自动备份</b>：每约 45 秒把全部数据（设置/对话/错题/知识库等）+ 附带文件静默写入该文件夹，无需每次手动保存。若系统选择框一点开就被取消（报 user aborted/安全拦截），请改用上方的「📦导出全部数据」或 WebDAV 云同步。
           </div>
         </div>
         <div class="sec-t">💾 数据管理</div>
         <div class="exp-choices">
           <button class="btn btn-pri" @click="exportAllData()">📦 导出全部数据</button>
+          <button class="btn btn-pri" @click="shareData()">📱 手机端保存/分享备份</button>
           <label class="btn btn-gh" style="text-align: center; margin: 0; cursor: pointer">
             📦 导入全部数据
             <input type="file" accept=".json,application/json" style="display: none" @change="importAllData" />
@@ -2798,6 +2819,12 @@ onUnmounted(() => {
           <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
 <div class="sec-t">☁️ WebDAV 云同步</div>
+        <div class="sec-desc" style="margin-top:4px">三步完成云备份：①选一个模板自动生成「地址」→ ②填「用户名」和「密码/应用密码」→ ③点 ⬆️ 上传备份。备份内容=整包全部数据（设置/对话/错题/知识库/战绩…），换设备后同一账号 ⬇️ 下载即恢复。</div>
+        <div class="exp-choices" style="margin:4px 0 8px">
+          <button class="btn btn-gh" @click="wdTpl('jianguo')">🌰 坚果云模板</button>
+          <button class="btn btn-gh" @click="wdTpl('nextcloud')">🏠 Nextcloud/自建模板</button>
+          <button class="btn btn-gh" @click="wdTpl('plain')">✍️ 自己填完整地址</button>
+        </div>
         <div class="fld">
           <label>WebDAV 地址（上传/下载的备份文件完整 URL）</label>
           <input v-model="store.cfg.webdav.url" placeholder="https://dav.jianguoyun.com/dav/行测AI备份.json" @change="saveCfg()" />
@@ -2815,7 +2842,7 @@ onUnmounted(() => {
           <button class="btn btn-gh" :disabled="wdBusy" @click="wdDown()">⬇️ 下载备份</button>
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
-          {{ wdStat || '凭据仅保存在本机 localStorage；坚果云示例地址 dav.jianguoyun.com/dav/…' }}
+          {{ wdStat || '提示：坚果云先在官网「安全选项」生成应用密码（不是登录密码）；地址会自动填好，一般无需手改。自定义地址以 .json 结尾（同一 URL 覆盖旧备份）。' }}
         </div>
 
 

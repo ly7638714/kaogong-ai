@@ -71,7 +71,7 @@ export function genZzQuestion(seed) {
         : `【政治理论·表述核对】“${statement}”。上述内容所对应的概念或表述是：`
     return {
       stem,
-      options: shuffled,
+      options: shuffled.map((t, i) => ({ k: 'ABCD'[i], t: String(t) })),
       answer,
       explain: `正确答案：${term}。本题考查政治理论表述的精确匹配——${statement.slice(0, 40)}…对应“${term}”。记忆锚点：表述必须与官方原文一致，近似说法均为干扰项。\n\n📌 素材源：官方原文要点（小黑新思想/马原笔记/时政卡集），非杜撰。`,
       cardId: 'zz-matrix',

@@ -1,6 +1,6 @@
 // utils/kpointLib.js —— 考点词典（判断/言语/资料细粒度；数量/常识/政治复用题型分类）
 // 用途：统计页「细分题型 → 考点」下钻；读取时计算（惰性），不改存储结构。
-import { classifyZhentiType } from './zhentiType'
+import { classifyZhentiType, ZHENTI_RULES } from './zhentiType'
 
 const KP_RULES = {
   '判断推理': [
@@ -57,4 +57,34 @@ export function kpointOf(subject, text) {
   return (subject || '') + '·综合'
 }
 
-export { KP_RULES }
+// —— 35号批次1-A：考点枚举（供 AI 出题 prompt 取值约束 / 后续下拉框）——
+// 细粒度覆盖三大板块（判断/言语/资料沿用 KP_RULES 词表）；数量/常识/政治复用真题题型词表；
+// 兜底恒含「<板块>·综合」，保证 prompt 永远给得出合法取值。
+function buildEnums() {
+  const enums = {}
+  Object.keys(KP_RULES).forEach((plate) => {
+    enums[plate] = KP_RULES[plate].map(([kp]) => kp)
+  })
+  Object.keys(ZHENTI_RULES).forEach((plate) => {
+    if (!enums[plate]) enums[plate] = ZHENTI_RULES[plate].map(([type]) => plate + '·' + type)
+  })
+  // 判断推理四子板块沿用主板块的细粒度词表（AI 自标可输出 图推·对称 / 逻辑·削弱加强 风格），避免只给「·综合」
+  ;['图形推理', '定义判断', '类比推理', '逻辑判断'].forEach((sub) => {
+    enums[sub] = (enums['判断推理'] || []).slice()
+  })
+  return enums
+}
+const KPOINT_ENUM = buildEnums()
+
+export function kpointEnum(plate) {
+  const list = (KPOINT_ENUM[plate] || []).slice()
+  const fallback = String(plate || '') + '·综合'
+  if (!list.includes(fallback)) list.push(fallback)
+  return list
+}
+// 生成 prompt 用枚举文本（同板块以「/」分隔）
+export function kpointEnumText(plate) {
+  return kpointEnum(plate).join(' / ')
+}
+
+export { KP_RULES, KPOINT_ENUM }

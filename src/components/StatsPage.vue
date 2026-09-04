@@ -8,6 +8,14 @@ import { showToast } from '../utils/toast'
 import { safeGet, KEYS } from '../utils/storage'
 import { masteryOfPlate } from '../utils/mastery'
 import { kpointOf } from '../utils/kpointLib'
+import { gateNow } from '../utils/abilityGate' // 35号批次4-B：能力自评灰度解锁
+import { recentGenStats } from '../utils/quizLog'
+import { genHealth } from '../utils/genHealth' // 深化·可诊断性：跨卷出题健康（板块·题型失败率） // 37号：出题质检数据外显
+import { readAttempts } from '../utils/attemptLog' // 5.2 考点热度数据源
+import { kpointHeat } from '../utils/kpointHeat' // 5.2 考点热度聚合
+import { difficultyTable } from '../utils/difficulty' // 难度校准摘要（数据在自动调难度）
+import { listFlagged, removeFlagged, confirmFlagged, dismissFlagged, flaggedStats } from '../utils/flaggedQuestions' // 深化③ UI：疑题榜单
+import { flaggedToCsv, flaggedToMd } from '../utils/flagExport' // 深化：疑题清单导出（CSV/MD 纯函数）
 import { useAi } from '../utils/useAi'
 const { run: aiRun } = useAi()
 const stats = computed(() => ({
@@ -218,6 +226,66 @@ const goalBreakdown = computed(() => {
     return { label: p.label, weight: p.weight, v: p.v, need, cur, gap: cur != null ? Math.round((need - cur) * 10) / 10 : null }
   })
 })
+// 35号批次4-B：AI 能力自评（灰度）——按 doc 35 §3.2 门槛点亮：全量≥200 且覆盖≥60% 板块才显示能力值；
+// 样本不足时只给解锁进度，不给没统计基础的数。能力值 = Elo θ（纵向自评口径，非全国排名）。
+const ability = computed(() => {
+  const g = gateNow()
+  const rows = Object.keys(g.theta).map((label) => ({ label, theta: g.theta[label].θ, n: g.theta[label].n })).sort((a, b) => b.theta - a.theta)
+  return { ...g.gate, rows, pct: Math.min(100, Math.round((g.gate.total / 200) * 100)) }
+})
+// 37号：出题质检运行数据（本机全量日志；门禁3 重出率反馈外显）
+const qcSum = computed(() => {
+  try {
+    const s = recentGenStats(0)
+    return s.gen ? { gen: s.gen, retried: s.retried, failed: s.failed, reasonsTop: (s.reasonsTop || []).slice(0, 2).join('；') } : null
+  } catch (e) { return null }
+})
+// 深化·可诊断性：跨卷出题健康——按(板块|题型)聚合失败率，筛出「反复难出」的类型供用户调参
+const health = computed(() => {
+  try { const h = genHealth({ minGen: 5, topN: 4 }); return (h.rows || []).filter((r) => r.fail > 0) } catch (e) { return [] }
+})
+// 5.2 考点热度（近 4 周 Top10，做题量×正确率）
+const heatTop = computed(() => {
+  try { return kpointHeat(readAttempts(), { weeks: 4, topN: 10 }).kps } catch (e) { return [] }
+})
+// 难度校准摘要：各板块实测正确率偏离中位最明显的前3（出题时会自动向目标区间调难度）
+const calibRows = computed(() => {
+  try {
+    const tbl = difficultyTable(readAttempts())
+    const rows = Object.keys(tbl.byPlate).map((pl) => {
+      const s = tbl.byPlate[pl]
+      return { pl, p: s.p, n: s.n, d: Math.abs(s.p - 0.55) }
+    }).filter((x) => x.n >= 8).sort((a, b) => b.d - a.d).slice(0, 3).map((x) => ({ ...x, tag: x.p >= 0.68 ? '偏易→自动调难' : x.p <= 0.42 ? '偏难→自动调易' : '区间内' }))
+    return rows
+  } catch (e) { return [] }
+})
+// 深化③ UI：疑题榜单（已上报且自动降权的题）
+const flaggedList = ref([])
+function loadFlagged() { try { flaggedList.value = listFlagged().slice(0, 20) } catch (e) { flaggedList.value = [] } }
+loadFlagged()
+function rmFlagged(id) { removeFlagged(id); loadFlagged() }
+// 深化·疑题生命周期：确有问题 / 误报 状态流转（误报不再降权同类题）
+function markFlag(id, st) { if (st === 'confirmed') confirmFlagged(id); else dismissFlagged(id); loadFlagged() }
+const flagChips = computed(() => { try { return flaggedStats() } catch (e) { return { open: 0, confirmed: 0, dismissed: 0 } } })
+// 深化(C)：疑题统计排行 + 导出
+const flagRank = computed(() => {
+  try {
+    const m = {}
+    listFlagged().forEach((x) => { const k = x.plate + '|' + (x.kpoint || x.variant || '综合'); m[k] = (m[k] || 0) + 1 })
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => ({ k, n }))
+  } catch (e) { return [] }
+})
+function exportFlagged() {
+  const list = (() => { try { return listFlagged() } catch (_) { return [] } })()
+  downloadText(flaggedToMd(list), '疑题反馈清单_' + new Date().toISOString().slice(0, 10) + '.md', 'text/markdown;charset=utf-8')
+  showToast('已导出疑题反馈清单（' + list.length + ' 条）', 'success')
+}
+function exportFlaggedCsv() {
+  const list = (() => { try { return listFlagged() } catch (_) { return [] } })()
+  downloadText(flaggedToCsv(list), '疑题反馈清单_' + new Date().toISOString().slice(0, 10) + '.csv', 'text/csv;charset=utf-8')
+  showToast('已导出疑题清单 CSV（' + list.length + ' 条 · Excel 可直接打开）', 'success')
+  loadFlagged()
+}
 const advice = computed(() => {
   const arr = mastery.value.filter((p) => p.v != null).sort((a, b) => a.v - b.v)
   if (!arr.length) return { text: '还没有做题数据，快去「单题快练 / 模拟组卷」开始第一题吧！', weak: '', strong: '' }
@@ -365,6 +433,18 @@ async function exportReport(days = 7, fmt = 'md') {
   L.push('- 提问 ' + asks + ' 次 · 做题 ' + quizDone + ' 题（正确率 ' + (quizDone ? Math.round((quizOk / quizDone) * 100) + '%' : '—') + '）')
   L.push('- 新增错题 ' + wrongs + ' 题 · 复盘 ' + revs + ' 次 · 学习 ' + mins + ' 分钟')
   L.push('')
+  // 🧾 出题健康小节（深化·诊断报告化）：本机累计出题日志的薄弱板块·题型
+  try {
+    const hd = genHealth({ minGen: 5, topN: 5 })
+    if (hd.total.gen > 0) {
+      L.push('## 🧾 出题健康（本机累计 ' + hd.total.gen + ' 次出题 · 未过闸 ' + hd.total.fail + ' 题，均 fail-closed 不入卷）')
+      const bad = hd.rows.filter((r) => r.fail > 0)
+      if (bad.length) bad.forEach((r) => L.push('- ' + r.plate + '·' + r.variant + '：失败 ' + r.fail + '/' + r.gen + '（' + Math.round((r.fail / r.gen) * 100) + '%）'))
+      else L.push('- 近段各类出题健康：无失败样本')
+      if (hd.reasonsTop.length) L.push('- 高频失败原因：' + hd.reasonsTop.join('；'))
+      L.push('')
+    }
+  } catch (e) {}
   L.push('## 🔥 学习打卡（近 15 周）')
   const cells = heat.value.weeks.flat()
   L.push('- 活跃 ' + cells.filter((d) => d.cnt > 0 || d.min > 0).length + ' 天 / ' + cells.length + ' 天')
@@ -471,6 +551,57 @@ async function exportReport(days = 7, fmt = 'md') {
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-top: 4px">当前预估分 = 六大板块按题量权重加权（判断/言语各30、资料20、数量8、常识7、政治5）；掌握度来自做题正确率 + 错题复盘 + 错题量。</div>
       </div>
+
+      <div class="sec-t">🧠 AI 能力自评（灰度）<span style="font-weight: 400; font-size: 12px; color: var(--text3)">纵向自评口径，非全国排名</span></div>
+      <div class="assess-card" style="font-size: 13px">
+        <template v-if="ability.predictionReady">
+          <div style="margin-bottom: 6px">📊 基于作答流水 {{ ability.total }} 次的纵向能力估算（Elo θ，样本越足越稳）：</div>
+          <div v-for="r in ability.rows" :key="r.label" style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
+            <span style="width: 64px">{{ r.label }}</span>
+            <span class="ass-num" style="font-size: 14px">{{ r.theta }}</span>
+            <span style="color: var(--text3)">样本 {{ r.n }} 题</span>
+          </div>
+          <div style="color: var(--text3); margin-top: 4px">说明：θ 由每次作答（含用时折价）按考点重放更新，仅供自我纵向对比；想得到“绝对校准”，可定期做锚点自测（每板块 10 道固定真题）。</div>
+        </template>
+        <template v-else>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
+            <span>🔒 能力自评解锁进度</span>
+            <span style="flex: 1; height: 8px; border-radius: 4px; background: var(--bg2, #1e293b); overflow: hidden"><i style="display: block; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #34d399, #22d3ee)" :style="{ width: ability.pct + '%' }"></i></span>
+            <b>{{ Math.min(ability.total, 200) }}/200</b>
+          </div>
+          <div style="color: var(--text3)">
+            <span v-if="ability.need > 0">还需累计作答 {{ ability.need }} 题后解锁（含单题/组卷/重做等全部作答事件）——样本不足时不显示能力值，避免给没统计基础的数。</span>
+            <span v-else>作答量已达标，继续覆盖更多板块即可解锁（当前 {{ Math.round(ability.coverage * 100) }}% 板块）。</span>
+            <span v-if="ability.anchorReady">；已累计 {{ ability.total }} 题，可定期做一次锚点自测（每板块 10 道固定真题）做绝对校准。</span>
+          </div>
+        </template>
+        <div v-if="qcSum" style="font-size: 11px; color: var(--text3); border-top: 1px dashed var(--bg3,#334155); margin-top: 8px; padding-top: 6px">🧾 出题质检运行数据（本机累计 {{ qcSum.gen }} 题）：重出 {{ qcSum.retried }} 题 · 未过闸 {{ qcSum.failed }} 题<span v-if="qcSum.reasonsTop"> · 高频失败原因：{{ qcSum.reasonsTop }}</span>（失败题不会入卷，属 fail-closed）</div>
+        <div v-if="health.length" style="font-size: 11px; color: var(--text3); margin-top: 4px">🔬 跨卷出题薄弱点（各 板块·题型 出题≥5）：<span v-for="h in health" :key="h.plate + h.variant" style="margin-right: 8px">{{ h.plate }}·{{ h.variant }} 失败{{ h.fail }}/{{ h.gen }}（{{ Math.round((h.fail / h.gen) * 100) }}%）</span>—— 这些类型常反复难出：可在出题配置关「严格质检/双模型互检」、换更快模型，或点「只补失败题」续出</div>
+        <div v-if="calibRows.length" style="font-size: 11px; color: var(--text3); margin-top: 4px">🎚️ 难度校准（板块实测，n≥8）：<span v-for="c in calibRows" :key="c.pl" style="margin-right: 8px">{{ c.pl }} 实测{{ Math.round(c.p * 100) }}%（{{ c.tag }}）</span></div>
+      </div>
+
+      <div v-if="heatTop.length" class="sec-t">🔎 考点热度 Top{{ heatTop.length }}（近 30 天 · 做题量 × 正确率）</div>
+      <div v-if="heatTop.length" class="assess-card" style="font-size: 12px">
+        <div v-for="k in heatTop" :key="k.kp" style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
+          <span style="flex: 0 0 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="k.kp">{{ k.kp }}</span>
+          <span style="flex: 1; height: 8px; border-radius: 4px; background: var(--bg2, #1e293b); overflow: hidden"><i style="display: block; height: 8px; border-radius: 4px" :style="{ width: Math.min(100, Math.round((k.total / heatTop[0].total) * 100)) + '%', background: k.rate == null ? '#64748b' : k.rate >= 80 ? '#34d399' : k.rate >= 60 ? '#fbbf24' : '#fb7185' }"></i></span>
+          <span style="flex: 0 0 96px; text-align: right">{{ k.total }} 题 · {{ k.rate == null ? '—' : k.rate + '%' }}</span>
+        </div>
+        <div style="color: var(--text3); margin-top: 4px">条长=做题量；颜色=正确率（绿≥80 / 黄 60-79 / 红(不足60)）。红 + 条长 = 薄弱高频考点，优先补短；空白 = 练得少</div>
+      </div>
+
+      <details v-if="flaggedList.length" class="assess-card" style="font-size: 12px">
+        <summary style="cursor: pointer; color: #fbbf24">⚠️ 疑题反馈榜（{{ flaggedList.length }} 条 · 已自动降低同类题出题权重）<span style="margin-left:6px; color:var(--text3); font-weight:400">待复核 {{ flagChips.open }} · 已确认 {{ flagChips.confirmed }} · 误报 {{ flagChips.dismissed }}</span></summary>
+        <div style="margin-top: 4px">📊 按 板块|考点 排行：<span v-for="rk in flagRank" :key="rk.k" style="margin-right: 8px">{{ rk.k }}×{{ rk.n }}</span></div>
+        <button class="btn btn-gh" style="padding: 1px 8px; font-size: 11px; margin-top: 2px" @click="exportFlagged()">📄 导出MD</button><button class="btn btn-gh" style="padding: 1px 8px; font-size: 11px; margin-top: 2px; margin-left: 4px" @click="exportFlaggedCsv()">📊 导出CSV</button>
+        <div v-for="f in flaggedList" :key="f.id" style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
+          <span style="flex: 0 0 90px">{{ f.plate }}</span>
+          <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="f.question">{{ f.kpoint || f.variant || '综合' }} · {{ f.note }}</span>
+          <span style="font-size: 10px" :style="{ color: f.status === 'confirmed' ? '#34d399' : f.status === 'dismissed' ? '#94a3b8' : '#fbbf24' }">{{ f.status === 'confirmed' ? '已确认' : f.status === 'dismissed' ? '误报' : '待复核' }}</span>
+          <template v-if="!f.status || f.status === 'open'"><button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" title="确认题目确实有问题（继续降权同类题）" @click="markFlag(f.id, 'confirmed')">✅确有问题</button><button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" title="判定为误报（解除降权）" @click="markFlag(f.id, 'dismissed')">❌误报</button></template>
+          <button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" @click="rmFlagged(f.id)">移除</button>
+        </div>
+      </details>
 
       <div class="sec-t">📈 学习趋势</div>
       <div class="trend-card">

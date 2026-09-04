@@ -1,4 +1,5 @@
 <script setup>
+import { richMd } from '../utils/wrongText'
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
 import { toRefs } from 'vue'
@@ -25,7 +26,7 @@ const {
         <span class="fi-idx">{{ i + 1 }}</span>
         <div class="fi-body">
           <div class="fi-subj">{{ q.subject || '未分类' }} · 错 {{ q.wrongCount || 1 }} 次 · 掌握 {{ masteryOf(q) }}%</div>
-          <div class="fi-q">{{ q.question }}</div>
+          <div class="fi-q" v-html="richMd(String((q || {}).question || ''))"></div>
         </div>
         <button class="btn btn-gh" @click="focusRedo(q)">✍️ 二刷</button>
       </div>

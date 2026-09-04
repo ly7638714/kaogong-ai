@@ -3,7 +3,7 @@ import { ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComp
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
 import { USAGE_GUIDE } from '../utils/usageGuide'
-import { parseQuiz, extractChoices, looksLikeQuiz } from '../utils/quiz'
+import { parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
 import { downloadMdScreenshot } from '../utils/capture'
 function md(t) {
   return renderMd(t)
@@ -40,6 +40,8 @@ import { buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirst
 import { retrieveDetailed } from '../kb/retrieveV2'
 import { normalizePlate } from '../kb/cards-index'
 import { verifyReply } from '../utils/replyVerify'
+import { wrongExplainPrompt } from '../utils/plateCoach'
+import { detectMode, askModeSys, MODE_MAP } from '../data/askModes'
 let _lastAskCtx = null
 import { analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
@@ -47,6 +49,7 @@ import { speakReadyText } from '../utils/speechScript'
 import { MODE_NAMES } from '../kb'
 import { collectChat } from '../utils/chat'
 import { showToast } from '../utils/toast'
+import { gateNow } from '../utils/abilityGate' // 35号批次4-B(2/2)：锚点自测解锁门槛
 import { navOpen, navBack } from '../utils/nav'
 import { buildReview } from '../utils/review'
 import ExamPanel from './ExamPanel.vue'
@@ -55,6 +58,7 @@ import { addPoints as petAddPoints } from '../utils/pet'
 // SolidTrain 依赖 three.js（~556KB），按需异步加载，避免拖慢启动
 const SolidTrain = defineAsyncComponent(() => import('./SolidTrain.vue'))
 import DataTrain from './DataTrain.vue'
+import AskWizard from './AskWizard.vue'
 const toolsCollapsed = ref(window.innerWidth <= 640) // 手机端默认收起为「🎯训练」抽屉
 const isNarrow = ref(window.innerWidth <= 640)
 try { if (localStorage.getItem('xc_chat_tools') !== null) toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
@@ -116,6 +120,26 @@ function confirmPlate(name) {
   saveCfg()
   if (ask.value) { ask.value.plate = { name, score: 99, conf: 1 }; ask.value.lowConf = false; ask.value.candidates = [] }
   showToast('✅ 已按「' + name + '」的方法论作答', 'success')
+}
+// ===== 四步发题向导（AskWizard）：发送前 板块→细分→题型→意图 手动定位，runChat 按路径定向注入 =====
+const wzOpen = ref(false)
+const wzSel = ref(null) // { plate, sub, type, mode }
+function wizardModeLabel(m) {
+  const mm = MODE_MAP[m]
+  return mm ? mm.label : (m || '')
+}
+function wzConfirm(sel) {
+  wzSel.value = { plate: sel.plate || '', sub: sel.sub || '', type: sel.type || '', mode: sel.mode || 'solve' }
+  store.cfg.pendingPlate = wzSel.value.plate
+  saveCfg()
+  if (ask.value) { ask.value.plate = { name: wzSel.value.plate, score: 99, conf: 1 }; ask.value.lowConf = false; ask.value.candidates = [] }
+  wzOpen.value = false
+  showToast('🎯 已锁定：' + wzSel.value.plate + (wzSel.value.sub ? '·' + wzSel.value.sub : '') + (wzSel.value.type ? '·' + wzSel.value.type : '') + ' · ' + wizardModeLabel(wzSel.value.mode) + '。发送后 AI 按此路径作答，可随时取消', 'success')
+  nextTick(() => { const ta = document.querySelector('.e-dock textarea'); if (ta) ta.focus() })
+}
+function wzCancel() {
+  if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+  wzSel.value = null
 }
 // 快捷 chip：把模板文本追加进输入框（不覆盖已有内容）
 function applyChip(ins) {
@@ -238,8 +262,9 @@ function onBlDown(e) {
 }
 
 // 选择题结构化：识别 AI 出题 → 对话页可点选项作答（新增消息与历史消息水合共用）
-function buildQuizFromMsg(m) {
+function buildQuizFromMsg(m, askReq) {
   if (!m || m.role !== 'assistant' || typeof m.content !== 'string' || m.err || m.stopped || m.quiz) return
+  if (!askReq) return // 非“叫我出题”的回复（真实题解析/复盘）一律不包装成可点选项卡
   if (!looksLikeQuiz(m.content)) return
   const quiz = parseQuiz(m.content)
   if (quiz) { m.quiz = quiz; return }
@@ -256,17 +281,20 @@ function buildQuizFromMsg(m) {
 // 历史消息水合：从本地恢复的旧消息（早期版本或当时未成功解析）也补建可点作答卡片
 function hydrateQuizCards() {
   let changed = false
+  let prevUserTxt = ''
   store.msgs.forEach((m) => {
+    if (m.role === 'user') { prevUserTxt = String(typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''); return }
     if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped) {
+      const askReq = isQuizAsk(prevUserTxt)
       if (m.quiz) {
-        // 清理历史误判：早期把「讲解/解析长文」误建成卡片的，水合时移除
-        if (!looksLikeQuiz(m.content)) {
+        // 清理历史误判：早期把「讲解/解析长文/真实题解析」误建成卡片的，水合时移除（截图整理卡 orgCard 保留）
+        if (!m.orgCard && (!askReq || !looksLikeQuiz(m.content))) {
           delete m.quiz
           changed = true
         }
-      } else {
+      } else if (askReq) {
         const before = m.quiz
-        buildQuizFromMsg(m)
+        buildQuizFromMsg(m, true)
         if (m.quiz && m.quiz !== before) changed = true
       }
     }
@@ -295,7 +323,7 @@ function addMsg(m) {
     // 归属板块：基于最近一次用户提问识别（与消息头/存错题同源）
     // 出题意图 / 学习诊断 提问跳过板块识别，避免「出一题图形…」「学习诊断」等请求被误标为图形推理并触发补画
     const _askT = String(lastAskText || '')
-    const _isQuizAsk = /(出一|来一|能不能出|给我出|出个|出几道|出题|让我(做|选|答)|做(一|几)道|练习|直接选|有选项|来道|出道)/.test(_askT) || /学习诊断|诊断/.test(_askT)
+    const _isQuizAsk = isQuizAsk(_askT) || /学习诊断|诊断/.test(_askT)
     m.bk = _isQuizAsk ? '' : (detectBanKuai(_askT) || '')
     // 考场计时开启时才弹用时统计（默认关闭避免打扰）；停止/失败/无耗时则不弹
     if (store.cfg.examMode && !m.err && !m.stopped && runSec.value > 0) {
@@ -310,8 +338,8 @@ function addMsg(m) {
   store.msgs.push(m)
   if (!m.t) m.t = Date.now()
   if (m.role === 'assistant' && !m.err) petAddPoints(1)
-  // 选择题结构化：识别 AI 出题 → 对话页可点选项作答
-  if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped && !m.quiz) {
+  // 选择题结构化：仅当用户在"叫我出题/练题"时，才把 AI 输出包装成可点作答卡（真实题的解析/复盘绝不自动加卡）
+  if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped && !m.quiz && isQuizAsk(String(lastAskText || ''))) {
     const quiz = parseQuiz(m.content)
     if (quiz) m.quiz = quiz
     else {
@@ -525,7 +553,7 @@ async function send() {
     userMsg._imgType = figRead.type || 'text'
   }
   // 出题意图检测：用户要求「出题/让我做/直接选」→ 让 AI 输出带完整选项与【正确答案】标记的可点作答题目
-  userMsg._askQuiz = /(出一|来一|能不能出|给我出|出个|出几道|出题|让我(做|选|答)|做(一|几)道|练习|练(一|几)题|直接选|有选项|来道|出道)/.test(txt)
+  userMsg._askQuiz = isQuizAsk(txt) // 仅“帮我出题/练题”请求才走可点作答；真实提问不生成选项卡
   pushRecent(txt)
   addMsg(userMsg) // 经 addMsg 统一处理（含考场倒计时启动/保存/滚动）
   text.value = ''
@@ -601,6 +629,28 @@ async function runChat() {
     else if (!_nx) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _pr.sub, text: curTxt }
   }
   let sys = buildSys(_plate ? PLATE_MODE[_plate] || '' : undefined, curTxt)
+  // ===== 四步发题向导：用户手动锁定 板块→细分→题型→意图，定向注入（覆盖自动猜测，本次发送即消费） =====
+  let wzMode = ''
+  try {
+    if (wzSel.value && wzSel.value.plate) {
+      const ws = wzSel.value
+      wzMode = ws.mode || 'solve'
+      const _wpath = [ws.plate, ws.sub, ws.type].filter(Boolean).join('·')
+      sys += '\n【发题向导·用户指定路径】用户已在发送前锁定本题路径：' + (_wpath || ws.plate) + '。请严格按该定位作答：判定确属此题型后调用对应专属方法，不要再猜其他板块/题型，也不要泛泛复述整个板块。'
+      if (ws.mode === 'wrong') {
+        // 错题复盘：文本若已含“做错/选我…”自动块已覆盖则不再叠加；否则按板块错因框架补一次
+        if (!/(做错|错题|答错|为什么错|错在哪|我选|判我|分析.*错)/.test(curTxt)) {
+          const _wp = wrongExplainPrompt(normalizePlate(ws.plate || ''))
+          if (_wp) sys += _wp
+        }
+      } else if (ws.mode && ws.mode !== 'solve') {
+        const _wm = askModeSys(ws.mode)
+        if (_wm) sys += _wm
+      }
+      if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+      wzSel.value = null
+    }
+  } catch (e) {}
   if (lastMsg && lastMsg._askQuiz) {
     sys += '\n【用户要求出题练习】请按用户要求出一道完整的行测题：题干 + 完整 A/B/C/D 四个选项（每个选项单独一行）。**不要输出答案和解析**，让用户先选择；用户选完后系统会再让你判题讲解。'
   }
@@ -649,6 +699,16 @@ async function runChat() {
       // P-B 判型先行：仅深单题(言语/判断等主观判断题型)启用，批答/泛问不加码
       if (_taskShape && _taskShape.kind === 'deepOne' && !_taskShape.sort && /(言语理解|判断推理|图形推理|定义判断|类比推理)/.test(_plate || '')) { const _tp = typeFirstPrompt(); if (_tp) sys += _tp }
       if (_taskShape && _taskShape.kind === 'deepOne') { const _hp = honestyPrompt(); if (_hp) sys += _hp }
+      // 错题讲解（做错/错题/为什么错/我选X）：按板块错因框架讲，不重讲整套
+      if (/(做错|错题|答错|为什么错|错在哪|我选|判我|分析.*错)/.test(curTxt)) {
+        const _wp = wrongExplainPrompt(normalizePlate(_plate || detectBanKuai(curTxt) || ''))
+        if (_wp) sys += _wp
+      }
+      // 泛化口吻→意图轻路由（重讲/易错点/总结考点），不覆盖错题通道
+      try {
+        const _md = detectMode(curTxt)
+        if (_md && _md !== wzMode) { const _ms = askModeSys(_md); if (_ms) sys += _ms }
+      } catch (e) {}
     } catch (e) {}
   }
   // 质量优先：历史尽量完整保留（不激进省 token），保障「解决具体提问」不缺上文。
@@ -1201,7 +1261,7 @@ function openExam(src) {
   examShow.value = true
   store.examOpen = true
   store.uiCtx.panel = 'exam'
-  navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : (src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : '模拟组卷') })
+  navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : src === 'anchor' ? '锚点自测' : '模拟组卷' })
 }
 function closeExam() {
   examShow.value = false
@@ -1209,6 +1269,15 @@ function closeExam() {
   store.uiCtx.panel = null
   examPaperData.value = null
   navBack()
+}
+// 35号批次4-B(2/2)：锚点自测——需累计 ≥100 次作答解锁（doc35 §3.2 冷启动门槛）
+function openAnchor() {
+  const g = gateNow().gate
+  if (!g.anchorReady) {
+    showToast('📐 锚点自测需累计作答 ' + g.total + '/100 题后解锁（锚点是固定真题，用来绝对校准能力值，样本太少没意义）', 'info')
+    return
+  }
+  openExam('anchor')
 }
 function openPaperData(paper) {
   examPaperData.value = paper || null
@@ -1873,6 +1942,7 @@ function fillPendingAsk() {
   showToast('📋 已按该知识卡预填提问，可直接发送（也可先修改）', 'info')
 }
 watch(() => store.pendingAsk, fillPendingAsk)
+watch(() => store.pendingOpenPaper, (p) => { if (!p) return; const saved = p; store.pendingOpenPaper = null; openPaperData(saved) })
 
 onMounted(() => {
   restoreDraft(); hydrateQuizCards()
@@ -1994,6 +2064,7 @@ defineEmits(['export-review'])
         <button class="btn btn-gh tb-btn" title="单题快练（原模拟出题）：选板块随机出1题，即时批改·可再来一题·错题入库" @click="openExam('single')">⚡ 单题快练</button>
         <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="examOffline = true; openExam('single')">📴 离线练习</button>
         <button class="btn btn-pri tb-btn" title="🌅 每日晨练包：资料速算5 + 常识速测5 + 错题未复盘二刷5，一键15题组合卷" @click="openExam('morning')">🌅 晨练包</button>
+        <button class="btn btn-gh tb-btn" title="📐 锚点自测：每板块10道固定真题校准能力值（累计作答100题后解锁）" @click="openAnchor()">📐 锚点自测</button>
         <button class="btn btn-gh tb-btn" title="统一考场：国考/省考卷面模板·AI智能出题·导入材料识别·错题组卷·限时作答批改" @click="openExam('ai')">📝 模拟组卷</button>
         
         <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
@@ -2274,6 +2345,10 @@ defineEmits(['export-review'])
           <button class="aa-enh" @click="openAssist()">🧭 开启提问助手（识别板块·题型，提示补全信息）</button>
         </div>
       </div>
+      <div v-if="wzSel && wzSel.plate" class="wz-active">
+        <span>🧭 <b>{{ wzSel.plate }}</b><template v-if="wzSel.sub"> · {{ wzSel.sub }}</template><template v-if="wzSel.type"> · {{ wzSel.type }}</template> · {{ wizardModeLabel(wzSel.mode) }}</span>
+        <button class="wz-cancel" @click="wzCancel()">✕ 取消锁定</button>
+      </div>
       <div class="input-bar">
         <div v-if="store.busy" class="stopwatch" :class="{ warn: left === 0 }">
           <span class="sw-ic">⏱</span>
@@ -2288,6 +2363,7 @@ defineEmits(['export-review'])
             @keydown.enter.exact.prevent="send()"
           ></textarea>
           <div class="dock-btns">
+          <button class="ib-btn wz-open" :class="{ on: !!wzSel }" title="🧭 四步发题向导：发送前先选 板块→细分→题型→意图，AI 不再猜题、按你的路径精准作答" @click="wzOpen = true">🧭</button>
           <button class="ib-btn" :class="{ on: store.cfg.ttsOn !== false }" :title="(store.cfg.ttsOn !== false ? '自动朗读已开启，点击关闭' : '自动朗读已关闭，点击开启')" @click="toggleTts()">{{ store.cfg.ttsOn !== false ? '🔊' : '🔇' }}</button>
           <button class="ib-btn" :style="{ color: recogOn ? 'var(--red)' : '' }" @click="toggleMic()">🎤</button>
           <button class="ib-btn" @click="linkShow = !linkShow">🔗</button>
@@ -2438,6 +2514,7 @@ defineEmits(['export-review'])
       </div>
     </div>
   </Teleport>
+  <AskWizard v-if="wzOpen" @close="wzOpen = false" @confirm="wzConfirm" />
   <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" :initial-local="examOffline" @close="closeExam" />
   
   <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />

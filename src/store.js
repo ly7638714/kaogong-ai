@@ -63,6 +63,9 @@ const D = () => ({
   themeMode: 'default',
   goalScore: 70, // 行测目标分数（100 制，用于综合评估）
   strictGen: true, // 出题严格质检：生成后二次验证唯一解/恰一正确（更稳，略慢）
+  fastAutoQC: true,
+  deepPlan: false,
+  propStyle: 'standard', // 命题质感：standard=标准 / strong=强陷阱(贴近真题卷面) / gentle=入门友好(干扰平实) // 深度命题两段式（先设计坑点再成题，文字题质感更强；每题 +1 次短请求，略慢，默认关） // 快模型质量门（默认开）：走「出题快模型/图形快模型」时即使关闭 strictGen 也保留一次 AI 复核兜底；追极限速度可关
   // 图形理解增强（可选 · 独立开源视觉模型，不影响文字/视觉主模型）
   fig: {
     on: false,
@@ -87,7 +90,7 @@ const D = () => ({
     model: 'deepseek-v4-flash'
   }
 })
-export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null, examMgr: false }, pendingAsk: '', pendingFocus: false })
+export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null, examMgr: false }, pendingAsk: '', pendingOpenPaper: null, pendingFocus: false })
 export function load() {
   try {
     const s = localStorage.getItem('xc_cfg')
@@ -239,12 +242,24 @@ export function addWrong(wq, opts = {}) {
     try { showToast('🚫 ' + chk.reason, 'error') } catch (e) {}
     return { ok: false, reason: chk.reason }
   }
+  // 完整性护栏（v3.8.167）：图形推理题必须有可渲染图形（题干/选项含 svg、md 图片或原题截图任一即可），杜绝“只有占位符”的残缺错题入库
+  if (wq && wq.subject === '图形推理') {
+    const rawTxt = String(wq.question || wq.q || wq.stem || '')
+    const hasFig = /<svg|```svg|!\[|<img|\[ECHARTS\]/.test(rawTxt) || !!((wq.imgs || []).length)
+    if (!hasFig) {
+      const reason = '图形推理题未包含图形（题干无 svg/图片、也无原题截图），为保证完整已拦截；请回原题重存或携带截图'
+      try { showToast('🚫 ' + reason, 'error') } catch (e) {}
+      return { ok: false, reason }
+    }
+  }
   const key = normWrongQ(wq)
   const dup = key ? store.wqs.find((x) => normWrongQ(x) === key) : null
   if (dup) {
     dup.wrongCount = (dup.wrongCount || 1) + 1
     dup.time = new Date().toLocaleString()
     if (wq.your && !dup.your) dup.your = wq.your
+    if (wq.designer && !dup.designer) dup.designer = wq.designer // 命题人设计说明补全（重复入库时也带上）
+    if (wq.explain && !dup.explain) dup.explain = wq.explain
     saveWqs()
     try { showToast('⚠️ 该题已在错题集，已累计错误次数，未重复添加', 'info') } catch (e) {}
     return { ok: true, dup: true, item: dup }
