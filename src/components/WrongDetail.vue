@@ -1,9 +1,13 @@
 <script setup>
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
-import { toRefs, computed } from 'vue'
+import { toRefs, computed, ref } from 'vue'
 import { richMd, snippet } from '../utils/wrongText' // 错题渲染净化
 import { downloadMdScreenshot, downloadLiveScreenshot } from '../utils/capture'
+import { retrieveCardsV2 } from '../kb/retrieveV2' // R5 关联知识卡（只读 kb）
+import { markLearned } from '../utils/learned'
+import { loadSrs, saveSrs, enqueueNew, ymdKey } from '../utils/memorySrs' // R5 二期：一键入记忆
+import { showToast } from '../utils/toast' // R5 标记已学
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -48,6 +52,33 @@ const {
   vtShow
 } = toRefs(props.ctx)
 
+// R5：按本题考点检索关联方法卡（≤3），可在详情内展开 / 标记已学 / 跳知识库
+const kbOpen = ref(false)
+const kbCards = computed(() => {
+  try {
+    const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
+    if (!q) return []
+    return retrieveCardsV2(String(q.subject || q.plate || ''), String(q.question || q.q || q.stem || ''), 3)
+  } catch (e) { return [] }
+})
+function memorizeRule() {
+  const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
+  if (!q) return
+  const txt = String(q.method || q.note || '').trim()
+  if (!txt) { try { showToast('请先填写「秒杀规律」或「笔记」再记', 'info') } catch (e) {} return }
+  try {
+    const srs = loadSrs()
+    const title = txt.replace(/\s+/g, ' ').slice(0, 60)
+    enqueueNew(srs, '我的错题', title, ymdKey())
+    saveSrs(srs)
+    showToast('🧠 已加入记忆复习（今天到期，今日复习中枢可见）', 'success')
+  } catch (e) {}
+}
+function openKbCard(id) {
+  if (id) { try { markLearned(id) } catch (e) {} }
+  window.dispatchEvent(new CustomEvent('xc-open-kb-card', { detail: id }))
+}
+
 const {
   addCustomReason,
   aiPolishReason,
@@ -60,7 +91,9 @@ const {
   del,
   downloadImg,
   gotoChat,
+  openRecall,
   openRedo,
+  wrongSubOf,
   repairFig,
   openRelated,
   openRename,
@@ -135,9 +168,10 @@ function capWrongExplain() {
         <h3>📋 错题详情</h3>
         <template v-if="cur >= 0 && store.wqs[cur]">
           <div class="pnl-sub">
-            {{ store.wqs[cur].subject || '未分类' }}
+            {{ wrongSubOf(store.wqs[cur]) || '未分类' }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
             <span class="wq-goto" title="以答题界面（可作答+即时判题）重做本题" @click.self.stop="openRedo()">✍️ 答题界面重做</span>
+            <span class="wq-goto" title="主动回忆复盘：先默写考点/思路再展开解析（计入二刷统计）" @click.self.stop="openRecall(store.wqs[cur])">🧠 主动回忆</span>
             <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>
             <span class="wq-goto" @click.self.stop="ankiPush()">🃏 推到 Anki</span>
           </div>
@@ -285,6 +319,31 @@ function capWrongExplain() {
             </div>
           </div>
 
+        <div v-if="cur >= 0 && store.wqs[cur]" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="memorizeRule()">🧠 记下这条规律（入记忆复习）</button>
+          <span class="cr-tip">把「秒杀 / 笔记」摘要（≤60字）加入今日记忆复习队列</span>
+        </div>
+        <!-- R5 关联知识卡（按本题考点检索 437 张方法卡，只读 kb） -->
+        <div v-if="kbCards.length" class="kb-link" style="margin-top:10px">
+          <div class="kb-link-hd" style="cursor:pointer;font-weight:600" @click="kbOpen = !kbOpen">📇 关联知识卡（{{ kbCards.length }}）{{ kbOpen ? '▾ 收起' : '▸ 展开' }} <span class="cr-tip">按本题考点匹配 · 可展开 / 标记已学 / 跳知识库</span></div>
+          <div v-if="kbOpen" style="margin-top:6px">
+            <div v-for="c in kbCards" :key="c.id" class="kb-link-card" style="border:1px dashed var(--bg3,#334155);border-radius:8px;padding:6px 8px;margin-bottom:6px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <b style="flex:1;min-width:140px">{{ c.plate }} · {{ c.type }}</b>
+                <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="标记为已学（点亮知识图谱）" @click="markLearned(c.id)">✓ 已学</button>
+                <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="openKbCard(c.id)">🔍 知识库打开</button>
+              </div>
+              <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--text2)">要点 / 陷阱 / 例题</summary>
+                <div style="font-size:12px;margin-top:4px;line-height:1.7">
+                  <div v-if="(c.steps || []).length"><b>步骤：</b><span v-for="(s, i) in c.steps" :key="i">{{ s }}；</span></div>
+                  <div v-if="(c.traps || []).length"><b>陷阱：</b><span v-for="(s, i) in c.traps" :key="i">{{ s }}；</span></div>
+                  <div v-if="c.tip"><b>提示：</b>{{ c.tip }}</div>
+                  <div v-if="c.example && c.example.q"><b>例：</b>{{ c.example.q }}</div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
 </template>
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="show = false">关闭</button>

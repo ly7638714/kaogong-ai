@@ -877,6 +877,10 @@ function filterTips() {
   const k = tipQuery.value.trim().toLowerCase()
   tipFiltered.value = k ? TIP_QA.filter(t => (t.q + t.a).toLowerCase().includes(k)) : TIP_QA
 }
+function askTipDetail(t) {
+  if (!t) return
+  emit('send-question', '【立体图推技巧问答】' + String(t.q || '') + '\n请结合以下要点通俗讲解并给记忆口诀：\n' + String(t.a || ''))
+}
 function askTipAI() {
   const q = tipQuery.value.trim()
   if (!q) { showToast('先输入你的问题', 'error'); return }
@@ -2070,7 +2074,7 @@ const foldProgPct = computed({
             <div class="tip-list">
               <details v-for="(t, i) in tipFiltered" :key="i" class="tip-it">
                 <summary>{{ t.q }}</summary>
-                <div class="tip-a">{{ t.a }}</div>
+                <div class="tip-a">{{ t.a }}</div><button class="btn btn-gh st-tip-send" style="margin-top:6px;padding:2px 10px;font-size:12px" @click="askTipDetail(t)">💬 问 AI 讲透并给口诀</button>
               </details>
               <div v-if="!tipFiltered.length" class="tip-empty">没有匹配的考点，换个关键词或点「问 AI」</div>
             </div>

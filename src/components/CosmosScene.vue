@@ -12,6 +12,7 @@ import { onMounted, onUnmounted, ref, computed, watch, nextTick, reactive } from
 import { store } from '../store'
 import { detectBanKuai, activeCfg, chatStream } from '../api'
 import { masteryOfPlate, MASTERY_PLATES } from '../utils/mastery'
+import { readAttempts } from '../utils/attemptLog' // R3 掌握度接作答证据
 import { createScene, PLATE_META } from '../scene/starSystem'
 import { pet, petStage, petLevel, petMood, petStats, patPet, feedPet, petSpeak, petMuted, bubble } from '../utils/pet'
 import { todaySeconds, totalSeconds, fmtMin, studyTick } from '../utils/study'
@@ -120,7 +121,7 @@ function computeDetailFor(key) {
   const active = !!(last[key] && now - last[key] < 7 * 86400000)
   // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达/看板同口径；按中文板块名+子板块分组）
   const _mp = MASTERY_PLATES.find((x) => x.key === meta.name) || { plates: [meta.name] }
-  let mastery = masteryOfPlate(meta.name, store.wqs, { plates: _mp.plates })
+  let mastery = masteryOfPlate(meta.name, store.wqs, { plates: _mp.plates, attempts: readAttempts() })
   let lastAt = '暂无记录'
   if (last[key]) {
     const mins = Math.round((now - last[key]) / 60000)

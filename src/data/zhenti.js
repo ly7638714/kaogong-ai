@@ -7,9 +7,29 @@ export async function zhentiIndex() {
   return r.json()
 }
 
+// ===== 真题卷 id 兼容（2026-09 文件名英文化：副省级→fushu 等）=====
+// 存量 localStorage/历史卷记录里可能存旧中文名 id；这里做 token 级名映射，
+// zhentiPaper() 首次装载失败时自动用新名重试一次，旧数据无需迁移即可自愈。
+const OLD_TO_NEW = [
+  ['贵州省考', 'guizhou'],
+  ['副省级', 'fushu'],
+  ['地市级', 'dishi'],
+  ['行政执法', 'xingzheng'],
+  ['省考', 'shengkao']
+]
+export function normalizeZhentiId(id) {
+  let s = String(id || '')
+  for (const [old, nw] of OLD_TO_NEW) s = s.split(old).join(nw)
+  return s
+}
 export async function zhentiPaper(id) {
-  const r = await fetch('./zhenti/' + id + '.json')
-  if (!r.ok) throw new Error('真题卷加载失败: ' + id)
+  const raw = String(id || '')
+  let r = await fetch('./zhenti/' + raw + '.json').catch(() => null)
+  if (!r || !r.ok) {
+    const mapped = normalizeZhentiId(raw)
+    if (mapped !== raw) r = await fetch('./zhenti/' + mapped + '.json').catch(() => null)
+  }
+  if (!r || !r.ok) throw new Error('真题卷加载失败: ' + raw)
   return r.json()
 }
 

@@ -3,6 +3,10 @@
 import { groupOf } from './abilityGate'
 
 const DAY = 86400000
+export function rateOf(cell) {
+  if (!cell || !cell.n) return null
+  return Math.round((cell.ok / cell.n) * 100)
+}
 export function weekOf(t, now) { return Math.floor((now - (t || now)) / (7 * DAY)) }
 
 export function kpointHeat(attempts, opts = {}) {

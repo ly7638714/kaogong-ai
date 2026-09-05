@@ -3,6 +3,7 @@
 // 把错题按板块进一步细分到题型（论证推理的加强/削弱/前提…），并用颜色+长度做强弱力度可视化，
 // 红色=薄弱（该题型错题多）、绿色=较稳；点题型即筛选下方错题列表，再点一次取消。
 import { computed, toRefs } from 'vue'
+import { groupLabelOf } from '../data/groupNames' // 大板块全称
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 const { fSubj, fSub } = toRefs(props.ctx)
@@ -20,12 +21,25 @@ function barWidth(count) {
   const max = d.value.maxCount || 1
   return Math.max(12, Math.round((count / max) * 100)) + '%'
 }
-function isActive(plate, sub) {
-  return fSubj.value === plate && fSub.value === sub
+// v3.8.207：行=「细分·题型」，组为六大板块；判断推理/言语理解 组内行带细分前缀（如 逻辑判断·削弱型）
+const SPLIT_GROUPS = ['判断推理', '言语理解']
+function rowLabel(plate, s) {
+  const sub = (s && s.sub) || ''
+  const type = (s && s.type) || (s && s.name) || ''
+  if (sub && sub !== plate && SPLIT_GROUPS.includes(plate)) return sub + '·' + type
+  return type
 }
-function pick(plate, sub) {
-  if (isActive(plate, sub)) props.ctx.clearTypeFilter()
-  else props.ctx.setTypeFilter(plate, sub)
+function chipLabel(x) {
+  // 判断推理/言语理解 组内行自带细分前缀，不再重复组名；其余组用全称前缀
+  if (SPLIT_GROUPS.includes(x.group)) return rowLabel(x.group, x)
+  return (groupLabelOf(x.group) || x.group) + '·' + (x.name || '')
+}
+function isActive(s) {
+  return !!s && fSubj.value === s.sub && fSub.value === (s.type || s.name)
+}
+function pick(plate, s) {
+  if (isActive(s)) props.ctx.clearTypeFilter()
+  else props.ctx.setTypeFilter(plate, (s && s.sub) || '', (s && (s.type || s.name)) || '')
 }
 </script>
 
@@ -41,30 +55,31 @@ function pick(plate, sub) {
       <span class="wts-top-l">⚠️ 最薄弱题型 TOP</span>
       <span
         v-for="(x, i) in d.topWeak"
-        :key="x.plate + x.name"
+        :key="x.group + '|' + x.sub + '|' + x.name"
         class="wts-top-chip"
-        :class="{ on: isActive(x.plate, x.name) }"
+        :class="{ on: isActive(x) }"
+        :title="`${groupLabelOf(x.group) || x.group} · ${x.sub || ''} · ${x.name}`"
         :style="{ background: strengthColor(x.count) + '1f', borderColor: strengthColor(x.count) }"
-        @click="pick(x.plate, x.name)"
-      >{{ i + 1 }}. {{ x.plate }}·{{ x.name }} <b>{{ x.count }}</b></span>
+        @click="pick(x.group, x)"
+      >{{ i + 1 }}. {{ chipLabel(x) }} <b>{{ x.count }}</b></span>
     </div>
 
     <div v-if="!d.plates.length" class="wts-empty">暂无错题数据，先去刷题并把错题「📌 存错题」吧～</div>
 
     <div v-for="p in d.plates" :key="p.plate" class="wts-plate">
       <div class="wts-plate-h">
-        <span class="wts-plate-n">{{ p.plate }}</span>
+        <span class="wts-plate-n">{{ groupLabelOf(p.plate) }}</span>
         <span class="wts-plate-t">{{ p.total }} 题</span>
       </div>
       <div
         v-for="s in p.subs"
-        :key="s.name"
+        :key="s.sub + '|' + s.type"
         class="wts-row"
-        :class="{ on: isActive(p.plate, s.name) }"
-        :title="`${p.plate} · ${s.name}：共 ${s.count} 道错题（占本板块 ${s.pct}%）`"
-        @click="pick(p.plate, s.name)"
+        :class="{ on: isActive(s) }"
+        :title="`${groupLabelOf(p.plate) || p.plate} · ${rowLabel(p.plate, s)}：共 ${s.count} 道错题（占本板块 ${s.pct}%）`"
+        @click="pick(p.plate, s)"
       >
-        <span class="wts-name">{{ s.name }}</span>
+        <span class="wts-name" style="flex-basis:auto;min-width:96px;text-align:left">{{ rowLabel(p.plate, s) }}</span>
         <span class="wts-bar-wrap">
           <span class="wts-bar" :style="{ width: barWidth(s.count), background: strengthColor(s.count) }"></span>
         </span>

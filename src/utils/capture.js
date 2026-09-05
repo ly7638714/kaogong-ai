@@ -7,6 +7,7 @@ import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from
 import { SVGRenderer } from 'echarts/renderers'
 import { renderMd } from './renderMd'
 import { showToast } from './toast'
+import { saveImage } from './downloadOut' // v3.8.214 统一保存出口（原生相册/另存为/兜底）
 
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -132,11 +133,7 @@ export async function downloadLiveScreenshot(el, { title, sub, name }) {
     try { bg = (host.ownerDocument && host.ownerDocument.defaultView && host.ownerDocument.defaultView.getComputedStyle(host).backgroundColor) || bg } catch (e) {}
     if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') bg = dark ? '#10141f' : '#ffffff'
     const dataUrl = await toPng(host, { pixelRatio: 2, cacheBust: true, backgroundColor: bg, width: host.offsetWidth, height: host.scrollHeight })
-    const a = document.createElement('a')
-    a.href = dataUrl
-    a.download = (name || title || '截图') + '.png'
-    a.click()
-    showToast('✅ 已导出截图：' + (name || title || '截图') + '.png', 'success')
+    await saveImage(dataUrl, (name || title || '截图') + '.png')
     return true
   } catch (e) {
     showToast('界面截图失败，改用内容导出：' + e.message, 'info')
@@ -200,11 +197,7 @@ export async function downloadMdScreenshot({ title, md, sub, name, theme }) {
       width: host.offsetWidth,
       height: host.scrollHeight
     })
-    const a = document.createElement('a')
-    a.href = dataUrl
-    a.download = (name || title || '截图') + '.png'
-    a.click()
-    showToast('✅ 已导出截图：' + (name || title || '截图') + '.png', 'success')
+    await saveImage(dataUrl, (name || title || '截图') + '.png')
   } catch (e) {
     showToast('截图导出失败：' + e.message, 'error')
   } finally {

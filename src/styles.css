@@ -4882,3 +4882,15 @@ body[data-theme='light'] .wz-foot { border-top-color: rgba(0,0,0,0.08); }
 @media (max-width: 480px) {
   .wz-plates .wz-p { min-width: 88px; font-size: 12.5px; }
 }
+/* v3.8.190 对话分步解析：AI 回复中的 ## 小节 -> 步骤卡片 */
+.msg.ai h2 { font-size: 14px; margin: 10px 0 4px; padding: 2px 10px; border-left: 3px solid var(--accent, #22d3ee); background: rgba(34, 211, 238, 0.08); border-radius: 6px; line-height: 1.6 }
+.msg.ai h2:first-child { margin-top: 0 }
+/* v3.8.196 今日目标卡 主题自适应（白天白底防低对比） */
+.ck-plan { background: var(--card, #0b1626); border: 1px solid var(--glass-border, rgba(127,127,127,.25)); }
+body[data-theme='light'] .ck-plan { background: #ffffff; }
+/* v3.8.199 资料材料：手机可横向滑动查看完整图/表 */
+.dt-mat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.dt-mat-scroll svg { max-width: none; }
+@media (max-width: 720px){ .dt-mat-scroll svg { min-width: 540px; } .dt-mat-scroll table { min-width: 560px; } }
+.dt-mat-scroll img { max-width: none !important; min-width: 100%; }
+@media (max-width: 720px){ .dt-mat-scroll img { min-width: 600px; } }

@@ -6,6 +6,7 @@ import { zhentiTypes } from '../data/zhenti'
 import { EXTRA_VARIANTS } from './examData' // 实测反馈③：自选下拉“更多/创新题型”同源扩展池
 import { readAttempts } from '../utils/attemptLog'
 import { loadPending, clearPending } from '../utils/pendingPaper' // 深化·断点续出：中断组卷草稿横幅 // 35号批次3-B：补短解锁进度
+import { groupLabelOf } from '../data/groupNames' // 大板块全称显示
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -18,6 +19,19 @@ const {
   onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx,
   selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates, retryInfo
 } = toRefs(props.ctx)
+
+// v3.8.211：统一考场七模式「身份卡」——每个入口有独立 名称/主色/一句话定位/要点，配置页不再千篇一律
+const EXAM_META = {
+  single: { c: '#34d399', name: '⚡ 单题快练', tag: '专项速刷：大板块(全称)→细分→题型→问法→组量，答完即批、错题入库。', pts: ['本地/离线零额度可用', '答错可钉同考点巩固', '自动进“出题集”可二刷'] },
+  ai: { c: '#5cc8ff', name: '🎲 AI 整卷出题', tag: '按真实卷面结构 AI 智能组卷：模块/题量/难度/补短自选，交卷出成绩单。', pts: ['支持断点续出 / 只补失败题', '可开仿真答题卡模式', '成绩单可导出 Word/PDF/MD/LaTeX/Typst'] },
+  import: { c: '#fbbf24', name: '📂 导入材料', tag: '把本地真题/讲义（图片/PDF/Word/txt/tex）识别成可做题。', pts: ['OCR 后先“预览校对”再入库', '可一键存入错题本'] },
+  wrong: { c: '#fb7185', name: '📚 错题集组卷', tag: '拿错题本组卷二刷：只看未复盘 / 按错次优先。', pts: ['联动 今日复习中枢 / 补弱任务'] },
+  zhenti: { c: '#a78bfa', name: '📋 真题快练', tag: '真题库（网友回忆版）快速练，AI 判题。', pts: ['支持按年份/板块选题'] },
+  morning: { c: '#f97316', name: '🌅 晨练包', tag: '一键 15 题晨练组合卷（资料5 + 常识5 + 错题二刷5）。', pts: ['完成联动看板“晨练”打卡'] },
+  weekRedo: { c: '#22d3ee', name: '📅 每周重做', tag: '每周重做卷：把本周到期/复错题按规则再卷一遍。', pts: ['到期与复错优先'] },
+  anchor: { c: '#60a5fa', name: '📐 锚点自测', tag: '每板块固定真题锚点，校准能力值（累计作答后解锁）。', pts: ['与 AI 出题同一套题型体系'] }
+}
+const meta = computed(() => EXAM_META[srcMode.value] || EXAM_META.ai)
 
 // 常量 / 方法（函数与数组不被 reactive 解包，保持原引用）
 const {
@@ -63,6 +77,16 @@ function toggleStrengthen(v) {
       <button class="fp-b" :class="{ on: srcMode === 'zhenti' }" @click="srcMode = 'zhenti'">📋 真题快练</button>
       <button class="fp-b" :class="{ on: srcMode === 'morning' }" @click="srcMode = 'morning'">🌅 晨练包</button>
       <button class="fp-b" :class="{ on: srcMode === 'weekRedo' }" @click="srcMode = 'weekRedo'">📅 每周重做</button>
+    </div>
+    <!-- v3.8.211 模式身份卡：每种训练入口独特配色与一句话定位 -->
+    <div class="ep-mode-id" :style="'background:linear-gradient(135deg,' + meta.c + '22,transparent);border:1px solid ' + meta.c + '55;border-radius:10px;padding:8px 12px;margin:6px 0'">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b :style="{ color: meta.c, fontSize: '14px' }">{{ meta.name }}</b>
+        <span style="font-size:12px;color:var(--text2);flex:1;min-width:200px">{{ meta.tag }}</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        <span v-for="p in meta.pts" :key="p" style="font-size:11px;color:var(--text3);border:1px solid rgba(127,127,127,.3);border-radius:10px;padding:1px 9px">{{ p }}</span>
+      </div>
     </div>
     <!-- 深化·续出：组卷残缺被拦截后 → 保留已出成功题、只补失败题的横幅 -->
     <div v-if="retryInfo" class="ep-note" style="margin: 6px 0; padding: 8px 10px; border: 1px dashed #e0a63c; background: #fff8e6">
@@ -295,7 +319,7 @@ function toggleStrengthen(v) {
       <div class="ep-param">
         <label>① 六大板块</label>
         <select v-model="singleGroup" class="tb-sel" @change="onSingleGroup()">
-          <option v-for="g in SIX_GROUPS" :key="g.key" :value="g.key">{{ g.key }}</option>
+          <option v-for="g in SIX_GROUPS" :key="g.key" :value="g.key">{{ groupLabelOf(g.key) }}</option>
         </select>
       </div>
       <div class="ep-param">

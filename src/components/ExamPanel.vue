@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { store, saveWqs, saveCfg, addWrong } from '../store'
+import { markMorningDone } from '../utils/dailyPlan' // v3.8.198 晨练打卡
 import { TEMPLATES, SUB_VARIANTS, DIR_LIB } from './examData'
 import { activeCfg, chatOnce, chatStream, supportsVision } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
@@ -706,6 +707,8 @@ function finish() {
   if (results.value.length > 50) results.value = results.value.slice(0, 50)
   saveResults()
   phase.value = 'result'
+// v3.8.198 晨练包完成 → 标记当日晨练（看板今日目标联动显示）
+if (srcMode.value === 'morning') { try { markMorningDone() } catch (e) {} }
   // 深化：锚点自测完成后提示校准基线（真题固定题正确率，供能力值绝对校准参考）
   const apName = curPaper.value && curPaper.value.name || ''
   if (apName.indexOf('📐 锚点自测') === 0) {
@@ -878,7 +881,7 @@ const topTitle = computed(() => {
   if (phase.value === 'gen') return '⏳ AI 出卷中…'
   if (phase.value === 'doing') return '📝 作答中 · ' + (curPaper.value ? curPaper.value.name : '模拟卷')
   if (phase.value === 'result') return '📄 成绩单'
-  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'morning' ? '🌅 每日晨练包' : srcMode.value === 'weekRedo' ? '📅 每周重做卷' : srcMode.value === 'import' ? '📂 导入组卷' : srcMode.value === 'wrong' ? '📚 错题组卷' : '📝 模拟组卷'
+  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'ai' ? '🎲 AI 整卷出题' : srcMode.value === 'morning' ? '🌅 每日晨练包' : srcMode.value === 'weekRedo' ? '📅 每周重做卷' : srcMode.value === 'import' ? '📂 导入材料' : srcMode.value === 'wrong' ? '📚 错题集组卷' : srcMode.value === 'zhenti' ? '📋 真题快练' : '📐 锚点自测'
 })
 function topBack() {
   if (phase.value === 'doing' || phase.value === 'result' || phase.value === 'preview') backToConfig()

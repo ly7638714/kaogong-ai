@@ -1,11 +1,16 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { store, getActiveExam, setActiveExam } from '../store'
+import { store, saveCfg, getActiveExam, setActiveExam } from '../store'
+import { readAttempts } from '../utils/attemptLog' // R3 掌握度接作答证据
+import { loadSrs, dueMemoryItems, ymdKey } from '../utils/memorySrs' // R 中枢角标
+import { todayProgress, planStatus, weekMini, DEFAULT_PLAN, morningDoneToday } from '../utils/dailyPlan' // 189 今日目标
 import { detectBanKuai, PLATE_MODE } from '../api'
 import { showToast } from '../utils/toast'
 import { safeGet, KEYS } from '../utils/storage'
 import { masteryOfPlate } from '../utils/mastery'
-import { todaySeconds, totalSeconds, fmtMin, studyTick } from '../utils/study'
+import { reviewHealth } from '../utils/reviewHealth' // 复盘健康分（深化）
+import { mergeWeakTasks } from '../utils/weakTask' // 补弱任务（深化）
+import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
 
 // 今日练习：统计今天(按日期)的 user 提问数（chat 记录无 time，用日期近似——用 store 计数即可，标注"累计"更稳）
 const ck = computed(() => {
@@ -14,8 +19,13 @@ const ck = computed(() => {
   const r = store.wqs.filter((x) => x.reviewed).length
   return { q, w, r, revRate: w ? Math.round((r / w) * 100) : 0 }
 })
+// 复盘健康分（深化）：复错率/到期/消化/复盘率 → 看板小结
+const health = computed(() => {
+  try { return reviewHealth(store.wqs) } catch (e) { return { score: 0, grade: '—', t: 0, tips: [], reviewedRate: 0, digestRate: 0, overdue: 0, repRate: null } }
+})
 // 当前激活考试（多考试倒计时：看板只针对当前激活的那场考试）
 const activeExam = computed(() => getActiveExam())
+const examLabel = computed(() => (activeExam.value && activeExam.value.name) || (store.cfg && store.cfg.examName) || '国考') // 冲刺节点标题随考试名
 const activeDate = computed(() => (activeExam.value && activeExam.value.date) || store.cfg.examDate || '2026-11-29')
 // 备考倒计时
 const daysLeft = computed(() => {
@@ -132,14 +142,30 @@ function loadTasks() {
     const t = JSON.parse(localStorage.getItem('xc_tasks') || 'null')
     if (t && t.date === todayKey() && Array.isArray(t.items)) {
       tasks.value = t.items
-      return
+    } else {
+      if (t && t.date !== todayKey() && Array.isArray(t.items)) {
+        const undone = t.items.filter((x) => !x.done).length
+        if (undone > 0) yesterdayLeft.value = undone
+      }
+      genTasks()
     }
-    if (t && t.date !== todayKey() && Array.isArray(t.items)) {
-      const undone = t.items.filter((x) => !x.done).length
-      if (undone > 0) yesterdayLeft.value = undone
-    }
+  } catch (e) {
+    genTasks()
+  }
+  mergeWeak()
+}
+// 补弱任务（深化）：同一题型累计答错>=3 的错题 → 自动 upsert 进今日任务；由错题二刷答错触发 xc-task-change 后刷新
+function mergeWeak() {
+  try {
+    const r = mergeWeakTasks(tasks.value, store.wqs, { wrongTypeOf: (q) => {
+      if (q && q.sub) return String(q.sub)
+      const plate = String((q && (q.subject || q.plate)) || '')
+      if (plate === '言语理解') return '片段阅读'
+      return plate || '未分类'
+    } })
+    tasks.value = r.tasks
+    if (r.changed) saveTasks()
   } catch (e) {}
-  genTasks()
 }
 function trainWeak() {
   if (!weakest.value) return
@@ -208,6 +234,10 @@ function goTask(t) {
     store.tab = 'chat'
   } else if (t.k === 'redo') {
     store.tab = 'wq'
+  } else if (t.weak) {
+    // 补弱任务（深化）：直接去对话页出同题型题
+    store.pendingAsk = '请给我出一道【' + (t.type || '') + '】' + (t.plate || '') + '题练手，先别给答案'
+    store.tab = 'chat'
   } else {
     store.tab = 'ths'
     showToast('💡 积累页已打开：选 常识/时政/成语/实词 → 看一条 → 点「记住了」按艾宾浩斯排期复习', 'info')
@@ -227,15 +257,40 @@ const WELCOME = [
 const welcome = ref('')
 // ===== 掌握度概览（看板 · 六大板块 + 目标分评估） =====
 const CP_PLATES = [
-  { key: '判断推理', label: '判断', weight: 30, subs: ['判断推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
-  { key: '言语理解', label: '言语', weight: 30, subs: ['言语理解'] },
-  { key: '资料分析', label: '资料', weight: 20, subs: ['资料分析'] },
-  { key: '数量关系', label: '数量', weight: 8, subs: ['数量关系'] },
-  { key: '常识判断', label: '常识', weight: 7, subs: ['常识判断'] },
-  { key: '政治理论', label: '政治', weight: 5, subs: ['政治理论'] }
+  { key: '判断推理', label: '逻辑判断与推理', weight: 30, subs: ['判断推理', '逻辑判断与推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
+  { key: '言语理解', label: '言语理解与表达', weight: 30, subs: ['言语理解', '言语理解与表达', '片段阅读', '篇章阅读'] },
+  { key: '资料分析', label: '资料分析', weight: 20, subs: ['资料分析'] },
+  { key: '数量关系', label: '数量关系', weight: 8, subs: ['数量关系'] },
+  { key: '常识判断', label: '常识判断', weight: 7, subs: ['常识判断'] },
+  { key: '政治理论', label: '政治理论', weight: 5, subs: ['政治理论'] }
 ]
 const cpCol = ref([])
 cpCol.value = safeGet(KEYS.QUIZ_COL, [])
+const srsTick = ref(0)
+window.addEventListener('xc-srs', () => { srsTick.value++ })
+const hubCnt = computed(() => {
+  srsTick.value
+  let n = 0
+  try { n += store.wqs.filter((q) => q.digested && q.dueAt && q.dueAt <= Date.now()).length } catch (e) {}
+  try { n += dueMemoryItems(loadSrs(), ymdKey()).length } catch (e) {}
+  return n
+})
+function openHub() { window.dispatchEvent(new CustomEvent('xc-open-hub')) }
+const planCfg = computed(() => Object.assign({}, DEFAULT_PLAN, (store.cfg && store.cfg.dailyPlan) || {}))
+const tp = computed(() => { try { return todayProgress({ attempts: readAttempts(), wqs: store.wqs, study: studyMap() }) } catch (e) { return { q: 0, rev: 0, minutes: 0, due: 0 } } })
+const ps = computed(() => planStatus(planCfg.value, tp.value))
+const morningTick = ref(0)
+window.addEventListener('xc-morning', () => { morningTick.value++ })
+const morningOk = computed(() => { morningTick.value; try { return morningDoneToday() } catch (e) { return false } })
+const week = computed(() => { try { return weekMini({ attempts: readAttempts(), wqs: store.wqs, study: studyMap() }) } catch (e) { return [] } })
+const weekMax = computed(() => Math.max(1, ...week.value.map((d) => d.total)))
+function setPlanGoal(k, v) {
+  const c = Object.assign({}, planCfg.value)
+  c[k] = Math.max(0, parseInt(v, 10) || 0)
+  try { store.cfg = Object.assign({}, store.cfg || {}, { dailyPlan: c }); saveCfg(store.cfg) } catch (e) {}
+}
+function goQuizAsk() { store.tab = 'chat'; store.pendingAsk = '请给我出一道' + (weakPlate() || '判断推理') + '单选题练手' }
+function goWrongs() { store.tab = 'wq' }
 const cpMastery = computed(() => {
   const items = CP_PLATES.map((p) => {
     const col = cpCol.value.filter((x) => p.subs.includes(x.subject))
@@ -247,7 +302,7 @@ const cpMastery = computed(() => {
     const rate = done ? Math.round((ok / done) * 100) : null
     // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达/CosmosScene 同口径）；无数据保持 null（看板显示"—"）
     let v = null
-    if (attempts > 0) v = masteryOfPlate(p.key, store.wqs, { plates: p.subs })
+    if (attempts > 0) v = masteryOfPlate(p.key, store.wqs, { plates: p.subs, attempts: readAttempts() })
     // 近 7 天活跃
     let active = false
     col.forEach((x) => { if (x.at && Date.now() - x.at < 7 * 86400000) active = true })
@@ -328,7 +383,8 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
 <template>
   <div class="page on">
     <div class="page-inner cock">
-      <div class="ck-head">
+      <div style="margin: 2px 0 8px"><button class="btn btn-gh" style="padding: 5px 12px" @click="openHub()">🗓️ 今日复习中枢 <b v-if="hubCnt" style="color:#fb7185">{{ hubCnt }}</b></button></div>
+  <div class="ck-head">
         <div class="ck-title">🚀 学习驾驶舱</div>
         <div v-if="daysLeft != null" class="ck-sub">
           距 <b class="ck-exam-name" :style="{ color: activeExam ? activeExam.color : '' }">【{{ activeExam ? activeExam.name : '考试' }}】</b> 笔试还有
@@ -337,7 +393,36 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         </div>
         <div v-else class="ck-sub">在 设置 → 考试管理 里配置笔试日期可显示倒计时</div>
       </div>
-      <!-- 考试切换 chips：各自独立倒计时 -->
+      <!-- 今日目标（189）：复习到期/做题/复盘/时长 + 本周完成迷你柱 -->
+  <div class="ck-plan" style="margin:10px 0 4px;border-radius:12px;padding:10px 12px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <b>🎯 今日目标</b>
+      <span v-if="ps.allDone" style="color:#34d399;font-size:12px">✅ 已达成</span>
+      <span :style="{ color: morningOk ? '#34d399' : 'var(--text3)', fontSize: '12px' }">🌅 晨练{{ morningOk ? ' ✅' : ' 未做' }}</span>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--text3)">进度 {{ ps.pct }}%</span>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;align-items:center">
+      <span style="font-size:12px">复习到期 <b style="color:#fb7185">{{ tp.due }}</b></span>
+      <span style="font-size:12px">做题 <b>{{ tp.q }}/{{ planCfg.quiz }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.quiz" @change="setPlanGoal('quiz', $event.target.value)" /></span>
+      <span style="font-size:12px">复盘 <b>{{ tp.rev }}/{{ planCfg.review }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.review" @change="setPlanGoal('review', $event.target.value)" /></span>
+      <span style="font-size:12px">时长分 <b>{{ tp.minutes }}/{{ planCfg.minutes }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.minutes" @change="setPlanGoal('minutes', $event.target.value)" /></span>
+    </div>
+    <div style="height:6px;border-radius:4px;background:rgba(127,127,127,.15);margin-top:8px;overflow:hidden"><i :style="{ display:'block', height:'6px', width: ps.pct + '%', background:'linear-gradient(90deg,#34d399,#fbbf24)' }"></i></div>
+    <div style="display:flex;gap:6px;margin-top:8px;align-items:flex-end">
+      <span style="font-size:11px;color:var(--text3);margin-right:6px">本周</span>
+      <span v-for="(d, i) in week" :key="d.key" style="display:flex;flex-direction:column;align-items:center;gap:2px" :title="d.key + ' 做题' + d.q + ' · 复盘' + d.r + ' · ' + d.min + '分'">
+        <i :style="{ display:'block', width:'10px', height: Math.max(2, Math.round(d.total / weekMax * 22)) + 'px', background:'var(--accent2,#22d3ee)', borderRadius:'2px', opacity:.85 }"></i>
+        <em style="font-style:normal;font-size:10px;color:var(--text3)">{{ d.label }}</em>
+      </span>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="openHub()">🗓️ 复习中枢</button>
+      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="goQuizAsk()">⚡ 单题快练</button>
+      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="goWrongs()">📋 错题</button>
+    </div>
+  </div>
+  <!-- 考试切换 chips：各自独立倒计时 -->
       <div class="ck-exams">
         <button
           v-for="ex in (store.cfg.exams || [])" :key="ex.id"
@@ -474,8 +559,28 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         复盘到位是提分关键。待复盘 {{ ck.w - ck.r }} 题。
       </div>
 
+      <!-- 复盘健康（深化）：评分 + 四指标 + 建议 -->
+      <div class="sec-t">💗 复盘健康</div>
+      <div v-if="health.t" style="border:1px solid rgba(127,127,127,.18);border-radius:12px;padding:10px 12px;background:var(--bg2,rgba(127,127,127,.06))">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="font-size:26px;font-weight:700;line-height:1" :style="{ color: health.score >= 85 ? '#34d399' : health.score >= 60 ? '#fbbf24' : '#fb7185' }">{{ health.score }}</div>
+          <div style="flex:1;min-width:150px">
+            <div style="font-size:13px">复盘健康 <b>{{ health.grade }}</b> · 共 {{ health.t }} 题错题</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--text2);margin-top:3px">
+              <span>复盘率 {{ health.reviewedRate }}%</span>
+              <span>消化率 {{ health.digestRate }}%</span>
+              <span v-if="health.repRate != null">复错率 {{ health.repRate }}%</span>
+              <span v-if="health.overdue">到期积压 <b style="color:#fb7185">{{ health.overdue }}</b></span>
+            </div>
+          </div>
+          <button class="btn btn-gh" style="padding:3px 12px;font-size:12px" @click="openHub()">🗓️ 清到期</button>
+        </div>
+        <div v-if="health.tips.length" style="font-size:11.5px;color:var(--text3);margin-top:6px">{{ health.tips.join('；') }}</div>
+      </div>
+      <div v-else class="empty" style="padding:10px 0"><div class="empty-d">先收几道错题并复盘，这里会给出「复盘健康分」与建议</div></div>
+
       <!-- 考试节点横条 -->
-      <div class="sec-t">📅 国考冲刺节点</div>
+      <div class="sec-t">📅 {{ examLabel }}冲刺节点</div>
       <div class="ck-nodes">
         <div v-for="n in nodes" :key="n.t" class="ck-node" :class="{ hot: n.hot }">
           <div class="cn-i">{{ n.i }}</div>

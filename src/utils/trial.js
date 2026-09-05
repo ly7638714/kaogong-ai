@@ -1,4 +1,6 @@
 // utils/trial.js —— 试用模式门禁（仅当构建时开启 VITE_TRIAL_MODE=true 才生效，正式构建完全不受影响）
+// ⚠️ 红线：本文件与 components/TrialGate.vue 属【正式源码】——由 VITE_TRIAL_MODE 编译期开关保护
+//   （正式构建 Rollup 树摇剔除，零影响）。切勿按旧「试用版残留」红线删除/清理，否则破坏正式构建。
 // 配置来源：.env.trial（VITE_TRIAL_CODE 邀请码 / VITE_TRIAL_EXPIRES 到期时间）
 // 说明：纯前端“软限制”——足够限制普通体验用户；到期后自动锁定，无法进入。
 const CFG = {

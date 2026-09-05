@@ -18,3 +18,14 @@ describe('renderMd smoke', () => {
     expect(html.includes('```')).toBe(false)
   })
 })
+
+describe('GFM 表格渲染', () => {
+  it('管道表格渲染成 <table><th><td>', async () => {
+    const m = await import('../utils/renderMd')
+    const h = m.renderMd('## 标题\n\n| 板块 | 错题 |\n| --- | --- |\n| 逻辑判断与推理 | 5 |\n| 资料分析 | 22 |')
+    expect(h).toContain('<table>')
+    expect(h).toContain('<th>板块</th>')
+    expect(h).toContain('<td>5</td>')
+    expect(h).toContain('table-scroll')
+  })
+})

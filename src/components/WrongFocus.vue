@@ -13,19 +13,20 @@ const {
 
 const {
   focusRedo,
-  masteryOf
+  masteryOf,
+  wrongSubOf
 } = props.ctx
 </script>
 
 <template>
   <div v-if="focusShow" class="ov show" @click.self="focusShow = false">
     <div class="pnl">
-      <h3>🎯 今日优先复习（按 错次×3 + 久未二刷 + 未复盘 排序）</h3>
+      <h3>🎯 今日优先复习（到期 / 复错加权 · 最多 8 题）</h3>
       <div v-if="!focusList.length" class="empty-t">暂无错题</div>
       <div v-for="(q, i) in focusList" :key="q.id" class="focus-item">
         <span class="fi-idx">{{ i + 1 }}</span>
         <div class="fi-body">
-          <div class="fi-subj">{{ q.subject || '未分类' }} · 错 {{ q.wrongCount || 1 }} 次 · 掌握 {{ masteryOf(q) }}%</div>
+          <div class="fi-subj">{{ wrongSubOf(q) || '未分类' }} · 错 {{ q.wrongCount || 1 }} 次 · 掌握 {{ masteryOf(q) }}%{{ (q.digested && q.dueAt && q.dueAt <= Date.now()) ? ' · 🔔 到期' : '' }}</div>
           <div class="fi-q" v-html="richMd(String((q || {}).question || ''))"></div>
         </div>
         <button class="btn btn-gh" @click="focusRedo(q)">✍️ 二刷</button>

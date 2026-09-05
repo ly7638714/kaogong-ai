@@ -1,8 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { genDataQ, CALC_METHOD_LIB } from '../utils/dataTrainGen'
+import { genLocateChain } from '../utils/dataTrainChain' // v3.8.203 同材料连问
+import { DOMAINS, domainOf } from '../data/dataDomains' // v3.8.213 领域字典 60+
 import { KNOWLEDGE_CARDS, KB_LAYERS, searchCards, cardForQuiz } from '../utils/dataTrainLib'
 import { renderMd } from '../utils/renderMd'
+import { lockHighlights, REAL_REF, findLockWords } from '../utils/dataTrainTips' // v3.8.200 小技巧层
 import { showToast } from '../utils/toast'
 import { store } from '../store'
 import { chatOnce, activeCfg } from '../api'
@@ -26,6 +29,71 @@ const streak = ref(0)
 const bestStreak = ref(0)
 const score = ref(0)
 const elapsed = ref(0)
+const DT_BEST_KEY = 'xc_dt_best_v1'
+function readDtBest() { try { return JSON.parse(localStorage.getItem(DT_BEST_KEY) || '{}') } catch (e) { return {} } }
+function saveRunBest() {
+  const st = stats.value
+  if (!st.total) return
+  const all = readDtBest()
+  const k = mode.value + '_' + level.value
+  const cur = all[k]
+  const pct = Math.round((st.ok / st.total) * 100)
+  if (!cur || st.total > cur.total || (st.total === cur.total && pct >= (cur.pct || 0))) all[k] = { ok: st.ok, total: st.total, pct }
+  try { localStorage.setItem(DT_BEST_KEY, JSON.stringify(all)) } catch (e) {}
+}
+const bestChip = computed(() => { const b = readDtBest()[mode.value + '_' + level.value]; return b && b.total ? b : null })
+// v3.8.199：本题/总计时 + 题组 + 数据来源·领域
+const qStart = ref(0)
+const qTime = ref(0)
+const groupSize = ref(0)
+const groupDone = ref(false)
+const DTS_SRC_KEY = 'xc_dt_src'
+const SRC_OPTIONS = ['国家统计局', '北京市统计局', '上海市统计局', '天津市统计局', '重庆市统计局', '广东省统计局', '浙江省统计局', '江苏省统计局', '山东省统计局', '福建省统计局', '湖北省统计局', '湖南省统计局', '河南省统计局', '安徽省统计局', '四川省统计局', '贵州省统计局', '云南省统计局', '陕西省统计局', '辽宁省统计局', '吉林省统计局', '黑龙江省统计局', '河北省统计局', '山西省统计局', '江西省统计局', '广西壮族自治区统计局', '新疆维吾尔自治区统计局', '内蒙古自治区统计局', '西藏自治区统计局', '青海省统计局', '甘肃省统计局', '宁夏回族自治区统计局', '海南省统计局']
+const FIELD_HOT = DOMAINS.filter((d) => d.cat === '热').map((d) => d.n)
+const FIELD_COLD = DOMAINS.filter((d) => d.cat === '冷').map((d) => d.n)
+const dtSrc = ref({ src: '国家统计局', field: '粮食', customField: '' })
+try { const _s = JSON.parse(localStorage.getItem(DTS_SRC_KEY) || 'null'); if (_s) dtSrc.value = Object.assign({}, dtSrc.value, _s) } catch (e) {}
+function saveDtSrc() { try { localStorage.setItem(DTS_SRC_KEY, JSON.stringify(dtSrc.value)) } catch (e) {} }
+function setSrc(v) { dtSrc.value.src = v; saveDtSrc(); reset() }
+function setField(v) { dtSrc.value.field = v; dtSrc.value.customField = ''; saveDtSrc(); reset() }
+function setCustomField(v) { dtSrc.value.customField = v; saveDtSrc(); reset() }
+const srcLabel = computed(() => { const f = dtSrc.value.customField ? (dtSrc.value.field + '·' + dtSrc.value.customField) : dtSrc.value.field; return dtSrc.value.src + ' · ' + f })
+const lockShow = ref(true)
+const realRef = computed(() => REAL_REF[srcLabel.value] || (dtSrc.value.customField ? '' : '真实口径参考请以所选来源官网年度公报为准（本材料为离线样本，非实时获取）。'))
+// v3.8.202：题组结果统计 + 三锁定判题联动
+const hist = ref([])
+const chain = ref(null)
+const chainIdx = ref(0)
+function startChain() {
+  const c = genLocateChain(Date.now() % 100000, 3)
+  if (!c) { showToast('同材料生成失败，请重试', 'err'); return }
+  chain.value = c
+  chainIdx.value = 0
+  applyChainQ()
+}
+function applyChainQ() {
+  const it = chain.value.qs[chainIdx.value]
+  q.value = Object.assign({}, it, { materialMd: chain.value.materialMd, _chain: true })
+  picked.value = ''
+  qStart.value = Date.now()
+  qTime.value = 0
+  idx.value += 1
+}
+function chainNext() {
+  if (!chain.value) return
+  if (chainIdx.value < chain.value.qs.length - 1) { chainIdx.value++; applyChainQ() }
+  else { showToast('🎉 本材料连问完成，共 ' + chain.value.qs.length + ' 问', 'success'); chain.value = null }
+}
+const lockWords = ref({ time: [], ind: [], unit: [] })
+const grpStats = computed(() => {
+  const total = stats.value.total
+  const ok = stats.value.ok
+  const secs = Math.max(1, elapsed.value)
+  const avg = total ? Math.round(secs / total) : 0
+  return { total, ok, bad: total - ok, rate: total ? Math.round((ok / total) * 100) : 0, secs, avg }
+})
+function setGroup(n) { groupSize.value = n; groupDone.value = false; reset() }
+watch(q, (nq) => { qStart.value = Date.now(); qTime.value = 0; if (nq) nq._srcLabel = srcLabel.value })
 let timerId = null
 
 const MODES = [
@@ -137,7 +205,7 @@ function gen() {
   picked.value = ''
   aiText.value = ''
   const seed = Date.now() % 100000 + idx.value * 137
-  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined)
+  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined, dtSrc.value.customField ? null : domainOf(dtSrc.value.field))
   if (!q.value) {
     showToast('生成失败，请重试', 'err')
     return
@@ -147,6 +215,7 @@ function gen() {
 function pick(k) {
   if (!q.value || picked.value) return
   picked.value = k
+  qTime.value = Math.max(0, Math.round((Date.now() - qStart.value) / 1000))
   const ok = k === q.value.answer
   if (ok) {
     stats.value.ok++
@@ -160,6 +229,9 @@ function pick(k) {
     modeStats.value[mode.value].bad++
   }
   stats.value.total++
+  hist.value.push({ ok, t: qTime.value })
+  try { lockWords.value = findLockWords(q.value && (q.value.materialMd || q.value.materialSvg)) } catch (e) {}
+  if (groupSize.value > 0 && stats.value.total >= groupSize.value) { groupDone.value = true; showToast('🏁 本组完成！共 ' + stats.value.total + ' 题 · 对 ' + stats.value.ok + ' · 正确率 ' + Math.round((stats.value.ok / stats.value.total) * 100) + '%', 'success') }
 }
 function switchMode(m) {
   mode.value = m
@@ -175,6 +247,10 @@ function setStage(st) {
   reset()
 }
 function reset() {
+  saveRunBest() // v3.8.198 结算上一轮 → 记录该模式·难度历史最佳
+  groupDone.value = false
+  hist.value = []
+  chain.value = null
   stats.value = { ok: 0, bad: 0, total: 0, start: Date.now() }
   elapsed.value = 0
   streak.value = 0
@@ -182,6 +258,7 @@ function reset() {
   gen()
 }
 function nextQ() {
+  if (groupSize.value > 0 && stats.value.total >= groupSize.value) { groupDone.value = true; showToast('🏁 本组已完成，点「🔄 再来一组」或换组量', 'success'); return }
   gen()
 }
 function sendChat() {
@@ -270,6 +347,7 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
 4. **④ 计算执行 · 速算**：先看选项差距（二八速判）再选估算方法（化除为乘/份数/百化分/截位/放缩），系统观念、不精算到小数点——公考本质是筛选。
 
 **如何高效训练**：四层逐层过关才算"会做资料分析"。本模块四种模式各对应一层，可随时切换难度（🌱入门 / ⚡进阶 / 🔥实战）。速算模式分三阶段训练：🔍方法识别 → ✏️方法应用 → 🎯实战混合。答错时右侧会展示"判别口诀 + 速算过程 + 操作步骤"，这正是 LY 老师强调的复盘动作：复选公式、查时间/单位/方向/基数陷阱、复盘估算路径。`
+onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
 </script>
 <template>
   <div class="ov show dt-ov" @click.self="emit('close')">
@@ -278,8 +356,8 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
         <button class="pnl-top-b" style="margin-right: 4px" title="返回上一层（也可按 Esc / 浏览器返回）" @click="emit('close')">← 返回</button>
         <span class="dt-title">📊 资料分析 · 四层能力训练</span>
         <div class="dt-acts">
-          <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span>
-          <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span>
+          <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span><span v-if="bestChip" class="dt-chip" :title="'该模式·难度历史最佳'" style="color:#fbbf24">🏅 {{ bestChip.ok }}题 {{ bestChip.pct }}%</span>
+          <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本题用时">⏱ 本题 {{ qTime }}s</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
           <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
           <button class="pc-close" @click="emit('close')">✕</button>
@@ -395,16 +473,41 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
             </div>
           </template>
 
-          <template v-else-if="q">
+      <template v-else-if="q">
+
+  <div class="dt-set" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:11px">
+  <span v-if="mode === 'locate' || mode === 'formula'" class="dt-chip" style="cursor:pointer" :title="'三锁定高亮'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 三锁定高亮开' : '🔍 三锁定高亮关' }}</span>
+        <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一张表格材料连续出 3 问" @click="startChain()">🔁 同材料连问(表格)</button>
+        <span v-if="chain" class="dt-chip" style="color:#34d399">📋 同材料 {{ chainIdx + 1 }}/{{ chain.qs.length }}</span>
+        <button v-if="chain && picked && chainIdx < chain.qs.length - 1" class="btn btn-pri" style="padding:1px 8px;font-size:11px" @click="chainNext()">➡️ 下一问(同材料)</button>
+        <span class="dt-chip">组量：</span>
+  <button v-for="n in [0, 1, 5, 10, 15, 20]" :key="n" class="btn" :class="groupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setGroup(n)">{{ n === 0 ? '🎲 随机' : n + '题' }}</button>
+  <span class="dt-chip">来源：</span>
+  <select :value="dtSrc.src" style="font-size:11px" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
+  <span class="dt-chip">领域：</span>
+  <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
+  <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:110px;font-size:11px" @change="setCustomField($event.target.value)" />
+  </div>
+  
+      <div v-if="groupDone && groupSize > 0" class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:10px 12px;margin:4px 0;background:var(--bg2,transparent)">
+        <div style="font-weight:700">🏁 本组完成</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:4px">共 {{ grpStats.total }} 题 · ✅对 {{ grpStats.ok }} · ❌错 {{ grpStats.bad }} · 正确率 <b>{{ grpStats.rate }}%</b> · 总用时 <b>{{ grpStats.secs }}s</b>（平均每题 {{ grpStats.avg }}s）</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">本题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">{{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-pri" style="padding:2px 10px;font-size:12px" @click="reset()">🔄 再来一组</button><button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="setGroup(0)">🎲 换随机</button></div>
+      </div>
+      <div v-if="mode === 'locate' && picked && (lockWords.time.length || lockWords.ind.length || lockWords.unit.length)" class="dt-lock-fb" style="border-left:3px solid var(--accent,#22d3ee);background:rgba(34,211,238,.08);border-radius:8px;padding:8px 10px;margin:4px 0;font-size:12px">
+        <b>🔍 判题后三锁定复盘</b>：⏱ 时间【<span v-for="(w,i) in lockWords.time" :key="'t'+i">{{ w }} </span>】 📐 指标【<span v-for="(w,i) in lockWords.ind" :key="'i'+i">{{ w }} </span>】 📏 单位【<span v-for="(w,i) in lockWords.unit" :key="'u'+i">{{ w }} </span>】——再看一遍题干要的是哪个，答错常因时间/指标/单位三锁定之一漏锁。
+      </div>
             <div class="dt-qcard">
               <div class="dt-qhead">
                 <span class="dt-qtag">{{ qName || '训练' }}</span>
                 <span class="dt-qmode">{{ MODES.find((m) => m.k === mode).t }}<template v-if="mode === 'calc'"> · {{ STAGES.find((s) => s.k === stage).t }}</template></span>
                 <span class="dt-qidx">第 {{ idx }} 题</span>
               </div>
-            <div v-if="q.materialMd" class="dt-mat" v-html="md(q.materialMd)"></div>
-            <div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div>
-            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">📌 本材料为训练用模拟数据（非真实统计），仅用于方法练习</div>
+            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-scroll"><div v-if="q.materialMd" class="dt-mat" v-html="md(lockHighlights(q.materialMd, lockShow))"></div><div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div></div>
+            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">{{ q._srcLabel ? '📊 来源设定：' + q._srcLabel + ' · ' : '' }}🧪 当前为训练模拟数据；真实统计局源为预留接入项（联网/官方API接入见设置说明）</div>
+<div v-if="q.materialMd || q.materialSvg" class="dt-mat-note" style="color:var(--text3)">⇄ 手机上左右滑动可查看完整图/表材料</div>
+      <div v-if="realRef" class="dt-mat-note" style="border-color:rgba(52,211,153,.45);color:var(--text2)">{{ realRef }}</div>
               <div class="dt-q" v-html="md(q.q)"></div>
             </div>
 
@@ -605,4 +708,14 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
   .dt-q { font-size: 13px; line-height: 1.7; }
   .dt-ex-b { font-size: 12.5px; }
 }
+
+/* v3.8.201 图/表材料手机可横滑看全（scoped 内 :deep 强制） */
+.dt-mat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.dt-mat-scroll :deep(.dt-mat-svg svg), .dt-mat-scroll :deep(svg), .dt-mat-scroll :deep(table), .dt-mat-scroll img { max-width: none !important; height: auto; }
+@media (max-width: 720px){
+  .dt-mat-scroll :deep(.dt-mat-svg svg), .dt-mat-scroll :deep(svg) { min-width: 640px !important; }
+  .dt-mat-scroll :deep(table), .dt-mat-scroll img { min-width: 600px !important; }
+  .dt-mat-scroll { -webkit-overflow-scrolling: touch; }
+}
+
 </style>

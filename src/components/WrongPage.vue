@@ -12,12 +12,20 @@ import { extractChoices, answerLetter } from '../utils/quiz'
 import { renderMd } from '../utils/renderMd'
 import { mountCharts } from '../utils/chartMount' // 统计图(ECharts)：错题详情/重做/卡片等视图渲染后也要挂载
 import { cleanTextKeepFigures } from '../utils/wrongText'
+import { scheduleAfter } from '../utils/reviewSchedule' // R1/R2 复习调度与复错
+import { questionMastery } from '../utils/mastery' // R3 evidence-based 单题掌握度
+import { reasonProfile, wqsOfReason } from '../utils/reasonProfile' // R4 错因画像
+import { canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, CANON_TYPE_ORDER } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
 import { genTutuQuestion } from '../utils/tutuGen' // 图推缺失图形时的本地确定性重建
+import { BATCH_MAX, batchReviewSys, batchReviewUser, parseBatchText, batchReviewMd } from '../utils/batchReview' // AI 批量复盘
+import { weakCandidates } from '../utils/weakTask' // 补弱任务（答错>=3同类自动进今日目标）
+import { speak as brSpeak } from '../utils/tts' // 批量复盘报告朗读
+import { saveText } from '../utils/downloadOut' // v3.8.214 统一保存出口
 const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
 import { GENERIC_REASONS, SUBJ_REASONS } from '../data/wrongReasons'
-import { PLATE_LIST, detectSubType } from '../utils/askAssist'
+
 import WrongVault from './WrongVault.vue'
 import WrongList from './WrongList.vue'
 import WrongDetail from './WrongDetail.vue'
@@ -26,6 +34,8 @@ import WrongFocus from './WrongFocus.vue'
 import WrongCards from './WrongCards.vue'
 import WrongReason from './WrongReason.vue'
 import WrongTypeStrength from './WrongTypeStrength.vue'
+import WrongBatchReview from './WrongBatchReview.vue' // AI 批量复盘弹层（深化）
+import WrongRecall from './WrongRecall.vue' // 主动回忆式复盘弹层（深化）
 
 const cur = ref(-1),
   show = ref(false)
@@ -51,11 +61,8 @@ function redoQuizCol(c) {
   store.pendingOpenPaper = p
 }
 function downloadText(t, n) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob([t], { type: 'text/markdown;charset=utf-8' }))
-  a.download = n
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  // v3.8.214：统一出口——原生写 Download/行测AI导出（手机也能拿到文件并提示路径），桌面走另存为/兜底下载
+  saveText(n || '导出.md', String(t || '')).catch(() => {})
 }
 function qToMd(q, i) {
   const l = ['## 第' + (i + 1) + '题 · ' + (q.subject || '') + (q.variant ? '（' + q.variant + '）' : ''), '', String(q.stem || ''), '']
@@ -88,6 +95,7 @@ function reasonsFor(subject) {
 const fSubj = ref(''),
   fGroup = ref(''), // 六大板块分组筛选（判断推理=图推/定义/类比/逻辑 等）
   fRev = ref('all'),
+  fState = ref('all'), // R1 状态维度: all|undig(待消化)|due(到期)|dig(已消化)
   fReason = ref(''),
   fSub = ref('') // 题型（板块下的具体子类，如 论证推理→加强/削弱）筛选
 const ALL_SUBJ = [
@@ -106,11 +114,10 @@ const WRONG_GROUPS = [
 watch(fGroup, (v) => {
   const g = WRONG_GROUPS.find((x) => x.label === v)
   if (!g) { fSubj.value = ''; fSub.value = ''; return }
-  // 题型强弱分布 chips 点击已自带「板块 + 细分」：若细分仍属于本组（或等于组名），不要覆盖，避免“点了没反应”
-  const inside = fSubj.value && (fSubj.value === g.label || (g.subs || []).includes(fSubj.value))
-  if (inside) return
-  const subs = g.subs.filter((s) => subjList.value.includes(s))
-  if (subs.length === 1) { fSubj.value = subs[0]; fSub.value = '' } else { fSubj.value = ''; fSub.value = '' }
+  // 单选细分板块的组（数量/资料/常识/政治）自动落到其细分；
+  // 多细分组（判断推理=图推/定义/类比/逻辑）不设细分，让“按组过滤”生效（见 filtered）
+  if ((g.subs || []).length === 1) { fSubj.value = g.subs[0]; fSub.value = '' }
+  else if (!(g.subs || []).includes(fSubj.value)) { fSubj.value = ''; fSub.value = '' }
 })
 const subjList = computed(() => {
   // 固定全部板块（含暂未收纳的），确保能查看/筛选各板块错题集
@@ -124,77 +131,65 @@ const reasonList = computed(() => {
   return [...s].filter(Boolean)
 })
 const stats = computed(() => {
-  const t = store.wqs.length,
-    r = store.wqs.filter((q) => q.reviewed).length
-  return { t, rev: r, pend: t - r }
+  const t = store.wqs.length
+  const r = store.wqs.filter((q) => q.reviewed).length
+  const due = store.wqs.filter((q) => q.digested && q.dueAt && q.dueAt <= Date.now()).length
+  let rr = 0,
+    ee = 0
+  store.wqs.forEach((q) => { const rs = q.reviewStats || {}; if (rs.r) { rr += rs.r; ee += rs.e || 0 } })
+  return { t, rev: r, pend: t - r, due, rep: { r: rr, e: ee } }
 })
-// 错题→细分板块（六大板块口径，与 AI出题一致）：新记录带 q.subx；旧记录按 subject 归位
-//  - 言语理解 组的细分=片段阅读/篇章阅读；历史数据只有 subject=言语理解，无细分信息 → 归 言语理解（整体）
+// ===== 板块→细分→题型 归一（v3.8.207）=====
+// 细分板块 = 真细分（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治）；
+// 组名“判断推理/言语理解”不再作为细分出现，历史 subject=判断推理 的题按正文/题型归到 逻辑判断 等。
 function wrongSubOf(q) {
-  if (!q) return ''
-  if (q.subx) return q.subx
-  const s = String(q.subject || q.plate || '')
-  if (s === '言语理解') return '言语理解'
-  return s
+  try { return canonicalSubOf(q) } catch (e) { return String((q && (q.subject || q.plate)) || '') || '未分类' }
 }
-// ===== 题型强弱分布（Request D Part 1）：把错题按板块→题型细分并统计 =====
-// ===== 题型强弱分布（Request D Part 1）：把错题按板块→题型细分并统计 =====
-// 优先用已存的 q.sub；旧错题无 sub 时实时用 detectSubType 推断（不修改原数据）。
+// 题型 = canonical 名称（优先存值 q.sub/q.variant，其次按正确板块词表识别正文）；识别不到归 未分类
 function wrongTypeOf(q) {
-  if (q && q.sub) return q.sub
-  const plate = (q && (q.subject || q.plate)) || ''
-  const text = q ? q.question || q.q || q.stem || '' : ''
-  try {
-    const r = detectSubType(String(text || ''), plate)
-    return r && r.name ? r.name : '未分类'
-  } catch (e) {
-    return '未分类'
-  }
+  try { return typeLabelOf(q) } catch (e) { return '未分类' }
 }
-// 聚合：plates=[{plate,total,subs:[{name,count,pct,t}]}]；topWeak=全局最薄弱题型 TOP5；maxCount=全题型最大错题数
+// 聚合（v3.8.207 归一）：先归 六大板块组 → 细分板块 → canonical 题型 再统计；
+// 输出 plates=[{plate(组),total,subs:[{sub(细分),name(题型),count,pct,t}]}]，杜绝“判断推理/逻辑判断”双行分裂
 const typeStats = computed(() => {
-  const counts = {} // plate -> sub -> n
+  const counts = {} // group -> 'sub|type' -> { sub, type, n }
   let maxCount = 1
   for (const q of store.wqs) {
-    const plate = q.subject || q.plate || '未分类'
-    const sub = wrongTypeOf(q)
-    if (!counts[plate]) counts[plate] = {}
-    counts[plate][sub] = (counts[plate][sub] || 0) + 1
+    const grp = canonicalGroupOf(q)
+    const sub = canonicalSubOf(q)
+    const type = typeLabelOf(q)
+    const key = sub + '|' + type
+    if (!counts[grp]) counts[grp] = {}
+    const m = counts[grp][key] || (counts[grp][key] = { sub, type, n: 0 })
+    m.n += 1
+    if (m.n > maxCount) maxCount = m.n
   }
-  // 板块顺序：标准 9 大板块在前（按 PLATE_LIST），其余非标准板块（如旧数据别名）按出现顺序补在末尾
-  const known = PLATE_LIST.filter((p) => counts[p])
-  const extra = Object.keys(counts).filter((p) => !PLATE_LIST.includes(p))
-  const plates = known.concat(extra)
+  const ordered = WRONG_GROUPS.map((g) => g.label).filter((g) => counts[g])
+  Object.keys(counts).forEach((g) => { if (!WRONG_GROUPS.some((x) => x.label === g)) ordered.push(g) })
   const list = []
-  for (const plate of plates) {
-    const subs = Object.keys(counts[plate])
-      .map((name) => ({ name, count: counts[plate][name] }))
-      .sort((a, b) => b.count - a.count)
-    const total = subs.reduce((s, x) => s + x.count, 0)
-    subs.forEach((s) => {
-      if (s.count > maxCount) maxCount = s.count
+  for (const plate of ordered) {
+    const rows = Object.keys(counts[plate]).map((k) => counts[plate][k]).sort((a, b) => b.n - a.n)
+    const total = rows.reduce((sum, x) => sum + x.n, 0)
+    rows.forEach((r) => {
+      r.count = r.n
+      r.pct = Math.round((r.n / total) * 100)
+      r.t = maxCount > 1 ? (r.n - 1) / (maxCount - 1) : 0
     })
-    list.push({ plate, total, subs })
+    list.push({ plate, total, subs: rows })
   }
   const all = []
-  list.forEach((p) => p.subs.forEach((s) => all.push({ plate: p.plate, name: s.name, count: s.count })))
+  list.forEach((p) => p.subs.forEach((x) => all.push({ group: p.plate, sub: x.sub, name: x.type, count: x.n })))
   all.sort((a, b) => b.count - a.count)
   const topWeak = all.slice(0, 5)
-  list.forEach((p) =>
-    p.subs.forEach((s) => {
-      s.pct = Math.round((s.count / p.total) * 100)
-      s.t = maxCount > 1 ? (s.count - 1) / (maxCount - 1) : 0
-    })
-  )
   return { plates: list, topWeak, maxCount }
 })
 // 题型筛选：点题型看板 → 设板块+题型筛选并滚动到列表；再点取消
-function setTypeFilter(plate, sub) {
-  // 同步板块分组：让顶部三连筛选与看板 chips 状态一致（chips 直接给细分/题型，组由板块反查）
-  const g = WRONG_GROUPS.find((x) => x.label === plate || (x.subs || []).includes(plate))
-  fGroup.value = g ? g.label : ''
-  fSubj.value = plate
-  fSub.value = sub
+function setTypeFilter(group, sub, type) {
+  // v3.8.207：参数 = 组 / 细分板块 / canonical 题型
+  const g = WRONG_GROUPS.find((x) => x.label === group || (x.subs || []).includes(group) || (x.subs || []).includes(sub))
+  fGroup.value = g ? g.label : (group || '')
+  fSubj.value = sub || ''
+  fSub.value = type || ''
   kw.value = ''
   pageN.value = 1
   setTimeout(() => {
@@ -208,6 +203,41 @@ function clearTypeFilter() {
   fSub.value = ''
   pageN.value = 1
 }
+
+// R4 错因画像：Top8 + 点击过滤 + 同类连做（复用变式答题卡）
+const reasonTop = computed(() => {
+  try { return reasonProfile(store.wqs, { top: 8 }) } catch (e) { return [] }
+})
+function setReasonFilter(r) {
+  fReason.value = r
+  pageN.value = 1
+  setTimeout(() => {
+    const el = document.getElementById('wqFilters')
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 60)
+}
+function startReasonPractice(r) {
+  const list = wqsOfReason(store.wqs, r).slice(0, 3)
+  if (!list.length) { showToast('该错因暂无错题可连做', 'info'); return }
+  vtQueue.value = list.map((x) => wrongToVt(x))
+  vtMode.value = 'do'
+  vtCount.value = Math.min(3, vtQueue.value.length)
+  vtAnswers.value = {}
+  vtScore.value = 0
+  vtOpen.value = {}
+  vtIdx.value = 0
+  vtPick.value = ''
+  vtShow.value = true
+}
+// 全局今日复习中枢：打开 + 按 id 直接二刷
+function openHub() { window.dispatchEvent(new CustomEvent('xc-open-hub')) }
+window.addEventListener('xc-redo-wq', (e) => {
+  const id = e && e.detail
+  const idx = id != null ? store.wqs.findIndex((q) => String(q.id) === String(id)) : -1
+  if (idx < 0) return
+  cur.value = idx
+  openRedo()
+})
 // ===== 列表可定位：关键词搜索 / 排序 / 分页 / 序号 / 跳转 =====
 const kw = ref('')
 const sortBy = ref('time') // time=最新优先 | wrong=错得多优先 | mastery=掌握低优先
@@ -216,8 +246,12 @@ const pageN = ref(1)
 const filtered = computed(() => {
   let list = store.wqs.filter((q) => {
     if (fSubj.value && wrongSubOf(q) !== fSubj.value) return false
+    if (!fSubj.value && fGroup.value && canonicalGroupOf(q) !== fGroup.value) return false
     if (fRev.value === 'rev' && !q.reviewed) return false
     if (fRev.value === 'pend' && q.reviewed) return false
+    if (fState.value === 'undig' && q.digested) return false
+    if (fState.value === 'due' && !(q.digested && q.dueAt && q.dueAt <= Date.now())) return false
+    if (fState.value === 'dig' && !q.digested) return false
     if (fReason.value && !(q.reasons || []).includes(fReason.value)) return false
     if (fSub.value && wrongTypeOf(q) !== fSub.value) return false
     const k = kw.value.trim().toLowerCase()
@@ -249,6 +283,172 @@ function dedupeNow() {
   pageN.value = 1
   if (n > 0) showToast('🧹 已合并完全相同的错题，删除 ' + n + ' 条重复', 'success')
   else showToast('✅ 错题集没有完全相同的重复题', 'info')
+}
+
+// ===== AI 批量复盘（深化）=====
+const brShow = ref(false)
+const brBusy = ref(false)
+const brCancel = ref(false)
+const brN = ref(10)
+const brDone = ref(0)
+const brRows = ref([])
+const brLog = ref('')
+const brErr = ref('')
+// v3.8.209：支持用户自选 板块→细分→题型 再做批量复盘（含 查看原题）
+const brGroup = ref('')
+const brSub = ref('')
+const brType = ref('')
+function brTargetList() {
+  let base = (!brGroup.value && !brSub.value && !brType.value) ? filtered.value : store.wqs
+  if (brGroup.value) base = base.filter((q) => canonicalGroupOf(q) === brGroup.value)
+  if (brSub.value) base = base.filter((q) => canonicalSubOf(q) === brSub.value)
+  if (brType.value) base = base.filter((q) => typeLabelOf(q) === brType.value)
+  return base
+}
+function brGroupOptions() { return WRONG_GROUPS.map((g) => g.label) }
+function brSubOptions() {
+  const g = brGroup.value
+  const present = new Set()
+  store.wqs.forEach((q) => { if (!g || canonicalGroupOf(q) === g) { const sub = canonicalSubOf(q); if (sub && isRealSub(sub)) present.add(sub) } })
+  const ordered = []
+  WRONG_GROUPS.forEach((gg) => { if (!g || gg.label === g) (gg.subs || []).forEach((sub) => { if (present.has(sub) && !ordered.includes(sub)) ordered.push(sub) }) })
+  present.forEach((sub) => { if (!ordered.includes(sub)) ordered.push(sub) })
+  return ordered
+}
+function brTypeOptions() {
+  const seen = new Set()
+  store.wqs.forEach((q) => {
+    if (brGroup.value && canonicalGroupOf(q) !== brGroup.value) return
+    if (brSub.value && canonicalSubOf(q) !== brSub.value) return
+    seen.add(typeLabelOf(q))
+  })
+  const rank = (t) => { const i = CANON_TYPE_ORDER.indexOf(t); return i < 0 ? 99999 : i }
+  const arr = [...seen].filter((t) => t !== '未分类').sort((a, b) => rank(a) - rank(b))
+  if (seen.has('未分类')) arr.push('未分类')
+  return arr
+}
+function brSyncN() {
+  const n = brTargetList().length
+  brN.value = n > 0 ? Math.max(1, Math.min(BATCH_MAX, brN.value || 10, n)) : 0
+}
+function brOpenQ(idx) {
+  if (idx < 0 || idx >= store.wqs.length) return
+  brShow.value = false
+  openRaw(idx)
+}
+function openBatchReview() {
+  brGroup.value = ''
+  brSub.value = ''
+  brType.value = ''
+  const n = filtered.value.length
+  if (!n) { showToast('当前筛选下没有错题，先调整筛选或去存几道错题', 'info'); return }
+  brRows.value = []
+  brLog.value = ''
+  brErr.value = ''
+  brDone.value = 0
+  brN.value = Math.min(BATCH_MAX, n)
+  brShow.value = true
+}
+function brPick(n) {
+  const max = Math.max(1, brTargetList().length)
+  brN.value = Math.max(1, Math.min(n, max))
+}
+async function brStart() {
+  if (brBusy.value) return
+  const targets = brTargetList().slice(0, brN.value).map((q) => store.wqs.indexOf(q)).filter((i) => i >= 0)
+  if (!targets.length) { showToast('当前范围没有可复盘的错题', 'info'); return }
+  brRows.value = []
+  brErr.value = ''
+  brDone.value = 0
+  brBusy.value = true
+  brCancel.value = false
+  const rows = []
+  for (let k = 0; k < targets.length; k++) {
+    if (brCancel.value) { brLog.value = '⏹ 已停止（完成 ' + k + '/' + targets.length + '）'; break }
+    const idx = targets[k]
+    const q = store.wqs[idx]
+    if (!q) continue
+    brLog.value = '正在复盘 第 ' + (k + 1) + '/' + targets.length + ' 题 · ' + String(q.subject || '未分类') + (q.variant || q.subx ? '·' + String(q.variant || q.subx || '') : '')
+    try {
+      const reply = await aiRun(async (c) => {
+        return await chatOnce(c, [{ role: 'system', content: batchReviewSys() }, { role: 'user', content: batchReviewUser(q, k) }], 240, 30000)
+      }, { keyHint: '文字模型', onError: () => {} })
+      const parsed = parseBatchText(reply || '', targets.length)
+      const row = parsed[k] || parsed.find((p) => p.idx === k)
+      rows.push(row ? { idx, reason: String(row.reason || '').trim(), fix: String(row.fix || '').trim(), action: String(row.action || '').trim() } : { idx, reason: '（AI 未按格式返回，建议对本题单题精复盘）', fix: '', action: '' })
+    } catch (e) {
+      rows.push({ idx, reason: '（该题复盘失败：' + String((e && e.message) || e).slice(0, 60) + '）', fix: '', action: '' })
+    }
+    brDone.value = k + 1
+  }
+  brRows.value = rows
+  brBusy.value = false
+  if (rows.length) showToast('✅ 批量复盘完成 ' + rows.length + ' 题，可导出 / 朗读', 'success')
+  else if (!brCancel.value) brErr.value = '全部失败：请检查文字模型 Key 后重试'
+}
+function brStop() { brCancel.value = true }
+function brExportMd() {
+  if (!brRows.value.length) { showToast('还没有复盘结果', 'info'); return }
+  const realRows = brRows.value.slice().sort((a, b) => a.idx - b.idx)
+  downloadText(batchReviewMd(realRows, store.wqs), 'AI批量复盘_' + new Date().toISOString().slice(0, 10) + '.md')
+  showToast('✅ 已导出批量复盘报告 MD', 'success')
+}
+function brSpeakAll() {
+  if (!brRows.value.length) { showToast('还没有复盘结果', 'info'); return }
+  const L = []
+  brRows.value.slice().sort((a, b) => a.idx - b.idx).forEach((r) => {
+    const q = store.wqs[r.idx]
+    if (q) L.push('第' + (r.idx + 1) + '题。错因：' + (r.reason || '无') + '。修正：' + (r.fix || '无') + '。今日动作：' + (r.action || '无'))
+  })
+  try { brSpeak(L.join('。')) } catch (e) {}
+  showToast('🔊 开始朗读复盘报告', 'info')
+}
+// ===== 主动回忆式复盘（深化）：先默写再展开，自评计入二刷统计 =====
+const rcShow = ref(false)
+const rcQ = ref(null)
+const rcRecall = ref('')
+const rcRevealed = ref(false)
+function openRecall(q) {
+  if (!q) return
+  rcQ.value = q
+  rcRecall.value = ''
+  rcRevealed.value = false
+  rcShow.value = true
+}
+function rcClose() { rcShow.value = false; rcQ.value = null }
+function rcReveal() { rcRevealed.value = true }
+function rcSelf(ok) {
+  const q = rcQ.value
+  if (!q) return
+  const i = store.wqs.indexOf(q)
+  rcClose()
+  if (i < 0) return
+  const note = String(rcRecall.value || '').trim()
+  if (note) {
+    q.note = (q.note ? q.note + '\n' : '') + '🧠 主动回忆(' + new Date().toLocaleDateString() + ')：' + note
+    q.reviewed = true
+  }
+  applyRedo(q, ok, 0, '')
+  showToast(ok ? '✅ 回忆到位，已计入二刷答对' : '❌ 已计入二刷答错（复错 +1，回到待消化）', ok ? 'success' : 'warn')
+}
+// ===== 补弱任务触发：同一题型累计答错 >=3 自动进看板今日任务 =====
+function maybeWeakTask(q) {
+  try {
+    const cands = weakCandidates(store.wqs, { wrongTypeOf })
+    const plate = String(q.subject || '未分类')
+    const type = wrongTypeOf(q)
+    const hit = cands.find((c) => c.plate === plate && c.type === type)
+    if (!hit) return
+    const key = hit.plate + '|' + hit.type
+    const today = new Date().toDateString()
+    let seen = {}
+    try { seen = JSON.parse(localStorage.getItem('xc_weak_toast') || '{}') } catch (e) {}
+    if (seen[key] === today) return
+    seen[key] = today
+    try { localStorage.setItem('xc_weak_toast', JSON.stringify(seen)) } catch (e) {}
+    showToast('⚠️ 「' + hit.type + '」已累计答错 ' + hit.wrongN + ' 次，已加入看板「今日任务」补弱项', 'warn')
+    window.dispatchEvent(new CustomEvent('xc-task-change'))
+  } catch (e) {}
 }
 
 function openIdx(i) {
@@ -301,19 +501,25 @@ function fmtT(s) {
   return String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0')
 }
 function applyRedo(q, correct, sec, picked) {
+  const now = Date.now()
   q.redoHistory = q.redoHistory || []
-  q.redoHistory.push({ at: new Date().toLocaleString(), ok: correct, t: sec, pick: picked || '' })
+  q.redoHistory.push({ at: new Date(now).toLocaleString(), ok: correct, t: sec, pick: picked || '' })
   if (q.redoHistory.length > 10) q.redoHistory = q.redoHistory.slice(-10)
   q.correctStreak = correct ? (q.correctStreak || 0) + 1 : 0
   q.wrongCount = (q.wrongCount || 1) + (correct ? 0 : 1)
-  q.lastRedo = new Date().toLocaleString()
-  q.lastRedoAt = Date.now()
+  q.lastRedo = new Date(now).toLocaleString()
+  q.lastRedoAt = now
   q.redoTime = sec
-  q.mastery = Math.min(100, (q.correctStreak || 0) * 50)
-  if ((q.correctStreak || 0) >= 2) q.digested = true
-  else if (!correct) q.digested = false
+  const patch = scheduleAfter(q, correct, now)
+  q.digested = patch.digested
+  q.digestLvl = patch.digestLvl
+  q.dueAt = patch.dueAt
+  q.digestedAt = patch.digested ? (q.digestedAt || now) : null
+  q.reviewStats = patch.reviewStats
+  q.mastery = questionMastery(q)
   saveWqs()
   petAddPoints(2)
+  if (!correct) maybeWeakTask(q)
 }
 function submitRedo(correct, picked) {
   const q = redoQ.value
@@ -347,8 +553,7 @@ function submitByChoice(k) {
   }
 }
 function masteryOf(q) {
-  if (!q) return 0
-  return q.digested ? 100 : q.mastery || 0
+  return questionMastery(q)
 }
 function redoFeedback(q) {
   if (!q) return ''
@@ -385,13 +590,16 @@ function cardMark(ok) {
 const focusShow = ref(false)
 const focusList = ref([])
 function todayFocus() {
+  const now = Date.now()
   const scored = store.wqs.map((q) => {
-    const days = q.lastRedoAt ? Math.min(30, Math.floor((Date.now() - q.lastRedoAt) / 86400000)) : 30
-    const score = (q.wrongCount || 1) * 3 + days + (q.digested ? -20 : 0) + (q.reviewed ? 0 : 2)
+    const days = q.lastRedoAt ? Math.min(30, Math.floor((now - q.lastRedoAt) / 86400000)) : 30
+    const due = q.digested && q.dueAt && q.dueAt <= now
+    const rs = q.reviewStats || {}
+    const score = (q.wrongCount || 1) * 3 + days + (q.digested ? (due ? 40 : -20) : 0) + (q.reviewed ? 0 : 2) + (rs.e || 0) * 5
     return { q, score }
   })
   scored.sort((a, b) => b.score - a.score)
-  focusList.value = scored.slice(0, 5).map((s) => s.q)
+  focusList.value = scored.slice(0, 8).map((s) => s.q)
   focusShow.value = true
 }
 function focusRedo(q) {
@@ -558,7 +766,7 @@ const relatedQs = computed(() => {
   const mine = (q.reasons || []).filter(Boolean)
   return store.wqs
     .map((x, i) => ({ x, i, share: mine.filter((r) => (x.reasons || []).includes(r)).length }))
-    .filter(({ x, i }) => i !== cur.value && x.subject === q.subject)
+    .filter(({ x, i }) => i !== cur.value && canonicalGroupOf(x) === canonicalGroupOf(q)) // v3.8.208 按 canonical 组判同类（避免 判断推理/逻辑判断 分裂）
     .sort((a, b) => b.share - a.share)
     .slice(0, 6)
 })
@@ -952,7 +1160,7 @@ AI 当时的解答：${aiReply || '（无）'}`
       }
     }
     if (obj) {
-      applyAiReasons(obj, () => fillAnswerMethodNote(obj))
+      applyAiReasons(q, obj, () => fillAnswerMethodNote(q, obj))
       showToast('已智能填入：答案/错因/秒杀/笔记' + (reasonModal.value ? '（错因待你确认）' : ''), 'success')
     } else if (reply) {
       frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + '🤖 小助手引导（可编辑）：\n' + reply
@@ -968,16 +1176,26 @@ AI 当时的解答：${aiReply || '（无）'}`
 }
 // 智能分字段回填
 // 应用 AI 返回的 reasons：若当前题已有旧错因且有新错因，先弹窗询问用户「替换 / 合并 / 取消」
-function applyAiReasons(o, fillOthers) {
+// v3.8.206 修复跨题串扰：① AI 错因只归属发起时的本题，不再写入全局「我的历史错因」池
+// （杜绝 A 题的 AI 错因出现在 B 题收纳盒、无限累积）；② 以发起时的题目 q 为目标——若 AI
+// 返回前用户已切到别的题，则把结果写入原题本身并保存，绝不污染当前打开题目的编辑框。
+function applyAiReasons(q, o, fillOthers) {
+  if (!q) return
+  const onQ = () => cur.value >= 0 && store.wqs[cur.value] === q
   const newReasons = Array.isArray(o.reasons)
     ? o.reasons.map((r) => String(r || '').trim()).filter(Boolean).slice(0, 3)
     : []
-  const oldReasons = frm.value.sel.slice()
+  const oldReasons = onQ() ? frm.value.sel.slice() : (Array.isArray(q.reasons) ? q.reasons.slice() : [])
   const commit = (selArr) => {
-    frm.value.sel = selArr
-    newReasons.forEach((r) => {
-      if (!userReasons.value.includes(r)) { userReasons.value.push(r); persistReasons() }
-    })
+    if (onQ()) {
+      frm.value.sel = selArr
+    } else {
+      q.reasons = selArr
+      q.reviewed = true
+      q.reviewedAt = Date.now()
+      saveWqs()
+      showToast('✅ AI 错因已填回原题（期间你切到了别的题，未改动当前题）', 'success')
+    }
   }
   if (oldReasons.length && newReasons.length) {
     reasonModal.value = {
@@ -995,10 +1213,20 @@ function applyAiReasons(o, fillOthers) {
   if (fillOthers) fillOthers()
 }
 // 只回填 answer/method/note（错因走 applyAiReasons 的询问流程）
-function fillAnswerMethodNote(o) {
-  if (o.answer && !frm.value.answer) frm.value.answer = String(o.answer)
-  if (o.method && !frm.value.method) frm.value.method = String(o.method)
-  if (o.note) frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + String(o.note)
+// v3.8.206：以目标题 q 为准——仍停留在该题则写编辑框；已切换则直接写原题并保存，防止串题
+function fillAnswerMethodNote(q, o) {
+  if (!q) return
+  if (cur.value >= 0 && store.wqs[cur.value] === q) {
+    if (o.answer && !frm.value.answer) frm.value.answer = String(o.answer)
+    if (o.method && !frm.value.method) frm.value.method = String(o.method)
+    if (o.note) frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + String(o.note)
+  } else {
+    if (o.answer && !q.answer) q.answer = String(o.answer)
+    if (o.method && !q.method) q.method = String(o.method)
+    if (o.note) q.note = (q.note ? q.note + '\n\n' : '') + String(o.note)
+    q.reviewed = true
+    q.reviewedAt = Date.now()
+  }
 }
 // 文本兜底解析：从 AI 自由文本里尽量抠出 answer/reasons/method/note
 function parseByField(txt) {
@@ -1065,7 +1293,11 @@ const wrongCtx = reactive({
   vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,
   vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
   vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow,
-  vtStartDo, vtSubmit, vtToggleOpen, wrongSubOf, wrongTypeOf
+vtStartDo, vtSubmit, vtToggleOpen, wrongSubOf, wrongTypeOf,
+fState, reasonTop, setReasonFilter, startReasonPractice, openHub,
+  brBusy, brCancel, brDone, brErr, brLog, brN, brRows, brShow, brPick, brStart, brStop, brExportMd, brSpeakAll,
+  brGroup, brSub, brType, brGroupOptions, brSubOptions, brTypeOptions, brSyncN, brOpenQ,
+  openBatchReview, rcShow, rcQ, rcRecall, rcRevealed, openRecall, rcClose, rcReveal, rcSelf
 })
 </script>
 
@@ -1088,5 +1320,7 @@ const wrongCtx = reactive({
     <WrongFocus :ctx="wrongCtx" />
     <WrongCards :ctx="wrongCtx" />
     <WrongReason :ctx="wrongCtx" />
+    <WrongBatchReview :ctx="wrongCtx" />
+    <WrongRecall :ctx="wrongCtx" />
   </div>
 </template>

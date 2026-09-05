@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { store, saveCfg } from '../store'
 import { detectBanKuai, chatOnce } from '../api'
 import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
@@ -13,6 +13,10 @@ import { recentGenStats } from '../utils/quizLog'
 import { genHealth } from '../utils/genHealth' // 深化·可诊断性：跨卷出题健康（板块·题型失败率） // 37号：出题质检数据外显
 import { readAttempts } from '../utils/attemptLog' // 5.2 考点热度数据源
 import { kpointHeat } from '../utils/kpointHeat' // 5.2 考点热度聚合
+import { weekMini } from '../utils/dailyPlan' // 189 本周每日完成
+import { buildHeatOption } from '../utils/kpointMatrix' // U7 考点×周矩阵 option
+import { reviewHealth, weekReviewStats } from '../utils/reviewHealth' // 复盘健康（深化）
+import { mountOne, disposeOne } from '../utils/chartMount' // U7 单点图表挂载/销毁
 import { difficultyTable } from '../utils/difficulty' // 难度校准摘要（数据在自动调难度）
 import { listFlagged, removeFlagged, confirmFlagged, dismissFlagged, flaggedStats } from '../utils/flaggedQuestions' // 深化③ UI：疑题榜单
 import { flaggedToCsv, flaggedToMd } from '../utils/flagExport' // 深化：疑题清单导出（CSV/MD 纯函数）
@@ -115,18 +119,20 @@ const trend = computed(() => {
 })
 // ===== 板块掌握度雷达（6 大板块）=====
 const radarPlates = [
-  { key: '判断推理', label: '判断', sub: ['判断推理', '图形推理', '类比推理', '定义判断'] },
-  { key: '言语理解', label: '言语', sub: ['言语理解'] },
-  { key: '数量关系', label: '数量', sub: ['数量关系'] },
-  { key: '资料分析', label: '资料', sub: ['资料分析'] },
-  { key: '常识判断', label: '常识', sub: ['常识判断'] },
-  { key: '政治理论', label: '政治', sub: ['政治理论'] }
+  { key: '判断推理', label: '逻辑判断与推理', sub: ['判断推理', '逻辑判断与推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
+  { key: '言语理解', label: '言语理解与表达', sub: ['言语理解', '言语理解与表达', '片段阅读', '篇章阅读'] },
+  { key: '数量关系', label: '数量关系', sub: ['数量关系'] },
+  { key: '资料分析', label: '资料分析', sub: ['资料分析'] },
+  { key: '常识判断', label: '常识判断', sub: ['常识判断'] },
+  { key: '政治理论', label: '政治理论', sub: ['政治理论'] }
 ]
 const radar = computed(() => {
+  const atts = readAttempts()
   const vals = radarPlates.map((p) => {
     const wrongN = store.wqs.filter((q) => p.sub.includes(q.subject)).length
-    // 批次6-6A 掌握度收编：统一走 mastery.js（与看板/CosmosScene 同口径）
-    return { ...p, v: masteryOfPlate(p.key, store.wqs, { plates: p.sub }), nodata: wrongN === 0 }
+    const attN = atts.filter((a) => p.sub.includes(String(a.plate || ''))).length
+    // R3 掌握度：接作答证据（近60天正确率 × 错题证据融合）；无错题且作答<5 才算暂无数据
+    return { ...p, v: masteryOfPlate(p.key, store.wqs, { plates: p.sub, attempts: atts }), nodata: wrongN === 0 && attN < 5 }
   })
   const cx = 110
   const cy = 105
@@ -149,8 +155,8 @@ const radar = computed(() => {
 const quizCol = ref([])
 quizCol.value = safeGet(KEYS.QUIZ_COL, [])
 const PLATES = [
-  { key: '判断推理', label: '判断推理', weight: 30, subs: ['判断推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
-  { key: '言语理解', label: '言语理解', weight: 30, subs: ['言语理解'] },
+  { key: '判断推理', label: '逻辑判断与推理', weight: 30, subs: ['判断推理', '逻辑判断与推理', '图形推理', '定义判断', '类比推理', '逻辑判断'] },
+  { key: '言语理解', label: '言语理解与表达', weight: 30, subs: ['言语理解', '言语理解与表达', '片段阅读', '篇章阅读'] },
   { key: '资料分析', label: '资料分析', weight: 20, subs: ['资料分析'] },
   { key: '数量关系', label: '数量关系', weight: 8, subs: ['数量关系'] },
   { key: '常识判断', label: '常识判断', weight: 7, subs: ['常识判断'] },
@@ -244,10 +250,30 @@ const qcSum = computed(() => {
 const health = computed(() => {
   try { const h = genHealth({ minGen: 5, topN: 4 }); return (h.rows || []).filter((r) => r.fail > 0) } catch (e) { return [] }
 })
+// 189 本周每日完成（做题+复盘）
+const weekStat = computed(() => { try { return weekMini({ attempts: readAttempts(), wqs: store.wqs, study: studyMap() }) } catch (e) { return [] } })
+const weekStatMax = computed(() => Math.max(1, ...weekStat.value.map((d) => d.total)))
 // 5.2 考点热度（近 4 周 Top10，做题量×正确率）
 const heatTop = computed(() => {
   try { return kpointHeat(readAttempts(), { weeks: 4, topN: 10 }).kps } catch (e) { return [] }
 })
+// U7 考点×周热力矩阵（近 8 周 × Top40；展开时渲染 ECharts heatmap）
+const heatGrid = computed(() => {
+  try { return kpointHeat(readAttempts(), { weeks: 8, topN: 40 }) } catch (e) { return null }
+})
+const showMatrix = ref(false)
+const heatEl = ref(null)
+const matrixRowH = computed(() => Math.max(240, Math.min(720, (heatGrid.value && heatGrid.value.kps ? heatGrid.value.kps.length : 1) * 18 + 76)))
+function renderMatrix() {
+  const opt = buildHeatOption(heatGrid.value)
+  if (heatEl.value && opt) { try { mountOne(heatEl.value, opt) } catch (e) {} }
+}
+function toggleMatrix() {
+  showMatrix.value = !showMatrix.value
+  if (showMatrix.value) { nextTick(renderMatrix) } else if (heatEl.value) { disposeOne(heatEl.value) }
+}
+watch(() => store.tab, (t) => { if (t === 'stat' && showMatrix.value) nextTick(renderMatrix) })
+onUnmounted(() => { if (heatEl.value) disposeOne(heatEl.value) })
 // 难度校准摘要：各板块实测正确率偏离中位最明显的前3（出题时会自动向目标区间调难度）
 const calibRows = computed(() => {
   try {
@@ -465,6 +491,18 @@ async function exportReport(days = 7, fmt = 'md') {
   L.push('## ✅ 错题复盘率')
   L.push('- ' + revRate.value + '%（已复盘 ' + store.wqs.filter((q) => q.reviewed).length + ' / ' + store.wqs.length + ' 题）')
   L.push('')
+  // 💗 复盘健康（深化）：健康分 + 复盘/消化/复错/到期 + 周错题活动
+  try {
+    const h = reviewHealth(store.wqs)
+    if (h.t > 0) {
+      L.push('## 💗 复盘健康分：' + h.score + '（' + h.grade + '）')
+      L.push('- 复盘率 ' + h.reviewedRate + '% · 消化率 ' + h.digestRate + '% · 到期积压 ' + h.overdue + ' 题' + (h.repRate != null ? ' · 复错率 ' + h.repRate + '%' : ''))
+      if (h.tips.length) L.push('- 建议：' + h.tips.join('；'))
+      const wk = weekReviewStats(store.wqs, { days: Math.min(7, days) })
+      L.push('- 近 ' + Math.min(7, days) + ' 天：新增错题 ' + wk.newWrongs + ' · 复盘 ' + wk.reviews + ' · 二刷 ' + wk.redoEvents + ' 次（再错 ' + wk.redoWrong + '）· 新消化 ' + wk.digestGain + ' 题')
+      L.push('')
+    }
+  } catch (e) {}
   if (repAi.value) {
     L.push('## 🤖 AI 学习总结与建议')
     L.push('')
@@ -590,6 +628,18 @@ async function exportReport(days = 7, fmt = 'md') {
         <div style="color: var(--text3); margin-top: 4px">条长=做题量；颜色=正确率（绿≥80 / 黄 60-79 / 红(不足60)）。红 + 条长 = 薄弱高频考点，优先补短；空白 = 练得少</div>
       </div>
 
+      <div v-if="heatGrid && heatGrid.kps && heatGrid.kps.length" style="margin-top: 8px">
+        <button class="btn btn-gh" style="font-size: 12px; padding: 2px 10px" @click="toggleMatrix()">
+          {{ showMatrix ? '🔼 收起 考点×周矩阵' : '🗺️ 展开 考点×周矩阵（近 8 周 · Top' + Math.min(40, heatGrid.kps.length) + '）' }}
+        </button>
+        <div v-if="showMatrix" style="margin-top: 6px">
+          <div style="overflow-x: auto">
+            <div ref="heatEl" class="hm-chart" :style="{ height: matrixRowH + 'px', width: '680px' }"></div>
+          </div>
+          <div style="color: var(--text3); font-size: 11px; margin-top: 2px">行=考点（按做题量 Top{{ Math.min(40, heatGrid.kps.length) }}，题量最多在顶部）；列=近 8 周滚动窗口（最右=本周）。颜色=正确率（绿≥80 / 黄 60-79 / 红&lt;60），越深=题量越大；空白=该周未练；悬停看完整考点与对错。横滑可看全列。</div>
+        </div>
+      </div>
+
       <details v-if="flaggedList.length" class="assess-card" style="font-size: 12px">
         <summary style="cursor: pointer; color: #fbbf24">⚠️ 疑题反馈榜（{{ flaggedList.length }} 条 · 已自动降低同类题出题权重）<span style="margin-left:6px; color:var(--text3); font-weight:400">待复核 {{ flagChips.open }} · 已确认 {{ flagChips.confirmed }} · 误报 {{ flagChips.dismissed }}</span></summary>
         <div style="margin-top: 4px">📊 按 板块|考点 排行：<span v-for="rk in flagRank" :key="rk.k" style="margin-right: 8px">{{ rk.k }}×{{ rk.n }}</span></div>
@@ -604,6 +654,13 @@ async function exportReport(days = 7, fmt = 'md') {
       </details>
 
       <div class="sec-t">📈 学习趋势</div>
+      <div v-if="weekStat.length" style="display:flex;gap:5px;align-items:flex-end;margin:6px 0 2px">
+        <span style="font-size:11px;color:var(--text3);margin-right:4px">本周每日完成（做题+复盘）</span>
+        <span v-for="d in weekStat" :key="d.key" style="display:flex;flex-direction:column;align-items:center;gap:2px" :title="d.key + ' 做题' + d.q + ' · 复盘' + d.r + ' · ' + d.min + '分'">
+          <i :style="{ display:'block', width:'12px', height: Math.max(2, Math.round(d.total / weekStatMax * 20)) + 'px', background:'var(--accent2,#22d3ee)', borderRadius:'2px', opacity:.8 }"></i>
+          <em style="font-style:normal;font-size:10px;color:var(--text3)">{{ d.label }}</em>
+        </span>
+      </div>
       <div class="trend-card">
         <div class="trend-ranges">
           <button v-for="r in [7, 14, 30]" :key="r" class="tr-btn" :class="{ on: range === r }" @click="range = r">{{ r }}天</button>

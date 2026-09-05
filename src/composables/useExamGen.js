@@ -10,6 +10,7 @@ import { genZzQuestion } from '../utils/zzGen'
 import { genZlQuestion } from '../utils/zlGen' // 深化(A)：资料构建性本地生成
 import { genZlChartGroup } from '../utils/zlChartGroup' // 实测反馈：图形材料无 fig 模型时用确定性真 SVG 图题组兜底
 import { verifyTruthTable } from '../utils/logicVerify'
+import { canLocalStrat, localFirstFreeOk } from '../data/genStrategy' // P3-2 本地/AI 生成策略表（只读表不写死）
 import { localQuizVerify } from '../utils/quizVerify'
 import { plateChecks, plateAiHint, plateLearn } from '../utils/quizVerifyProfiles'
 import { recordGenLog, genLogHint, recentGenStats } from '../utils/quizLog' // 35号批次5(2/3)：出卷质量报告
@@ -31,6 +32,7 @@ import { isFastGenMode } from '../utils/fastMode' // 深化·快模型质量门 
 import { checkFigureText } from '../utils/svgCheck' // 单题快练优化④：配图强校验（图推必须有合法 SVG）
 import { pickRetryReset } from '../utils/retryPlan' // 深化·续出：续出重置计划（纯函数）
 import { calcRecheck, groupNumericRecheck } from '../utils/verifyCalc' // 深化·AI题可算必验（单题 + 材料题组子题）
+import { canRelaxDecision, needAiRecheck } from '../utils/quizGate' // 39号矩阵：闸门判定纯函数（可单测）
 import { savePending, loadPending, clearPending } from '../utils/pendingPaper' // 深化·断点续出：组卷失败/中断后持久化草稿
 
 // 深化·速度护栏：单题时间预算（秒，默认45，可配 10..90）。所有出题/重试/流式/质检共用，超预算即止损。
@@ -196,9 +198,9 @@ export function useExamGen(ctx) {
     if (item.group && !item.groupLeader) return // 占位：由组首生成后统一填充
     // 🎲 本地题库生成（单题快练·图形推理/数量关系/政治理论，选择本地或未配Key离线练习）→ 零额度、确定性质检、永不裁切
     const localCapable = { '图形推理': genTutuQuestion, '数量关系': genSlQuestion, '政治理论': genZzQuestion, '资料分析': genZlQuestion } // 深化(A)：资料单题(自由练)本地可算
-    const canLocal = localCapable[item.subject]
+    const canLocal = canLocalStrat(item.subject, item.variant) ? localCapable[item.subject] : null // P3-2 读策略表（localCapable 仍持生成函数）
     // 深化②(2/2)：确定性本地优先路由——开启 preferLocalDet 且为自由练（未指定题型）时，图推/数量/政治直接走本地确定性生成（零错题、零成本）
-    const localFreeDet = singleMode.value && canLocal && !!store.cfg.preferLocalDet && !String(item.variant || '')
+    const localFreeDet = singleMode.value && canLocal && !!store.cfg.preferLocalDet && localFirstFreeOk(item.subject) && !String(item.variant || '') // P3-2 读策略表
     if (singleMode.value && canLocal && !item.group && (singleLocal.value || localFreeDet || !pickGenC() || !pickGenC().key)) {
       const lq = canLocal()
       if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地题库'; item.local = true; item.kpoint = kpointOf(item.subject, lq.stem); return }
@@ -206,7 +208,7 @@ export function useExamGen(ctx) {
     const c = pickGenC()
     if (!c || !c.key) {
       // 未配 Key 时本地可出题板块（图推/数量/政治）照样出题：离线练习零门槛
-      if (canLocal && !item.group && !String(item.variant || '').match(/空间重构|截面图|三视图|立体拼合/) && (singleMode.value || !pickGenC() || !pickGenC().key)) {
+      if (canLocal && !item.group && canLocalStrat(item.subject, item.variant) && (singleMode.value || !pickGenC() || !pickGenC().key)) { // P3-2 noLocalVariants(3D) 读策略表
         const lq = canLocal()
         if (lq) { item.stem = lq.stem; item.options = lq.options; item.answer = lq.answer; item.explain = lq.explain || ''; item.variant = '本地题库'; item.local = true; item.kpoint = kpointOf(item.subject, lq.stem); return }
       }
@@ -461,7 +463,7 @@ export function useExamGen(ctx) {
           if (!vt || !vt.ok) { fixHint = '。上一版真值表校验未通过（' + (vt ? vt.reason : '缺少【验证数据】JSON') + '）：请重设条件/选项，使 2^n 枚举恰一组满足题设真假数、且恰一个选项对应唯一解，并在输出末尾附【验证数据】JSON'; continue }
           ttVerified = true
         }
-        if (aiGate && !ttVerified && !(isBlankQC && attempt >= 1)) { // 选词填空：本地质检通过后 AI 复核至多 2 次（防误杀型反复否决） // 37号 加固C：双模型互检 / 快模型质量门（strictGen 关掉但用快模型出题时仍保底一次 AI 复核）
+        if (needAiRecheck({ aiGateOn: aiGate, ttVerified, isBlank: isBlankQC, attempt })) { // 选词填空：本地质检通过后 AI 复核至多 2 次（防误杀型反复否决） // 37号 加固C：双模型互检 / 快模型质量门（strictGen 关掉但用快模型出题时仍保底一次 AI 复核）
           stage(attempt, 'AI 质检中…')
           const vq = await verifyQuestion(cur, item.subject, variant)
           if (vq && vq.error) { failReasons.push('AI质检调用失败（网络/模型/限流）——暂不据此判死'); continue }
@@ -473,7 +475,7 @@ export function useExamGen(ctx) {
       // 写入出题历史（供 AI 学习：板块/题型/尝试次数/失败原因/是否成功）
       recordGenLog({ plate: item.subject, variant, difficulty: item.difficulty || '', ok: !!qz, attempts: genAttempts, reasons: failReasons, src: 'single' })
       // 放宽兜底仅在【无 AI 复核门】时允许：开启 strict/双检/快模型质量门后，被 AI 复核否决(非唯一/多解/多选)的题绝不兜底放行——宁可判失败重出，也不把有争议的题发给用户
-      if (!qz && lastParsed && !calcBad && variant !== '真假话' && localQuizVerify(lastParsed).ok && !qcHardFail) qz = lastParsed // 仅“内容真被否决”才不放行；调用失败等可按本地兜底收下
+      if (!qz && canRelaxDecision({ hasLastParsed: !!lastParsed, lastOk: lastParsed ? localQuizVerify(lastParsed).ok : false, calcBad, isTruthTable: variant === '真假话', qcHardFail })) qz = lastParsed // 仅“内容真被否决”才不放行；调用失败等可按本地兜底收下
       if (qz && qz.options && qz.options.length >= 4) {
         item.stem = qz.stem
         item.options = qz.options

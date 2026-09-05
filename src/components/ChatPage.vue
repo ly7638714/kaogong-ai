@@ -1,15 +1,20 @@
 <script setup>
-import { ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
+import { ref, reactive, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
 import { USAGE_GUIDE } from '../utils/usageGuide'
 import { parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
-import { downloadMdScreenshot } from '../utils/capture'
+import { downloadMdScreenshot, snapshotMd } from '../utils/capture' // v3.8.215 截图分享(整幅渲染)
+import { saveImage } from '../utils/downloadOut' // v3.8.214 统一保存出口
 function md(t) {
   return renderMd(t)
 }
 // 批次5-P5-2 markdown 渲染缓存：消息内容不可变，首算即缓存（流式 live 消息不入缓存）
 const _mdCache = new Map()
+const STEP_PROMPT = '\n【分步解析要求】本题为具体题目求解，请严格用 Markdown 二级标题（##）按以下小节输出：\n## 考点\n## 题干拆解\n## 解题步骤\n## 干扰项\n## 一句话小结\n要求：考点一句话点明；题干拆解只讲关键信息与陷阱；解题步骤用 1. 2. 3. 编号逐条可执行；干扰项逐项点名错因；小结一句话收束。非解题类回复（概念问答/出题/闲聊）不要套用此结构。' // v3.8.190 分步解析
+const isStepText = (t) => { try { return hasStepHeadings(String(t || '')) } catch (e) { return false } }
+const stepTagText = (m) => { if (m && m._vt) return '🧭 ' + m._vt + ' 分步'; try { return isStepText(textOf(m)) ? '🧭 分步解析' : '' } catch (e) { return '' } }
+function sameTypeAgain(m) { const vt = m && m._vt; if (!vt) return; text.value = '帮我出一道【' + vt + '】题，先别给答案'; forceSend() }
 function mdC(txt) {
   const key = String(txt || '')
   let h = _mdCache.get(key)
@@ -44,6 +49,14 @@ import { wrongExplainPrompt } from '../utils/plateCoach'
 import { detectMode, askModeSys, MODE_MAP } from '../data/askModes'
 let _lastAskCtx = null
 import { analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
+import { hasStepHeadings } from '../utils/replySteps' // v3.8.190 分步解析
+import { digestOlder } from '../utils/historyDigest' // v3.8.205 长历史自动摘要
+import { calcVerifySys } from '../utils/calcProtocol' // v3.8.205 数值题可算必验
+import { recallBlock } from '../utils/recall' // v3.8.205 追问召回本人错题/记忆
+import { loadSrs } from '../utils/memorySrs' // v3.8.205 记忆召回数据源
+import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
+import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
+import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
 import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
 import { speakReadyText } from '../utils/speechScript'
 import { MODE_NAMES } from '../kb'
@@ -59,6 +72,9 @@ import { addPoints as petAddPoints } from '../utils/pet'
 const SolidTrain = defineAsyncComponent(() => import('./SolidTrain.vue'))
 import DataTrain from './DataTrain.vue'
 import AskWizard from './AskWizard.vue'
+import ChatTools from './ChatTools.vue' // v3.8.195 工具抽屉区子组件
+import ChatMsgs from './ChatMsgs.vue' // v3.8.195 消息渲染区
+import ChatComposer from './ChatComposer.vue' // v3.8.196 输入区+提问助手
 const toolsCollapsed = ref(window.innerWidth <= 640) // 手机端默认收起为「🎯训练」抽屉
 const isNarrow = ref(window.innerWidth <= 640)
 try { if (localStorage.getItem('xc_chat_tools') !== null) toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
@@ -629,6 +645,7 @@ async function runChat() {
     else if (!_nx) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _pr.sub, text: curTxt }
   }
   let sys = buildSys(_plate ? PLATE_MODE[_plate] || '' : undefined, curTxt)
+let _vtType = '' // v3.8.192 命中 canonical 题型则非空
   // ===== 四步发题向导：用户手动锁定 板块→细分→题型→意图，定向注入（覆盖自动猜测，本次发送即消费） =====
   let wzMode = ''
   try {
@@ -684,7 +701,7 @@ async function runChat() {
         }
         // ④ 锚定本题：仅对真正在解题的意图追加（出题/概念/秒杀不适用）
         const _anchorOk = !_taskShape || (_taskShape.kind !== 'batchN' && _taskShape.kind !== 'genericHow')
-        if (_anchorOk && (aa.intent === '求解' || aa.intent === '判错解释' || aa.intent === '对比')) sys += ANCHOR_PROTOCOL
+    if (_anchorOk && (aa.intent === '求解' || aa.intent === '判错解释' || aa.intent === '对比')) { let _vi = null; try { const _pp6 = normalizePlate(_plate || aa.plate.name || detectBanKuai(curTxt) || ''); _vi = resolveVariant({ plate6: _pp6, sub: (wzSel.value && wzSel.value.sub) || aa.sub.name || '', type: (wzSel.value && wzSel.value.type) || '', detected: aa.sub.name || '' }) } catch (e) {} _vtType = _vi ? (_vi.sub + '·' + _vi.type) : ''; sys += ANCHOR_PROTOCOL + (_vtType ? variantStepPrompt(_vi) : STEP_PROMPT) }
       }
     } catch (e) {}
     // ⑤ 回答深度
@@ -745,10 +762,28 @@ async function runChat() {
     const topics = lastImgTopics(store.msgs, 6)
     if (topics.length) sys += '\n【本会话最近看过的截图题目】\n' + topics.join('\n') + '\n（用户若说“第N题/上一题/这道”即指以上题目，直接据此作答，勿要求重发截图）'
   } catch (e) {}
+  // ===== v3.8.205 对话深化三件套 =====
+  // P-C2 长历史自动摘要：被条数/预算截掉的更早对话压缩进 sys（防断片，不静默丢上下文）
+  try {
+    const _dig = digestOlder(store.msgs, { keep: _HIS, cap: 2200 })
+    if (_dig.text) sys += _dig.text
+  } catch (e) {}
+  // P-C3 数值题「可算必验」：数量/资料解题要求 算式→代入→【验算】=数值，供 verifyCalc 复核
+  try {
+    const _pp6c = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+    const _cps = calcVerifySys(_pp6c, curTxt)
+    if (_cps) sys += _cps
+  } catch (e) {}
+  // P-C4 追问召回：追问/短问时自动带出本人相关错题 + 记忆词条，让讲解贴着“我的历史”
+  try {
+    const _pp6r = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+    const _rb = recallBlock({ wqs: store.wqs, srs: loadSrs(), query: curTxt, plate6: _pp6r })
+    if (_rb) sys += _rb
+  } catch (e) {}
   live.value = { text: '', think: '', thinkOpen: false }
   scroll()
   try {
-    const full = await chatStream([{ role: 'system', content: sys }, ...history], replyC, (d) => {
+    let full = await chatStream([{ role: 'system', content: sys }, ...history], replyC, (d) => {
       if (d.type === 'think') {
         live.value.think = d.think
       } else {
@@ -758,6 +793,18 @@ async function runChat() {
       scrollThrottled()
     }, abortCtrl.signal)
     live.value = null
+    // P-C3b 本地数值自查（v3.8.205）：模型附【验算】且题干有选项 → 程序求值复核，不符即正文追加提示
+    try {
+      const _pp6v = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+      if ((_pp6v === '数量关系' || _pp6v === '资料分析') && /【验算】/.test(String(full || ''))) {
+        const optsV = extractChoices(curTxt || '')
+        const ansM = String(full || '').match(/答案[:：]?\s*([A-D])/i) || String(full || '').match(/选\s*([A-D])\b/i)
+        if (ansM && optsV.length >= 2) {
+          const cv = calcRecheck({ answer: String(ansM[1]).toUpperCase(), options: optsV }, full)
+          if (cv && cv.ok === false) full = full + '\n\n⚠️ **本地数值自查**：' + cv.reason + '（请以算式实际结果为准复核，勿直接照抄答案选项）'
+        }
+      }
+    } catch (e) {}
     // 高效复盘指引：模型已按 SYS 输出则以模型为准；缺失时按板块本地复盘库兜底
     const review = buildReview(full, detectBanKuai(curTxt), curTxt)
     const finalContent = review ? full + '\n\n' + review : full
@@ -770,7 +817,7 @@ async function runChat() {
       }
     } catch (e) {}
     const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '')
-    addMsg({ role: 'assistant', content: _withSrc })
+addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
     if (sentImgs.length && shouldFigEnhance(curTxt, lastMsg && lastMsg._imgType)) {
       const lastAi = store.msgs[store.msgs.length - 1]
@@ -787,7 +834,7 @@ async function runChat() {
   } catch (e) {
     live.value = null
     if (e.name === 'AbortError') {
-      addMsg({ role: 'assistant', content: live.value && live.value.text ? live.value.text : '⏹ 已停止生成。', stopped: true })
+      addMsg({ role: 'assistant', content: live.value && live.value.text ? live.value.text : '⏹ 已停止生成。', stopped: true, _vt: _vtType })
     } else if (curIsImg && !curFigRead && figCfg()) {
       // 视觉请求失败（如接口拒收图片）→ 自动用图形增强模型读图后重试一次
       try {
@@ -880,6 +927,28 @@ function figSave(f) {
     img.onerror = () => { downloadBlob(blob, '复刻图.svg'); URL.revokeObjectURL(url) }
     img.src = url
   } catch (e) { showToast('保存失败：' + e.message, 'error') }
+}
+async function capMsg(m, _i) {
+  // v3.8.215：不再克隆实时节点（长内容/嵌套样式下易空白），改用 snapshotMd 整幅白底渲染：
+  // 文字/表格/公式/内嵌图全部可靠输出，并把“我的提问”一起带进分享卡。
+  try {
+    const idx = store.msgs.indexOf(m)
+    let prev = ''
+    for (let j = idx - 1; j >= 0; j--) {
+      const u = store.msgs[j]
+      if (u && u.role === 'user') { prev = String(textOf(u) || '').trim(); break }
+    }
+    const t = String(textOf(m) || '').trim()
+    const md = (prev ? '**🧑 我的提问：**\n' + prev + '\n\n---\n\n' : '') + '**🤖 AI 回复：**\n\n' + t
+    const dataUrl = await snapshotMd(md, {
+      title: '行测AI · AI 答疑分享',
+      sub: '生成时间：' + new Date().toLocaleString('zh-CN', { hour12: false }) + ' · 截图自“行测名师AI小助理”'
+    })
+    if (!dataUrl) { showToast('生成失败，请重试', 'error'); return }
+    await saveImage(dataUrl, 'AI答疑分享_' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14))
+  } catch (e) {
+    showToast('截图失败：' + ((e && e.message) || e), 'error')
+  }
 }
 function downloadBlob(b, name) {
   const u = URL.createObjectURL(b)
@@ -978,32 +1047,25 @@ function resendMsg(i) {
   scroll()
   send()
 }
-function saveWrong() {
+function saveWrong(m) {
   const n = store.msgs.length
-  if (n < 2) {
+  if (!n) {
     showToast('请先完成一次问答', 'info')
     return
   }
-  // 取最后一轮：最后一条用户消息 + 对应 AI 消息板块
-  let uIdx = -1
-  for (let i = n - 1; i >= 0; i--) {
-    if (store.msgs[i].role === 'user') {
-      uIdx = i
-      break
-    }
-  }
-  if (uIdx < 0) {
-    showToast('找不到提问', 'info')
+  // 以“被点击的这条 AI 回复”为锚点，从对话历史里挑真正的题目全文：
+  // ① 结构化题目卡(题干+选项) → ② 截图 OCR 全文(_curImgRead/imgNotes) → ③ 最近用户文字提问
+  const anchor = m ? store.msgs.indexOf(m) : n - 1
+  const src = pickWrongSource(store.msgs, anchor)
+  const qFull = String(src.q || '').trim()
+  const imgs = src.imgs || []
+  if (!qFull && !imgs.length) {
+    showToast('找不到题目内容：请粘贴题干文字，或先让 AI 识别截图里的题目', 'info')
     return
   }
-  const u = store.msgs[uIdx]
-  const aiMsg = store.msgs.find((m, idx) => m.role === 'assistant' && idx > uIdx)
-  const bk = (aiMsg && aiMsg.bk) || detectBanKuai(lastAskText) || '判断推理'
-  // 保存该轮提问的图片（原题截图）与原消息索引（可跳回原对话）
-  const imgs =
-    u.content && u.content.imgs && u.content.imgs.length ? u.content.imgs.slice() : []
+  const bk = detectBanKuai(qFull || lastAskText || '') || '判断推理'
   bkPick.value = bk
-  bkOrigin.value = { q: textOf(u), imgs, msgIdx: uIdx }
+  bkOrigin.value = { q: qFull.slice(0, 3000), imgs, msgIdx: src.msgIdx >= 0 ? src.msgIdx : n - 1, source: src.source || '' }
   bkShow.value = true
 }
 // ===== 选择题作答：点选选项 → 判对错 + 可存错题本 =====
@@ -1261,7 +1323,8 @@ function openExam(src) {
   examShow.value = true
   store.examOpen = true
   store.uiCtx.panel = 'exam'
-  navOpen({ id: 'exam', label: src === 'single' ? '单题快练' : src === 'import' ? '导入组卷' : src === 'wrong' ? '错题组卷' : src === 'anchor' ? '锚点自测' : '模拟组卷' })
+  const EXAM_LABEL = { single: '⚡ 单题快练', ai: '🎲 AI 整卷出题', import: '📂 导入材料', wrong: '📚 错题集组卷', zhenti: '📋 真题快练', morning: '🌅 晨练包', weekRedo: '📅 每周重做', anchor: '📐 锚点自测' }
+  navOpen({ id: 'exam', label: EXAM_LABEL[src] || '统一考场' })
 }
 function closeExam() {
   examShow.value = false
@@ -1316,12 +1379,9 @@ function onNavBack(e) {
 }
 const solidShow = ref(false) // 立体图推训练
 const dtShow = ref(false) // 资料分析四层能力训练
-const bkPick = ref('判断推理')
+const bkPick = ref('逻辑判断与推理') // v3.8.210 默认大板块全称
 const bkOrigin = ref({ q: '', imgs: [], msgIdx: -1 })
-const BK_OPTIONS = [
-  '判断推理', '言语理解', '资料分析', '数量关系', '常识判断', '政治理论',
-  '定义判断', '类比推理', '图形推理'
-]
+const BK_OPTIONS = ['逻辑判断与推理', '言语理解与表达', '资料分析', '数量关系', '常识判断', '政治理论'] // v3.8.210 板块=六大组全称（杜绝 组/细分 混选歧义）
 // 压缩图片：存错题时用缩略图控制 localStorage 体积（最长边 max 像素）
 function compressImage(dataUrl, max = 760, quality = 0.72) {
   return new Promise((resolve) => {
@@ -1355,7 +1415,8 @@ async function confirmSaveWrong() {
   const raw = bkOrigin.value.imgs || []
   const imgs = []
   for (const it of raw) imgs.push(it.startsWith('data:') ? await compressImage(it) : it)
-  const q = (bkOrigin.value.q || '').slice(0, 220)
+  const qRaw = (bkOrigin.value.q || '').trim()
+  const q = (qRaw || (imgs.length ? '（截图题目，见下方原图；建议配置可识图模型或图形增强以自动识别文字）' : '')).slice(0, 3000)
   addWrong({
     id: Date.now(),
     subject: bkPick.value,
@@ -2026,256 +2087,16 @@ onMounted(() => window.addEventListener('resize', onToolsResize))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 onUnmounted(() => window.removeEventListener('resize', onToolsResize))
 defineEmits(['export-review'])
+
+// v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
+const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, sendGuard, askWarn, _askT, reAnalyze, confirmPlate, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, applyChip, enhanceAskBtn, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, gotoFix, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+
 </script>
 <template>
   <div class="page on" style="display: flex; flex-direction: column; height: 100%">
     <div class="page-inner" style="display: flex; flex-direction: column; flex: 1; min-height: 0">
-      <div class="chat-tools">
-        <div class="chat-tools-hd">
-          <span class="cth-t">{{ isNarrow ? '🎯 训练' : '🛠️ 训练工具' }}</span>
-          <button class="cth-btn" @click="toggleTools()">{{ toolsCollapsed ? '▾ 展开' : '▴ 收起' }}</button>
-        </div>
-        <div v-if="!toolsCollapsed && isNarrow" class="chat-tools-ov" @click="toggleTools()"></div>
-        <div v-show="!toolsCollapsed" class="chat-tools-bd">
-          <div class="mode-pick">
-            <button class="mode-pick-btn" :title="'当前模式：' + MODE_NAMES[store.mode] + '，点击切换专项模式'" @click.stop="modeOpen = !modeOpen">
-              <span class="mp-ic">{{ modeIcon(store.mode) }}</span>
-              <span class="mp-name">{{ modeName(store.mode) }}</span>
-              <span class="mp-arrow">{{ modeOpen ? '▴' : '▾' }}</span>
-            </button>
-            <div v-if="modeOpen" class="mode-pop" @click.self="modeOpen = false">
-              <div v-for="g in MODE_GROUPS" :key="g.k" class="mp-group">
-                <div class="mp-group-t">{{ g.t }}</div>
-                <div class="mp-group-items">
-                  <button v-for="m in g.items" :key="m" class="mp-item" :class="{ on: store.mode === m }" @click="setMode(m); modeOpen = false">
-                    <span class="mp-item-ic">{{ modeIcon(m) }}</span>
-                    <span class="mp-item-t">{{ modeName(m) }}</span>
-                    <span v-if="store.mode === m" class="mp-check">✓</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="train-bar">
-        <span class="tb-l">🎯 智能训练</span>
-        <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
-          <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
-        </select>
-        <button class="btn btn-gh tb-btn" title="单题快练（原模拟出题）：选板块随机出1题，即时批改·可再来一题·错题入库" @click="openExam('single')">⚡ 单题快练</button>
-        <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="examOffline = true; openExam('single')">📴 离线练习</button>
-        <button class="btn btn-pri tb-btn" title="🌅 每日晨练包：资料速算5 + 常识速测5 + 错题未复盘二刷5，一键15题组合卷" @click="openExam('morning')">🌅 晨练包</button>
-        <button class="btn btn-gh tb-btn" title="📐 锚点自测：每板块10道固定真题校准能力值（累计作答100题后解锁）" @click="openAnchor()">📐 锚点自测</button>
-        <button class="btn btn-gh tb-btn" title="统一考场：国考/省考卷面模板·AI智能出题·导入材料识别·错题组卷·限时作答批改" @click="openExam('ai')">📝 模拟组卷</button>
-        
-        <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
-            <button
-              class="btn tb-btn"
-              :class="store.cfg.examMode ? 'btn-pri' : 'btn-gh'"
-              title="考场计时：开启后每次提问按问数限时（1 问=1 分钟），AI 回复后统计用时；关闭则不打扰"
-              @click="store.cfg.examMode = !store.cfg.examMode; saveCfg()"
-            >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
-            <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
-            <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
-            <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
-            <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
-          </div>
-        </div>
-      </div>
-      <div id="msgs" ref="msgsBox" class="msgs" style="flex: 1; overflow-y: auto" @scroll="sumMsgsScroll">
-        <div v-if="!store.msgs.length && !live" class="hero">
-          <div class="hero-badge">六大板块 · 名师方法论 · 命题人视角</div>
-          <h2><span>行测智能助教</span></h2>
-          <p>文字题走 DeepSeek · 图表公式走视觉模型 · 给你名师级的做题思路与错题复盘</p>
-          <div class="hero-stats">
-            <div class="hs">
-              <div class="hs-n">{{ dStat.q }}</div>
-              <div class="hs-l">累计提问</div>
-            </div>
-            <div class="hs">
-              <div class="hs-n">{{ dStat.w }}</div>
-              <div class="hs-l">已收错题</div>
-            </div>
-            <div class="hs">
-              <div class="hs-n g">{{ dStat.r }}</div>
-              <div class="hs-l">已复盘</div>
-            </div>
-          </div>
-          <div class="hero-grid">
-            <div v-for="c in quickCards" :key="c.t" class="hero-card" @click="askQuick(c)">
-              <div :class="'hero-ic b-' + c.bg">{{ c.ic }}</div>
-              <div>
-                <div class="hero-t">{{ c.t }}</div>
-                <div class="hero-s">{{ c.s }}</div>
-              </div>
-            </div>
-          </div>
-          <div v-if="recentQs.length" class="hero-recents">
-            <div class="hr-t">🕘 最近提问</div>
-            <div class="hr-list">
-              <button v-for="(rq, ri) in recentQs" :key="ri" class="hr-chip" @click="useRecent(rq)">{{ rq.slice(0, 26) }}</button>
-            </div>
-          </div>
-          <div class="hero-motto">💡 {{ motto }}</div>
-        </div>
-        <template v-for="(m, i) in store.msgs" :key="m.id">
-          <div class="msg" :class="[m.role === 'user' ? 'me' : 'ai', { hl: i === hlIdx }]" :data-i="i">
-            <div v-if="m.role === 'user'">
-              <template v-if="typeof m.content === 'string'"><div v-html="md(m.content)"></div>
-</template>
-              <template v-else>
-                <div class="msg-imgs">
-                  <template v-for="(im, j) in m.content.imgs" :key="j">
-                    <img v-if="im" class="msg-img" :src="im" @click="viewImg(im)" />
-                  </template>
-                </div>
-                <div v-html="md(m.content.text)"></div>
-</template>
-              <div class="msg-actions me-actions">
-                <button @click="resendMsg(i)">↻ 重发</button>
-                <button @click="copyMsg($event)">📋 复制</button>
-              </div>
-            </div>
-            <template v-else>
-              <div class="ans-tag">
-                <span v-if="m.bk" class="at-plate" style="cursor:pointer" title="点击修正板块归属（同时修正统计）" @click.stop="fixPlate(m, $event)">📐 {{ m.bk }} ✏️</span>
-                <div v-if="m.bkEditing" class="bk-fix" style="position:absolute;z-index:30;background:var(--card);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:320px">
-                  <button v-for="bp in BK_OPTIONS" :key="'bk' + bp" class="fp-b" :class="{ on: m.bk === bp }" style="padding:2px 8px;font-size:12px" @click.stop="applyPlate(m, bp)">{{ bp }}</button>
-                </div>
-                <span class="at-mark">✍️ AI 批改</span>
-                <span v-if="m.answerTime" class="at-time">{{ m.answerTime }}</span>
-              </div>
-              <template v-if="m.quiz">
-                <div v-if="quizPlate(m)" class="quiz-hd">
-                  <span class="quiz-plate">📐 {{ quizPlate(m) }}</span>
-                  <span v-if="m.quiz.needAi" class="quiz-tag">先选后判</span>
-                  <span v-if="m.orgCard" class="quiz-tag src">截图整理</span>
-                </div>
-                <div class="quiz-stem" v-html="mdC(m.quiz.stem)"></div>
-                <div class="quiz-opts" :class="{ 'has-svg': quizHasSvg(m) }">
-                  <button
-                    v-for="o in m.quiz.options"
-                    :key="o.k"
-                    class="quiz-opt"
-                    :class="{
-                      picked: m.quiz.picked === o.k,
-                      right: m.quiz.picked && o.k === m.quiz.answer,
-                      wrong: m.quiz.picked && o.k === m.quiz.picked && o.k !== m.quiz.answer
-                    }"
-                    :disabled="!!m.quiz.picked"
-                    @click="pickQuiz(m, o.k)"
-                  >
-                    <span class="qk">{{ o.k }}</span><span class="qt" v-html="mdC(o.t)"></span>
-                  </button>
-                </div>
-                <div v-if="!m.quiz.picked" class="quiz-guide">
-                  <span class="qg-t">🧩 直接点选项作答，选完自动判题+解析</span>
-                  <button class="btn btn-gh" @click="quizFullShow(m)">⛶ 全屏做题</button>
-                  <button class="btn btn-gh" @click="quizDeep(m)">💬 发到对话深挖</button>
-                  <button class="btn btn-gh" @click="capQuizShot(m, 'q')">📸 题目截图</button>
-                </div>
-                <div v-if="m.orgCard && !m.quiz.picked" class="quiz-org-acts">
-                  <button class="btn btn-pri" @click="quizExplainNow(m)">📖 直接讲解</button>
-                  <button class="btn btn-gh" @click="quizScrollTo(m)">✍️ 先做一遍</button>
-                </div>
-                <div v-if="m.quiz.picked" class="quiz-result" :class="m.quiz.checking ? 'pending' : (m.quiz.correct ? 'ok' : 'no')">
-                  <template v-if="m.quiz.checking">⏳ AI 判题中…</template>
-                  <template v-else-if="m.quiz.correct === null">已提交，等待 AI 判题…</template>
-                  <template v-else>{{ m.quiz.correct ? '✅ 回答正确！' : (m.quiz.answer ? '❌ 回答错误，正确答案是 ' + m.quiz.answer : '❌ 回答错误（待人工核对）') }} <span v-if="m.quiz.aiChecked" class="quiz-ai-badge">🤖 已按解析核验</span><span v-else-if="m.quiz.checkFailed" class="quiz-ai-badge warn">⚠️ 未取回答案</span></template>
-                </div>
-                <div v-if="m.quiz.picked && m.quiz.correct === false && !m.quiz.checking && !m.quiz.wrongPrompted" class="quiz-wrong-bar">
-                  <span class="qw-t">📌 这道题做错了，加入错题集？</span>
-                  <button class="btn btn-pri qw-yes" @click="quizWrongAdd(m)">加入</button>
-                  <button class="btn btn-gh" @click="quizWrongIgnore(m)">忽略</button>
-                </div>
-                <div v-if="m.quiz.picked && m.quiz.explain && !m.quiz.checking" class="quiz-explain" v-html="mdC(m.quiz.explain)"></div>
-                <div v-if="m.quiz.picked && !m.quiz.checking" class="quiz-acts">
-                  <button class="btn btn-gh" @click="quizDeep(m)">💬 发到对话深挖</button>
-                  <button class="btn btn-gh" @click="saveQuizWrong(m)">📌 存错题本</button>
-                  <button class="btn btn-gh" @click="quizFullShow(m)">⛶ 全屏做题</button>
-                  <button class="btn btn-gh" @click="capQuizShot(m, 'e')">📸 解析截图</button>
-                </div>
-                <div v-if="m.quiz.picked && !m.quiz.checking" class="quiz-followup">
-                  <span class="qf-t">🤔 答对还想巩固？要不要再来一道变式、看解析，或换个角度聊聊？</span>
-                  <button class="qf-b" @click="variantMenu = (variantMenu === m ? null : m)">🔁 再出变式</button>
-                  <button class="qf-b" @click="showVariantExplain(m)">📖 看解析</button>
-                  <button class="qf-b" @click="followUp(m)">💬 继续追问</button>
-                  <button class="qf-b" @click="focusInput()">❓ 其他问题</button>
-                  <template v-if="variantMenu === m">
-                    <button class="qf-d" @click="doVariant(m, 'easy')">简单</button>
-                    <button class="qf-d" @click="doVariant(m, 'mid')">中等</button>
-                    <button class="qf-d" @click="doVariant(m, 'hard')">困难</button>
-                  </template>
-                </div>
-              </template>
-              <div v-else>
-                <div v-html="mdCached(m, i)"></div>
-                <button v-if="isLong(textOf(m))" class="fold-btn" @click="toggleExpand(i)">
-                  {{ expanded[i] ? '🔼 收起全文' : '🔽 展开全文（' + textOf(m).length + ' 字）' }}
-                </button>
-                <div v-if="m.figBusy" class="fig-busy"><span class="fig-spin"></span>🖼 图形增强：正在用独立模型把截图复刻成图…</div>
-                <div v-if="m.fig && m.fig.ok" class="fig-card">
-                  <div class="fig-hd">
-                    <span>🖼 AI 图形复刻 · {{ m.fig.type }}</span>
-                    <div style="display:flex;gap:6px;align-items:center">
-                    <button class="btn btn-gh" @click="figZoom(m.fig)">⛶ 放大</button>
-                    <button class="btn btn-gh" @click="figSave(m.fig)">💾 保存</button>
-                    <button class="btn btn-gh" title="收起这张复刻图" @click="m.figHide = !m.figHide">{{ m.figHide ? '🔽 展开' : '🔼 收起' }}</button>
-                  </div>
-                  </div>
-                  <div v-show="!m.figHide" class="fig-svg" @click="figZoom(m.fig)" v-html="m.fig.svg"></div>
-                  <div v-if="m.fig.summary" class="fig-summary">📝 {{ m.fig.summary }}</div>
-                  <div v-if="m.fig.rule" class="fig-rule">📐 规律：{{ m.fig.rule }}</div>
-                  <div v-if="m.fig.tips" class="fig-tips">💡 {{ m.fig.tips }}</div>
-                </div>
-                <div v-if="m.fig && m.fig.ok === false" class="fig-fail">
-                  <div>🖼 图形增强未生成图像（不影响本题解答）——可能该截图无需画图，或模型未返回有效图形。{{ m.fig.err ? '（' + m.fig.err + '）' : '' }}</div>
-                  <button class="btn btn-gh" :disabled="m.figBusy" @click="retryFigEnhance(m)">🔄 重试复刻</button>
-                </div>
-              </div>
-              <div class="msg-actions">
-                <button v-if="m.err" class="retry-btn" @click="retryLast()">↻ 重试</button>
-                <button v-if="!m.err && prevHasImg(m) && figCfg()" :disabled="m.figBusy" :title="'用独立模型把题目截图复刻成图'" @click="retryFigEnhance(m)">🖼 {{ m.fig && m.fig.ok ? '重绘' : '图形增强' }}</button>
-                <button v-if="!m.err" @click="saveWrong()">📌 存错题</button>
-                <button v-if="!m.err" @click="variantMenu = (variantMenu === m ? null : m)">🔁 变式题</button>
-                <template v-if="variantMenu === m">
-                  <button class="vt-diff" @click="doVariant(m, 'easy')">简单</button>
-                  <button class="vt-diff" @click="doVariant(m, 'mid')">中等</button>
-                  <button class="vt-diff" @click="doVariant(m, 'hard')">困难</button>
-                </template>
-                <button v-if="!m.err" @click="$emit('export-review')">📄 复盘</button>
-                <button title="基于这条回复继续追问" @click="followUp(m)">💬 追问</button>
-                <button title="收藏到我的笔记" @click="collectMsg(m)">📌 收藏</button>
-                <button :class="{ 'fb-on': m.fb === 1 }" title="这条回复对你有用" @click="toggleFb(m, 1)">👍</button>
-                <button :class="{ 'fb-on': m.fb === -1 }" title="这条回复需改进" @click="toggleFb(m, -1)">👎</button>
-                <button @click="copyMsg($event)">📋 复制</button>
-                <button @click="toggleSpeak($event)">🔊 朗读</button>
-              </div>
-</template>
-          </div>
-</template>
-        <div v-if="live" class="msg ai live-cursor">
-          <div v-if="live.think" class="think-box" :class="{ open: live.thinkOpen }">
-            <div class="tb-head" @click="live.thinkOpen = !live.thinkOpen">
-              💭 {{ live.thinkOpen ? '正在思考…（实时推理）' : '思考过程（点击展开）' }}
-            </div>
-            <div class="tb-body">{{ live.think }}</div>
-          </div>
-          <template v-if="live.text">
-            <div v-html="md(live.text)"></div>
-            <span class="type-cursor" aria-hidden="true"></span>
-</template>
-          <div v-else class="ai-skels">
-            <div class="skel-typing"><span class="skel-dot"></span><span class="skel-dot"></span><span class="skel-dot"></span> 正在回复…</div>
-            <span class="skel" style="width: 70%; height: 14px"></span>
-            <span class="skel" style="width: 88%; height: 14px"></span>
-            <span class="skel" style="width: 55%; height: 14px"></span>
-          </div>
-        </div>
-        <!-- 回到最新：全局悬浮按钮（Teleport 到 body，脱离滚动容器），点击回最新、可拖到页面任意位置并记忆 -->
-        <Teleport to="body">
-          <button v-if="store.tab === 'chat'" v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
-        </Teleport>
-      </div>
+    <ChatTools :ctx="fpctx" />
+    <ChatMsgs :ctx="fpctx" />
       <div v-if="imgs.length" class="img-strip">
         <div v-for="(im, i) in imgs" :key="i" class="img-thumb">
           <img :src="im" @click="viewImg(im)" />
@@ -2305,88 +2126,7 @@ defineEmits(['export-review'])
         </div>
         <button class="rb-clear" title="清空提问历史" @click="recentQs = []; try{localStorage.removeItem('xc_recent_qs')}catch(e){}">✕</button>
       </div>
-      <!-- 🧭 提问助手（v3.8.76）：输入即识别板块/题型/意图，缺信息就轻轻提示，可一键结构化 -->
-      <div v-if="askShow" class="ask-assist">
-        <div class="aa-row1">
-          <span v-if="ask.plate.name" class="aa-chip" :class="{ low: ask.lowConf }" :title="'置信度 ' + Math.round(ask.plate.conf * 100) + '%'">
-            {{ ask.plate.name }}<span v-if="ask.sub.name" class="aa-sub">·{{ ask.sub.name }}</span>
-          </span>
-          <span v-else class="aa-chip none">未识别板块</span>
-          <span v-if="ask.plate.name" class="aa-bar" :title="'识别置信度 ' + Math.round(ask.plate.conf * 100) + '%'">
-            <i :style="{ width: Math.round(ask.plate.conf * 100) + '%', background: ask.plate.conf >= 0.7 ? 'var(--green,#3ddc84)' : ask.plate.conf >= 0.4 ? '#f2c14e' : '#8b93a7' }"></i>
-          </span>
-          <span class="aa-intent">{{ ask.intent }}</span>
-          <span class="aa-sp"></span>
-          <span class="aa-depth" title="回答深度：详讲 / 简答 / 只给秒杀">
-            <button v-for="d in ['detail', 'brief', 'flash']" :key="d" class="aa-dp" :class="{ on: (store.cfg.answerDepth || 'detail') === d }" @click="setDepth(d)">{{ DEPTH_LABEL[d] }}</button>
-          </span>
-          <button class="aa-enh" title="把口语化/残缺的提问自动结构化（纯本地，不会编造题目数据）" @click="enhanceAskBtn()">✨ 增强提问</button>
-          <button class="aa-off" title="关闭提问助手（关闭后本条不再出现）" @click="closeAssist()">✕</button>
-        </div>
-        <div v-for="(h, hi) in ask.hints" :key="hi" class="aa-hint">
-          <span class="aa-hic">{{ h.ic }}</span><span>{{ h.t }}</span>
-        </div>
-        <div v-if="ask.lowConf && ask.candidates.length" class="aa-pick">
-          <span class="aa-pk-t">是哪个板块？</span>
-          <button v-for="c in ask.candidates" :key="c" class="aa-pk-b" @click="confirmPlate(c)">{{ c }}</button>
-        </div>
-        <div v-if="ask.chips.length" class="aa-chips">
-          <button v-for="(c, ci) in ask.chips" :key="ci" class="aa-cp" :title="'插入：' + c.ins" @click="applyChip(c.ins)">{{ c.t }}</button>
-        </div>
-        <div v-if="askWarn" class="aa-warn">
-          <span>⚠️ {{ askWarn }}</span>
-          <button class="aa-wb pri" @click="forceSend()">仍要发送</button>
-          <button class="aa-wb" @click="gotoFix()">去补充</button>
-        </div>
-      </div>
-      <!-- 助手已关闭时的一键重开入口（仅在输入内容时出现，平时零打扰） -->
-      <div v-else-if="store.cfg.askAssist === false && text.trim().length > 3" class="ask-assist">
-        <div class="aa-row1">
-          <button class="aa-enh" @click="openAssist()">🧭 开启提问助手（识别板块·题型，提示补全信息）</button>
-        </div>
-      </div>
-      <div v-if="wzSel && wzSel.plate" class="wz-active">
-        <span>🧭 <b>{{ wzSel.plate }}</b><template v-if="wzSel.sub"> · {{ wzSel.sub }}</template><template v-if="wzSel.type"> · {{ wzSel.type }}</template> · {{ wizardModeLabel(wzSel.mode) }}</span>
-        <button class="wz-cancel" @click="wzCancel()">✕ 取消锁定</button>
-      </div>
-      <div class="input-bar">
-        <div v-if="store.busy" class="stopwatch" :class="{ warn: left === 0 }">
-          <span class="sw-ic">⏱</span>
-          <span class="sw-num hud-num">{{ fmtSec(left) }}</span>
-          <span class="sw-lbl">{{ left === 0 ? '超时' : '限 ' + fmtSec(limitShow) }}</span>
-        </div>
-        <div class="e-dock">
-          <textarea
-            v-model="text"
-            rows="1"
-            :placeholder="inputPh"
-            @keydown.enter.exact.prevent="send()"
-          ></textarea>
-          <div class="dock-btns">
-          <button class="ib-btn wz-open" :class="{ on: !!wzSel }" title="🧭 四步发题向导：发送前先选 板块→细分→题型→意图，AI 不再猜题、按你的路径精准作答" @click="wzOpen = true">🧭</button>
-          <button class="ib-btn" :class="{ on: store.cfg.ttsOn !== false }" :title="(store.cfg.ttsOn !== false ? '自动朗读已开启，点击关闭' : '自动朗读已关闭，点击开启')" @click="toggleTts()">{{ store.cfg.ttsOn !== false ? '🔊' : '🔇' }}</button>
-          <button class="ib-btn" :style="{ color: recogOn ? 'var(--red)' : '' }" @click="toggleMic()">🎤</button>
-          <button class="ib-btn" @click="linkShow = !linkShow">🔗</button>
-          <button
-            class="ib-btn qm"
-            :class="{ on: quickMode }"
-            :title="quickMode ? '⚡快答：用快模型秒回（简单/熟练题）；点击切回🧠深度' : '🧠深度：用思考模型更准（难题/文字截图题）；点击切到⚡快答'"
-            @click="toggleQuickMode()"
-          >{{ quickMode ? '⚡ 快答' : '🧠 深度' }}</button>
-          <label class="ib-btn" style="display: flex; align-items: center; justify-content: center; cursor: pointer">
-            📷
-            <input type="file" accept="image/*" style="display: none" @change="pickImage" />
-          </label>
-          </div>
-          <button
-            v-if="store.busy"
-            class="ib-send stop"
-            title="停止生成"
-            @click="stopGenerate()"
-          >⏹</button>
-          <button v-else class="ib-send" @click="send()">➤</button>
-        </div>
-      </div>
+    <ChatComposer :ctx="fpctx" />
     </div>
   </div>
   <!-- 对话使用说明书弹窗 -->

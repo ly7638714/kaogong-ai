@@ -922,17 +922,73 @@ function buildCalc(seed, level, stage) {
   return { ...base, stage: 'practice' }
 }
 // ================= 入口 =================
-export function genDataQ(mode, seed, level = 2, stage) {
+export function genDataQ(mode, seed, level = 2, stage, domain) {
   if (seed === undefined) seed = Date.now() % 100000
+  const domCfg = domain && typeof domain === 'object' ? domain : null
   for (let attempt = 0; attempt < 8; attempt++) {
     const s = seed + attempt * 137
     const q = mode === 'type' ? buildType(s)
-      : mode === 'locate' ? buildLocate(s)
+      : mode === 'locate' ? (domCfg ? buildLocateForDomain(s, domCfg) : buildLocate(s))
       : mode === 'formula' ? buildFormula(s)
       : buildCalc(s, level, stage)
     if (q && verifyUnique(q)) return q
   }
   return null
+}
+
+// ===== 按所选领域出“找数据”材料（v3.8.213：杜绝 选A领域出B材料）=====
+function rndF(seed) { const x = Math.sin(seed * 9973.17) * 10000; return x - Math.floor(x) }
+function iRand(seed, a, b) { return a + Math.floor(rndF(seed) * (b - a + 1)) }
+function buildLocateForDomain(seed, dom) {
+  const inds = Array.isArray(dom && dom.inds) && dom.inds.length ? dom.inds.slice() : ['粮食产量', '肉类产量', '水产品产量']
+  const unit = (dom && dom.unit) || '万吨'
+  const area = (dom && dom.n) || '该领域'
+  const text = iRand(seed, 0, 1) === 0
+  if (text) return buildLocateTextDomain(seed, inds, unit, area)
+  return buildLocateTableDomain(seed, inds, unit, area)
+}
+function buildLocateTextDomain(seed, inds, unit, area) {
+  const themes = ['总体运行情况', '分项结构情况', '同比对比情况']
+  const segs = [0, 1, 2].map((i) => {
+    const main = inds[i % inds.length]
+    const sub = inds[(i + 1) % inds.length]
+    const mv = iRand(seed + i * 13, 3000, 96000)
+    const subV = Math.round(mv * (0.18 + rndF(seed + i * 17) * 0.3))
+    const r = (iRand(seed + i * 11, 1, 96)) / 10
+    const sr = Math.max(-6, Math.min(22, Math.round((r + (iRand(seed + i * 23, -30, 30)) / 10) * 10) / 10))
+    return { i: i + 1, theme: themes[i], main, mv, sub, subV, r, sr }
+  })
+  const t = segs[iRand(seed + 3, 0, 2)]
+  const askNum = iRand(seed + 5, 0, 1) === 0
+  const found = askNum ? (t.mv + unit) : (t.r + '%')
+  const label = '2024年' + (askNum ? '「' + t.main + '」的数值' : '「' + t.main + '」的同比增速')
+  const opts = buildOpts([found], [askNum ? fmtV(segs[(segs.indexOf(t) + 1) % 3].mv) + unit : (segs[(segs.indexOf(t) + 2) % 3].r + '%'), askNum ? fmtV(Math.round(t.mv * 1.06)) + unit : (segs[segs.indexOf(t)].sr + '%'), askNum ? fmtV(Math.round(t.mv * 0.94)) + unit : (segs[(segs.indexOf(t) + 1) % 3].sr + '%')], seed + 8)
+  const mat = `【材料】${area}领域 · 统计（${new Date().getFullYear()}年样本）\n\n${segs.map((x) => '**' + x.i + '、' + area + '·' + x.theme + '**。' + x.main + fmtV(x.mv) + unit + '，比上年增长' + x.r + '%。其中，' + x.sub + fmtV(x.subV) + unit + '，增长' + x.sr + '%。').join('\n\n')}\n\n注：指标口径与官方年度公报一致；本材料为训练样本。`
+  const answer = opts.answer
+  const explain = '【定位三步】①看时间：2024年；②看指标：' + t.main + '；③定位句子：' + t.i + '、' + t.theme + ' → ' + label + ' = **' + found + '**。\n\n口诀：先找时间→指标→单位，再回材料定位。'
+  return { mode: 'locate', materialType: 'text', materialMd: mat, q: '求' + label + '，应定位到材料中哪一句/哪个数据？', options: opts.options, answer, explain, tip: '口诀：结构阅读三步——先看时间、再看指标、后定单位。', extra: { name: '数据定位', area } }
+}
+function buildLocateTableDomain(seed, inds, unit, area) {
+  const cols = inds.slice(0, 4)
+  while (cols.length < 4) cols.push(cols[0] + '·其他')
+  const years = [2021, 2022, 2023, 2024]
+  const base = Array.from({ length: 16 }, (_, i) => 3200 + iRand(seed + i * 7, 0, 8000))
+  const rows = years.map((y, ri) => [0, 1, 2, 3].map((ci) => base[ri * 4 + ci]))
+  const targetYear = years[iRand(seed + 9, 1, 3)]
+  const ti = years.indexOf(targetYear)
+  const ci = iRand(seed + 11, 0, cols.length - 1)
+  const head1 = '| 年份 | ' + [cols[0], cols[1]].join(' | ') + ' || ' + [cols[2], cols[3]].join(' | ') + ' |'
+  const head2 = '| --- | ' + cols.map(() => '---').join(' | ') + ' |'
+  const body = years.map((y, ri) => '| ' + y + ' | ' + rows[ri].join(' | ') + ' |').join('\n')
+  const unitRow = '| 单位 | ' + cols.map(() => unit).join(' | ') + ' |'
+  const mat = `【材料】${area}领域 · 主要指标表\n\n${head1}\n${head2}\n${body}\n${unitRow}\n\n注：样本数据，口径参考官方公报。`
+  const correct = rows[ti][ci]
+  const dists = [rows[ti][(ci + 1) % 4], rows[(ti + 1) % 4][ci], rows[(ti + 3) % 4][(ci + 2) % 4]].map((v) => fmt(v))
+  const opts = buildOpts([fmt(correct)], dists, seed + 13)
+  const q = '求' + targetYear + '年「' + cols[ci] + '」的数值（单位 ' + unit + '），应读取哪一行哪一列的交叉格？'
+  const explain = '【定位】行 = ' + targetYear + '年，列 = ' + cols[ci] + ' → 交叉格 = **' + fmt(correct) + unit + '**。\n\n口诀：先锁「行年份 × 列指标」，再读交叉格，别串行串列。'
+
+  return { mode: 'locate', materialType: 'table', materialMd: mat, q, options: opts.options, answer: opts.answer, explain, tip: '口诀：行年份 × 列指标，读交叉格。', extra: { name: '数据定位', area } }
 }
 
 // 模式元信息（供 UI 与测试复用）

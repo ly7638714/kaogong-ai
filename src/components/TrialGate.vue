@@ -22,8 +22,8 @@
             class="trial-input"
             type="text"
             placeholder="请输入邀请码"
-            @keyup.enter="doUnlock"
             autocomplete="off"
+            @keyup.enter="doUnlock"
           />
           <button class="trial-btn" :disabled="busy" @click="doUnlock">{{ busy ? '验证中…' : '解锁进入' }}</button>
           <p v-if="err" class="trial-err">邀请码不正确，请重新输入</p>

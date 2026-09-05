@@ -16,6 +16,7 @@ import ExamBar from './components/ExamBar.vue'
 import ExamManager from './components/ExamManager.vue'
 import PetAvatar from './components/PetAvatar.vue'
 import Data3DPage from './components/Data3DPage.vue'
+import ReviewHub from './components/ReviewHub.vue' // R 今日复习中枢（全局）
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
 import { emit as evEmit } from './utils/events'
@@ -1992,6 +1993,7 @@ onUnmounted(() => {
     <div class="pg" :class="{ on: store.tab === 'ck' }"><CockpitPage /></div>
     <div class="pg" :class="{ on: store.tab === '3d' }"><Data3DPage /></div>
           <div class="pg" :class="{ on: store.tab === 'ths' }"><FloatPanel /></div>
+    <ReviewHub />
     <!-- 设置弹窗 -->
     <div class="ov set-ov" :class="{ show: setShow }" @click.self="setShow = false">
       <div class="pnl">

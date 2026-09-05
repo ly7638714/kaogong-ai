@@ -1,4 +1,6 @@
 import { reactive } from 'vue'
+import { canonicalType } from './data/solveSteps' // v3.8.192 题型 canonical 归一
+import { canonicalSubjectOf } from './utils/wrongTaxonomy' // v3.8.212 板块/细分/题型 写入统一
 import { showToast } from './utils/toast'
 import { safeSet, KEYS, migrate } from './utils/storage'
 import { extractChoices, answerLetter } from './utils/quiz'
@@ -151,6 +153,17 @@ export function load() {
   try {
     const w = localStorage.getItem('xc_wqs')
     if (w) store.wqs = JSON.parse(w)
+    // v3.8.212 一次性迁移：存量错题 subject 统一为 canonical（细分小板块或大板块全称）
+    if (Array.isArray(store.wqs) && store.wqs.length && localStorage.getItem('xc_wq_subj_v1') !== '1') {
+      let changed = false
+      store.wqs.forEach((q) => {
+        if (!q || !(q.subject || q.plate)) return
+        const ns = canonicalSubjectOf(q)
+        if (ns && ns !== q.subject) { q.subject = ns; changed = true }
+      })
+      if (changed) saveWqs()
+      localStorage.setItem('xc_wq_subj_v1', '1')
+    }
   } catch (e) {}
   try {
     const mo = localStorage.getItem('xc_mode')
@@ -237,6 +250,8 @@ function normWrongQ(x) {
 }
 // 添加错题（唯一规则）：完全相同的题干只存一道；重复时累计错误次数、更新存入时间，不新增条目
 export function addWrong(wq, opts = {}) {
+  try { const st = String((wq && (wq.subject || wq.plate)) || ''); const t0 = String((wq && (wq.sub || wq.variant)) || '').trim(); if (t0) { const c = canonicalType(st, t0); if (c) wq.sub = c } } catch (e) {} // v3.8.192 题型 canonical 归一
+  try { if (wq && (wq.subject || wq.plate)) { const ns = canonicalSubjectOf(wq); if (ns) wq.subject = ns } } catch (e) {} // v3.8.212 subject 写入统一（细分小板块或大板块全称）
   const chk = isCompleteWrong(wq, opts)
   if (!chk.ok) {
     try { showToast('🚫 ' + chk.reason, 'error') } catch (e) {}

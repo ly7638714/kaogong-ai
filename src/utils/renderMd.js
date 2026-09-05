@@ -49,6 +49,20 @@ export function renderMd(t) {
   s = s.replace(/\\\(([^)]+?)\\\)/g, (m, c) => put(katexHtml(c, false)))
   // 行内公式 $...$
   s = s.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (m, c) => put(katexHtml(c, false)))
+  // v3.8.213：把 Markdown 管道表格（GFM）转成真实 HTML 表格（marked 默认未启用 GFM 表格时兜底）
+  s = s.replace(/(^|\n)(\|[^\n]+\|(?:\n\|[^\n]+\|)+)/g, (m, lead, block) => {
+    const rows = block.split('\n').filter((l) => l.trim())
+    if (rows.length < 2) return m
+    const parseRow = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+    const headCells = parseRow(rows[0])
+    // 第二行若全是 --- 分隔行则跳过
+    let bodyStart = 1
+    const isSep = (l) => /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(String(l).trim())
+    if (rows.length > 1 && isSep(rows[1])) bodyStart = 2
+    const thead = '<thead><tr>' + headCells.map((c) => '<th>' + (c || '&nbsp;') + '</th>').join('') + '</tr></thead>'
+    const tbody = '<tbody>' + rows.slice(bodyStart).map((l) => '<tr>' + parseRow(l).map((c) => '<td>' + (c || '&nbsp;') + '</td>').join('') + '</tr>').join('') + '</tbody>'
+    return (lead || '') + '<table>' + thead + tbody + '</table>'
+  })
   let html = ''
   try {
     html = marked.parse(s)

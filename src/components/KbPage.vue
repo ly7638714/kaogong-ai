@@ -5,6 +5,17 @@ import { CARDS } from '../kb/cards-index'
 import { markLearned } from '../utils/learned'
 import KnowledgeGraph from './KnowledgeGraph.vue'
 
+// R5：错题详情「🔍 知识库打开」→ 定位到对应方法卡（切 tab + 展开卡 + 标记已学）
+window.addEventListener('xc-open-kb-card', (e) => {
+  const id = e && e.detail
+  if (!id) return
+  store.tab = 'kb'
+  activeShelf.value = 'all'
+  view.value = 'cards'
+  cardOpen.value = id
+  try { markLearned(id) } catch (e) {}
+})
+
 const activeShelf = ref('all')
 const view = ref('quick') // quick=核心速查 | cards=理论技巧卡 | graph=神经网络图谱
 

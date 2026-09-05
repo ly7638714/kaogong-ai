@@ -5,7 +5,10 @@
 import { safeGet, safeSet, KEYS } from './storage'
 import { kpointOf } from './kpointLib'
 
-export const ATTEMPT_MAX = 3000 // 环形上限（doc 35 §1-B）；超限丢弃最旧
+export const ATTEMPT_MAX = 10000 // 环形上限（P3-5：3000→10000，按 50 题/天把淘汰窗口从 ~60 天延到 ~200 天）
+// 注：difficulty 逐次从环重聚合 per-cls/per-plate、elo 逐事件重放 per-kpoint，均受环淘汰影响。
+// 彻底解（doc38 P3-5 方案①）：把 per-cls/per-plate 聚合结果定期落独立键(不入环)供 difficulty 用；
+// elo 的逐事件重放需更长窗口或 per-kpoint 摘要——待真实数据验证后再做，勿在此核心上盲改。
 // 生成配置版本：cls（题类键）的一部分。换出题模型 / 大改 professor.js 出题提示词后必须 +1，
 // 否则新旧两个分布的历史 b 值混在一起会得到错误标定（见 35 §3.1）。
 export const GEN_VER = 'g1'
