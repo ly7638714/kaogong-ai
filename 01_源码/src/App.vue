@@ -26,6 +26,7 @@ import { startStudyTrack, stopStudyTrack } from './utils/study'
 import { nav, navBack, syncNavFromHistory } from './utils/nav'
 import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nativeToast, isNativeHost } from './utils/platform' // ★安卓返回键/宿主桥
 import { webdavUpload, webdavDownload } from './utils/webdav'
+import { runCloudSync, readSyncState, saveSyncState } from './utils/cloudSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
@@ -1011,7 +1012,7 @@ const SET_GUIDE = [
   { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
-  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、保存到本地文件夹、WebDAV 云同步、导入笔记、时政时间范围。', tips: '数据只存本机；换设备用导出/导入或 WebDAV。' },
+  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、保存到本地文件夹、WebDAV 自动互通、导入笔记、时政时间范围。', tips: '换设备想保留原数据：两端填同一 WebDAV 后开「自动互通」；也可导出/导入 JSON。' },
   { id: 'set-account', t: '🔐 账号', d: '本地登录门：注册/登录、修改密码、退出、删除账号、重置本地账号。', tips: '账号仅存本机（无服务器）；忘记密码可「重置本地账号」重新注册；不想每次登录可关闭登录门。' },
   { id: 'set-help', t: '🧭 帮助', d: '六步学习闭环、快捷键、常见问题、新手引导开关。', tips: '考前把快捷键和闭环过一遍；引导可一键全关或重开。' },
   { id: 'set-about', t: '📜 关于', d: '免责声明与开发者说明。', tips: '仅供个人学习使用，切勿商用；隐私与开发者信息见此处。' }
@@ -1687,6 +1688,50 @@ const wdTpl = (kind) => {
 
 const wdBusy = ref(false)
 const wdStat = ref('')
+const wdAuto = ref(readSyncState().auto)
+let wdAutoTimer = null
+function ensureWdAutoTimer() {
+  if (wdAutoTimer) return
+  wdAutoTimer = setInterval(() => {
+    if (wdAuto.value && !document.hidden) runWdAuto(false).catch(() => {})
+  }, 45000)
+}
+async function runWdAuto(manual) {
+  if (wdBusy.value) return { ok: false }
+  wdBusy.value = true
+  wdStat.value = manual ? '智能同步中…' : '自动互通中…'
+  try {
+    const r = await runCloudSync()
+    wdStat.value = '✅ ' + (r.changed ? '已合并并上传云端' : '两端一致') + '（' + new Date(r.ts).toLocaleString() + '）'
+    if (r.changed) {
+      showToast('☁️ 云端发现新数据，已安全合并，即将刷新', 'success')
+      setTimeout(() => location.reload(), 700)
+    } else if (manual) {
+      showToast('☁️ 已同步，两端一致', 'success')
+    }
+    return r
+  } catch (e) {
+    wdStat.value = '❌ ' + ((e && e.message) || e)
+    if (manual) showToast('☁️ 同步失败：' + ((e && e.message) || e), 'error')
+    return { ok: false, error: (e && e.message) || e }
+  } finally {
+    wdBusy.value = false
+  }
+}
+function wdToggleAuto() {
+  wdAuto.value = !wdAuto.value
+  const st = readSyncState()
+  st.auto = wdAuto.value
+  saveSyncState(st)
+  if (wdAuto.value) {
+    ensureWdAutoTimer()
+    wdStat.value = '🟢 自动互通已开启，先执行一次同步'
+    runWdAuto(false).catch(() => {})
+  } else {
+    if (wdAutoTimer) { clearInterval(wdAutoTimer); wdAutoTimer = null }
+    wdStat.value = '已关闭自动互通；仍可手动同步'
+  }
+}
 async function wdUp() {
   wdBusy.value = true
   wdStat.value = '上传中…'
@@ -1880,6 +1925,10 @@ if (isNativeHost()) { try { installNativeBackBehavior() } catch (e) {} } // 自�
 onMounted(() => {
   authGateInit()
   clampFloatPos()
+  if (wdAuto.value) {
+    ensureWdAutoTimer()
+    setTimeout(() => runWdAuto(false).catch(() => {}), 2200)
+  }
   window.addEventListener('keydown', onKey)
   startStudyTrack()
   try { if (!localStorage.getItem('xc_onboarded')) { startOnboard() } } catch (e) {}
@@ -1888,6 +1937,7 @@ onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
 })
 onUnmounted(() => {
+  if (wdAutoTimer) { clearInterval(wdAutoTimer); wdAutoTimer = null }
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('xc-export-kb', () => openExp('kb'))
   window.removeEventListener('popstate', onPopState)
@@ -2892,7 +2942,7 @@ onUnmounted(() => {
           <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
 <div class="sec-t">☁️ WebDAV 云同步</div>
-        <div class="sec-desc" style="margin-top:4px">三步完成云备份：①选一个模板自动生成「地址」→ ②填「用户名」和「密码/应用密码」→ ③点 ⬆️ 上传备份。备份内容=整包全部数据（设置/对话/错题/知识库/战绩…），换设备后同一账号 ⬇️ 下载即恢复。</div>
+        <div class="sec-desc" style="margin-top:4px">网页 / iPad / 安卓互通推荐：两端填同一套 WebDAV 后点「▶ 开启自动互通」。学习数据会安全合并，不整包覆盖另一台；设置与密钥仍各自保存在本机。</div>
         <div class="exp-choices" style="margin:4px 0 8px">
           <button class="btn btn-gh" @click="wdTpl('jianguo')">🌰 坚果云模板</button>
           <button class="btn btn-gh" @click="wdTpl('nextcloud')">🏠 Nextcloud/自建模板</button>
@@ -2911,6 +2961,8 @@ onUnmounted(() => {
           <input v-model="store.cfg.webdav.pass" type="password" autocomplete="new-password" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
+          <button class="btn btn-pri" :disabled="wdBusy" @click="wdToggleAuto()">{{ wdAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
+          <button class="btn btn-gh" :disabled="wdBusy" @click="runWdAuto(true)">🔄 立即同步</button>
           <button class="btn btn-pri" :disabled="wdBusy" @click="wdUp()">⬆️ 上传备份</button>
           <button class="btn btn-gh" :disabled="wdBusy" @click="wdDown()">⬇️ 下载备份</button>
         </div>
@@ -3219,7 +3271,7 @@ onUnmounted(() => {
             <ul>
               <li><b>发消息没反应？</b> 先在「API 设置」填 Key 并「保存并测试」，状态灯出现 ✅。</li>
               <li><b>发图/截图题看不到？</b> 必须配置「视觉模型」并选可识图模型（DeepSeek vision / 智谱 GLM-5V）。</li>
-              <li><b>想换设备接着用？</b> 数据存 localStorage；用「数据管理→导出备份 JSON」→ 新设备「导入备份」，或用「WebDAV 云同步」。</li>
+              <li><b>想换设备接着用？</b> 在两端「数据与同步 → WebDAV」填同一账号并开启「自动互通」，学习数据会自动安全合并；也可「导出备份 JSON」→ 新设备导入。</li>
               <li><b>想导入自己的笔记？</b> 「数据管理→📥 导入笔记(.md)」，支持 Obsidian 格式（frontmatter 标签 + 标题分节）。</li>
               <li><b>想在 iPad/Anki 里复习？</b> 错题页导出 PDF（A4）给 GoodNotes，或「🃏 推到 Anki」（需 AnkiConnect）。</li>
             </ul>
