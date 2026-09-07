@@ -1019,7 +1019,20 @@ body[data-theme='light'] .sec-t {
 .core-points { margin: 0; padding-left: 18px; }
 .core-points li { font-size: 12.5px; line-height: 1.8; color: var(--text); margin-bottom: 2px; }
 .core-acts { margin-top: 10px; }
-.core-ai { margin-top: 10px; font-size: 13px; line-height: 1.85; color: var(--text); background: var(--surface); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; }
+.core-ai { margin-top: 10px; font-size: 13px; line-height: 1.85; color: var(--text); background: var(--surface); border-radius: 8px; padding: 10px 12px; white-space: normal; overflow-wrap: anywhere; }
+.core-ai h1, .core-ai h2, .core-ai h3, .core-ai h4 { font-size: 15px; font-weight: 800; color: var(--accent); margin: 12px 0 6px; line-height: 1.5; }
+.core-ai h3, .core-ai h4 { font-size: 13.5px; }
+.core-ai p, .core-ai ul, .core-ai ol { margin: 6px 0; }
+.core-ai ul, .core-ai ol { padding-left: 22px; }
+.core-ai table, .core-ai th, .core-ai td { border: 1px solid var(--glass-border); }
+.core-ai table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+.core-ai th, .core-ai td { padding: 5px 7px; text-align: left; vertical-align: top; }
+.core-ai th { background: var(--accent2); color: var(--text); }
+.core-ai pre, .core-ai code { font-family: Consolas, "Microsoft YaHei", monospace; background: var(--glass-bg); border-radius: 6px; }
+.core-ai code { padding: 1px 4px; font-size: 12px; }
+.core-ai pre { padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; }
+.core-ai img, .core-ai svg { max-width: 100%; height: auto; display: block; margin: 8px auto; }
+.core-ai blockquote { margin: 8px 0; padding: 5px 10px; border-left: 3px solid var(--accent); background: var(--accent2); border-radius: 0 6px 6px 0; color: var(--text2); }
 .paper-opts { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .paper-opt { font-size: 13.5px; line-height: 1.7; color: var(--text); padding: 7px 10px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); text-align: left; font-family: inherit; cursor: pointer; transition: all .15s; }
 .paper-opt:hover { border-color: var(--accent); }
@@ -1079,7 +1092,19 @@ body[data-theme='light'] .vt-diff-btn.on { border-color: var(--accent); backgrou
 .vt-c-col { flex: 0 0 46%; min-width: 210px; background: var(--surface); border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px; }
 .vt-c-hd { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
 .vt-c-q { font-size: 12.5px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
-.vt-cmp { margin-top: 8px; font-size: 13px; line-height: 1.8; color: var(--text); background: var(--surface); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
+.vt-cmp { margin-top: 8px; font-size: 13px; line-height: 1.8; color: var(--text); background: var(--surface); border-radius: 8px; padding: 8px 10px; white-space: normal; overflow-wrap: anywhere; }
+.vt-cmp h1, .vt-cmp h2, .vt-cmp h3, .vt-cmp h4 { font-size: 14px; font-weight: 800; color: var(--accent); margin: 10px 0 5px; line-height: 1.5; }
+.vt-cmp p, .vt-cmp ul, .vt-cmp ol { margin: 6px 0; }
+.vt-cmp ul, .vt-cmp ol { padding-left: 22px; }
+.vt-cmp table, .vt-cmp th, .vt-cmp td { border: 1px solid var(--glass-border); }
+.vt-cmp table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+.vt-cmp th, .vt-cmp td { padding: 5px 7px; text-align: left; vertical-align: top; }
+.vt-cmp th { background: var(--accent2); color: var(--text); }
+.vt-cmp pre, .vt-cmp code { font-family: Consolas, "Microsoft YaHei", monospace; background: var(--glass-bg); border-radius: 6px; }
+.vt-cmp code { padding: 1px 4px; font-size: 12px; }
+.vt-cmp pre { padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; }
+.vt-cmp img, .vt-cmp svg { max-width: 100%; height: auto; display: block; margin: 8px auto; }
+.vt-cmp blockquote { margin: 8px 0; padding: 5px 10px; border-left: 3px solid var(--accent); background: var(--accent2); border-radius: 0 6px 6px 0; color: var(--text2); }
 .var-tag.dim { color: var(--text3); }
 .vt-prog { font-size: 12px; font-weight: 700; color: var(--accent); margin-left: 6px; }
 .vt-busy { text-align: center; color: var(--text3); padding: 24px 0; font-size: 13px; }

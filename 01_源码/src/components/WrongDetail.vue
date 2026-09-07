@@ -486,7 +486,7 @@ function capWrongExplain() {
           <div class="core-acts">
             <button class="btn btn-pri" :disabled="coreAiBusy" @click="askCoreDeep()">{{ coreAiBusy ? '⏳ AI 剖析中…' : '🧠 AI 深度剖析本题骨架' }}</button>
           </div>
-          <div v-if="coreAiText" class="core-ai">{{ coreAiText }}</div>
+          <div v-if="coreAiText" class="core-ai" v-html="richMd(coreAiText)"></div>
         </div>
         <!-- 全错 → 原题 × 变式 横向比较复盘 -->
         <div v-if="vtAllWrong" class="vt-deep">
@@ -502,7 +502,7 @@ function capWrongExplain() {
             </div>
           </div>
           <button class="btn btn-pri" :disabled="vtCmpBusy" @click="vtDeepCompare()">{{ vtCmpBusy ? '⏳ 对比中…' : '🧠 AI 横向比较复盘' }}</button>
-          <div v-if="vtCmpText" class="vt-cmp">{{ vtCmpText }}</div>
+          <div v-if="vtCmpText" class="vt-cmp" v-html="richMd(vtCmpText)"></div>
         </div>
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="vtClose()">关闭</button>

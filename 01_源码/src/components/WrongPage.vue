@@ -1020,7 +1020,7 @@ function _aiCfgKey(c) {
   return [String(c && c.key || ''), String(c && c.url || ''), String(c && c.model || '')].join('|')
 }
 async function askAiWithFallback(ask, { label = 'AI' } = {}) {
-  const cfgs = [pickGenCfg(), petFastCfg(), activeCfg(false)]
+  const cfgs = [petFastCfg(), pickGenCfg(), activeCfg(false)]
   const seen = new Set()
   let lastErr = ''
   for (const c of cfgs) {
@@ -1043,9 +1043,9 @@ function localSkeletonFallback(q, tpl) {
   const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 220)
   return [
     '🤖 深度模型暂时不可用，先用本地骨架卡巩固：',
-    '【核心骨架】' + (tpl.tag || '本题核心'),
-    ...(tpl.points || []),
-    '【本题速览】' + (stem || '（本题文本较短，请直接看上方原题）')
+    '**【核心骨架】** ' + (tpl.tag || '本题核心'),
+    ...(tpl.points || []).map((p) => '- ' + p),
+    '**【本题速览】** ' + (stem || '（本题文本较短，请直接看上方原题）')
   ].join('\n')
 }
 async function askCoreDeep() {
