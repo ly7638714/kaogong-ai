@@ -49,6 +49,8 @@ export function renderMd(t) {
   s = s.replace(/\\\(([^)]+?)\\\)/g, (m, c) => put(katexHtml(c, false)))
   // 行内公式 $...$
   s = s.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (m, c) => put(katexHtml(c, false)))
+  // 模型偶尔会把整段 Markdown 包进 ```markdown / ```md；这里透明展开，否则会被当代码展示成原样源码
+  s = s.replace(/```(?:markdown|md)\s*\r?\n?([\s\S]*?)```/gi, '$1')
   // v3.8.213：把 Markdown 管道表格（GFM）转成真实 HTML 表格（marked 默认未启用 GFM 表格时兜底）
   s = s.replace(/(^|\n)(\|[^\n]+\|(?:\n\|[^\n]+\|)+)/g, (m, lead, block) => {
     const rows = block.split('\n').filter((l) => l.trim())

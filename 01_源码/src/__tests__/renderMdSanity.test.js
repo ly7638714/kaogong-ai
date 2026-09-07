@@ -17,6 +17,12 @@ describe('renderMd smoke', () => {
     const html = renderMd('A. ```svg ```')
     expect(html.includes('```')).toBe(false)
   })
+  it('markdown/md fence transparently expands instead of showing source', () => {
+    const html = renderMd('```markdown\n**考点：** 削弱题\n\n| 项 | 值 |\n| --- | --- |\n| A | 2 |\n```')
+    expect(html).not.toContain('```')
+    expect(html).toContain('<strong>考点：</strong>')
+    expect(html).toContain('<table>')
+  })
 })
 
 describe('GFM 表格渲染', () => {
