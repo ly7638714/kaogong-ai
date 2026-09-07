@@ -2157,13 +2157,13 @@ onUnmounted(() => {
           <div class="mk-hd">
             <div class="mk-tt">
               <span class="mk-title">🎙️ 语音阅读大模型 <i class="mk-opt">可选</i></span>
-              <span class="mk-desc">朗读前先用它把题干/解析/理论卡改写成「口语化讲稿」再交给 TTS 朗读，听题更自然；不配置则照旧直接朗读原文。</span>
+              <span class="mk-desc">朗读前先用它把 AI 回复/题干/解析/理论卡改写成「口语化讲稿」再交给 TTS 朗读；对话自动朗读也走这条链路。不配置则照旧直接朗读原文。</span>
             </div>
             <span class="mk-chip" :class="stCfg.rdOk ? 'ok' : ''" :title="'语音阅读讲稿：' + (stCfg.rdOk ? '已启用 ' + (store.cfg.rd.model || '') : '未启用（直接朗读原文）')">{{ stCfg.rdOk ? '✅ 已启用' : '⛔ 默认关闭' }}</span>
           </div>
           <label class="fig-on">
             <input v-model="store.cfg.rd.on" type="checkbox" @change="saveCfg()" />
-            启用「朗读讲稿」：读题 / 朗读解析 / 萌宠读当前内容 时先让该模型把文字改写为口语讲稿
+            启用「朗读讲稿」：AI 自动朗读、手动朗读消息、读题 / 朗读解析 / 萌宠读当前内容 时，先让该模型改写为口语讲稿再读
           </label>
           <div class="fld-row">
             <div class="fld">

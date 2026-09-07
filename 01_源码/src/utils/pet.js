@@ -414,7 +414,7 @@ export function petReadCurrent() {
     if (!petVoiceOn.value) { petBubbleTip('我的语音被静音了，去设置里打开吧 🔇'); return false }
     _readBusy = true
     petBubbleTip('📖 我在帮你读～')
-    speakReadyText(ctx.text)
+    speakReadyText(ctx.text, { kind: ctx.type || ctx.title || '' })
       .then((t) => { _readBusy = false; petRead(t && t.length ? t : ctx.text, { speed: Number(store.cfg.ttsRate) || 1 }) })
       .catch(() => { _readBusy = false; petRead(ctx.text, { speed: Number(store.cfg.ttsRate) || 1 }) })
     return true

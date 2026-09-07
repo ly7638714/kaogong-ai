@@ -1659,13 +1659,8 @@ function trainWeak() {
   showToast('正在针对薄弱板块「' + w.plate + '」出题…', 'info')
   train('quiz', { plate: w.plate, mode: w.mode, difficulty: 'mid' })
 }
-function autoSpeak(t) {
-  if (store.cfg.ttsOn !== false && t)
-    speak(String(t).replace(/[#*`>|_]/g, ''), {
-      scene: store.cfg.ttsScene,
-      rate: store.cfg.ttsRate,
-      pitch: store.cfg.ttsPitch
-    })
+async function autoSpeak(t) {
+  if (store.cfg.ttsOn !== false && t) await speakWithScript(t, null)
 }
 function toggleTts() {
   store.cfg.ttsOn = store.cfg.ttsOn === false
@@ -1673,17 +1668,24 @@ function toggleTts() {
   if (store.cfg.ttsOn === false) stopSpeak()
   showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
 }
-// v3.8.88：手动「🔊 朗读消息」时若启用语音阅读大模型 → 先改口语讲稿再朗读；否则原文直读
-function speakMsgTxt(txt, onEnd) {
-  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, onEnd }
+// v3.8.225：自动朗读与手动「🔊 朗读消息」统一走讲稿链路；
+// 启用语音阅读大模型 → 先改口语讲稿再朗读；未启用/失败 → 原文直读
+function speakWithScript(txt, onEnd) {
+  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch }
+  if (onEnd) base.onEnd = onEnd
+  const raw = String(txt || '').trim()
+  if (!raw) return Promise.resolve()
   const rd = store.cfg && store.cfg.rd
   if (rd && rd.on && rd.key && rd.url && rd.model) {
-    speakReadyText(txt)
-      .then((t) => speak(t && t.length ? t : txt, base))
-      .catch(() => speak(txt, base))
-  } else {
-    speak(txt, base)
+    return speakReadyText(raw)
+      .then((t) => speak((t && t.trim()) || raw, base))
+      .catch(() => speak(raw, base))
   }
+  speak(raw, base)
+  return Promise.resolve()
+}
+function speakMsgTxt(txt, onEnd) {
+  return speakWithScript(txt, onEnd)
 }
 function toggleSpeak(ev) {
   const btn = ev.currentTarget

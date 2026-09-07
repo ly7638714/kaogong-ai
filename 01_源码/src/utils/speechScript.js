@@ -1,9 +1,10 @@
-// speechScript.js —— 「语音阅读·讲稿改写」工具（v3.8.88）
+// speechScript.js —— 「语音阅读·讲稿改写」工具（v3.8.225）
 // 用途：朗读/听题前，用用户独立配置的「语音阅读 LLM」(store.cfg.rd) 把原文
 //（题干/解析/错题/理论卡/长消息）改写成口语化、适合听的「讲稿」再交给 TTS 朗读。
 // 设计：
 //  - 默认关（cfg.rd.on=false）→ rdCfg() 返回 null → 行为与以前完全一致（直接朗读原文）
 //  - 开启但 Key/URL/模型缺失 → 退回原文；LLM 调用失败/超时 → 退回原文（绝不影响朗读可用性）
+//  - 内容很短且已经像一句可读的短句 → 直接返回原文，省一次 LLM 调用
 //  - 复用 chatOnce（OpenAI 兼容协议 + 成本记录 + 自动重试），非流式、小预算、短超时
 import { store } from '../store'
 import { chatOnce } from '../api/client'
@@ -17,33 +18,73 @@ export function rdCfg() {
   return c
 }
 
+// v3.8.225：从「念稿主播」升级为「真人课堂口播」。智谱 GLM-TTS 的情绪/语调由
+// 文本语境驱动，因此这里重点约束短句、语气起伏、句型和停顿，而不靠外部不可用参数硬改语速。
 const SCRIPT_SYS =
-  '你是公考行测「听题主播」。把给我的原文改写成适合直接朗读的口语化讲稿：' +
-  '用自然口语（可在句首加“来，看这道题”这类过渡词，但别每句都套模板）；' +
-  '每句话结尾必须用句号或问号，需要换气处用逗号，绝不把两句内容挤成无标点的长句；' +
-  '把题干要点、选项、正确答案、关键数字、易错点讲清楚；' +
-  '把“/”“→”“%”等符号读成中文（如“百分之”）；去掉 Markdown 符号、代码、表格、URL、emoji；' +
-  '不增编内容、不加多余寒暄。'
+  '你是资深公考行测老师，正在用自然说话给考生“听题讲解”。请把原文改写成一段可直接交给语音合成朗读的口语讲稿。' +
+  '直接输出讲稿正文，不要解释自己的改写过程，不要输出 Markdown、编号标题、代码、表格、URL 或任何“以下是讲稿”式的说明。' +
+  '听感硬要求：' +
+  '一、短句为主：百分之八十的句子控制在八到二十二字，最多不超过二十八字；复杂长句必须拆成两三个口语短句。' +
+  '二、句末必须用句号、问号或省略号；需要换气、强调前停顿的地方用逗号；绝不允许两句挤成一整行无标点。' +
+  '三、语气和节奏要像真人上课：句子长短交错，不能每句都是同等长度；把最重要的结论或最容易错的地方放在最后或单独短句里，前面先自然带一句“注意了”“这里最容易绕进去”“关键就在这句话里”。' +
+  '四、可用少量自然口语词把话讲活：来、其实、你看、反过来、对、也就是说、记住，但同一说法不能反复用，也不能每句都用“哦”“哈”“啦”卖萌。' +
+  '五、内容不变形：题干里的年份、数字、单位、字母、专有名词、逻辑关系和选项原文必须保留；解析、知识点允许换说法，但考点、结论和易错点不得丢失，也不得增编原文没有的结论。' +
+  '六、把“/”“→”“%”“≤”等符号按口语读法写出来（如“百分之”“推出”“小于等于”），不要照抄符号。'
 
 // 改写上限（字符）：readCtx 一般已截到 ~1400 字，这里多留余量
 const MAX_CHARS = 1800
+// 已像一句完整可读短句时不再改写，既省一次 LLM 调用，也避免小题大做拖慢听题
+const SHORT_AS_IS_MAX = 90
+
+// 场景提示：让题干和解析不要被同一套“卖萌化”改写规则污染
+function speechUserRule(kind) {
+  if (kind === 'quiz') {
+    return '这是题干/选项/判题内容。请像老师现场念题给考生听：关键条件和选项逐个读清，字母编号不能丢；信息太多时允许把修饰语拆成短句，但绝不能为了顺口改写数字、年份、单位或逻辑关系。'
+  }
+  if (kind === 'theory' || kind === 'explain') {
+    return '这是理论卡或解析。请像老师口头讲题，不要机械念书面标题和“第一点、第二点”：先点破最核心的结论，再用短句讲清判断路径、适用范围和易错点。'
+  }
+  return '这是 AI 答疑回复。保留讲解中有用的层次和结论，把书面排比改成口语短句；既要有真人语气，也不要加无意义寒暄。'
+}
+
+// 通过 readCtx.type / 文本特征判断朗读场景；拿不准时按通用答疑处理
+export function speechScriptKind(raw, hint) {
+  const t = String(hint || '')
+  if (/^(quiz|solid|redo|wrong|chat)/.test(t) && t !== 'chat') return 'quiz'
+  if (/^(theory|explain|kb)/.test(t)) return 'explain'
+  const s = String(raw || '')
+  if (/[A-D]\s*[.、)）]|选项[:：]|正确答案[:：]|请你选择|以下哪[一项个]?/.test(s)) return 'quiz'
+  if (/理论|知识卡|考点|方法|技巧|口诀|解析[:：]|错因|易错|陷阱/.test(s)) return 'explain'
+  return 'chat'
+}
 
 // 把原文转成“可直接朗读的讲稿”；不可用/失败一律返回原文
-export async function speakReadyText(raw, maxChars = MAX_CHARS) {
+export async function speakReadyText(raw, opts = {}) {
   const src = stripSpeechNoise(String(raw || '').trim())
   if (!src) return src
   const c = rdCfg()
   if (!c) return src
-  const snippet = src.replace(/[#*`>_|~\\]/g, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, maxChars)
+  const kind = speechScriptKind(src, opts.kind)
+  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : MAX_CHARS
+  // 很短的普通答疑短句直接读原文；题干/解析需要重排听感，仍走改写
+  if (kind === 'chat' && src.length <= SHORT_AS_IS_MAX && /[。！？!?…]$/.test(src)) return src
+  const snippet = src
+    .replace(/[#*`>_|~\\]/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, maxChars)
   if (!snippet) return src
   try {
     const r = await chatOnce(
       c,
       [
         { role: 'system', content: SCRIPT_SYS },
-        { role: 'user', content: '请把下面内容改写成能直接朗读的口语讲稿（原样保留题目数字/选项与正确答案）：\n' + snippet }
+        {
+          role: 'user',
+          content: '请把下面的内容改写成可直接朗读的口语讲稿。\n' + speechUserRule(kind) + '\n原文：\n' + snippet
+        }
       ],
-      600, // 输出上限：讲稿控制在数百字内，控制成本与延迟
+      900, // 输出上限：讲稿控制在数百字内，控制成本与延迟
       25000 // 超时 25s：超过就退回原文，不阻塞朗读
     )
     const out = String(r || '').trim()
