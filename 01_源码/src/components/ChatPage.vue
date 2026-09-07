@@ -1,0 +1,2256 @@
+<script setup>
+import { ref, reactive, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
+import 'katex/dist/katex.min.css'
+import { renderMd } from '../utils/renderMd'
+import { USAGE_GUIDE } from '../utils/usageGuide'
+import { parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
+import { downloadMdScreenshot, snapshotMd } from '../utils/capture' // v3.8.215 截图分享(整幅渲染)
+import { saveImage } from '../utils/downloadOut' // v3.8.214 统一保存出口
+import { setClipboard } from '../utils/platform' // ★剪贴板走宿主桥（5+下用系统剪贴板）
+function md(t) {
+  return renderMd(t)
+}
+// 批次5-P5-2 markdown 渲染缓存：消息内容不可变，首算即缓存（流式 live 消息不入缓存）
+const _mdCache = new Map()
+const STEP_PROMPT = '\n【分步解析要求】本题为具体题目求解，请严格用 Markdown 二级标题（##）按以下小节输出：\n## 考点\n## 题干拆解\n## 解题步骤\n## 干扰项\n## 一句话小结\n要求：考点一句话点明；题干拆解只讲关键信息与陷阱；解题步骤用 1. 2. 3. 编号逐条可执行；干扰项逐项点名错因；小结一句话收束。非解题类回复（概念问答/出题/闲聊）不要套用此结构。' // v3.8.190 分步解析
+const isStepText = (t) => { try { return hasStepHeadings(String(t || '')) } catch (e) { return false } }
+const stepTagText = (m) => { if (m && m._vt) return '🧭 ' + m._vt + ' 分步'; try { return isStepText(textOf(m)) ? '🧭 分步解析' : '' } catch (e) { return '' } }
+function sameTypeAgain(m) { const vt = m && m._vt; if (!vt) return; text.value = '帮我出一道【' + vt + '】题，先别给答案'; forceSend() }
+function mdC(txt) {
+  const key = String(txt || '')
+  let h = _mdCache.get(key)
+  if (h === undefined) { if (_mdCache.size > 300) _mdCache.clear(); h = md(key); _mdCache.set(key, h) }
+  return h
+}
+function mdCached(m, i) {
+  const full = textOf(m)
+  const txt = isLong(full) && !(expanded.value && expanded.value[i]) ? full.slice(0, 700) + '…' : full
+  if (m._htmlKey !== txt) { m._htmlKey = txt; m._html = md(txt) }
+  return m._html
+}
+// 滚动 rAF 合帧：流式期间避免每帧 scroll 触发重排
+let _rafPending = false
+function scrollThrottled() {
+  if (_rafPending) return
+  _rafPending = true
+  requestAnimationFrame(() => { _rafPending = false; scroll() })
+}
+import { store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat } from '../store'
+import { on as evOn, off as evOff } from '../utils/events'
+import { activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
+import { analyzeFigImage, readQuestionFromImage, figCfg } from '../api/figEnhance'
+import { buildChatHistory, ensureImgNotesForHistory, lastImgTopics } from '../utils/imgMemory'
+import { probe, detectAskDir, taskShape } from '../utils/intentProbe'
+import { nextContext } from '../utils/askState'
+import { buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt } from '../utils/replyProtocol'
+import { retrieveDetailed } from '../kb/retrieveV2'
+import { normalizePlate } from '../kb/cards-index'
+import { verifyReply } from '../utils/replyVerify'
+import { wrongExplainPrompt } from '../utils/plateCoach'
+import { detectMode, askModeSys, MODE_MAP } from '../data/askModes'
+let _lastAskCtx = null
+import { analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
+import { hasStepHeadings } from '../utils/replySteps' // v3.8.190 分步解析
+import { digestOlder } from '../utils/historyDigest' // v3.8.205 长历史自动摘要
+import { calcVerifySys } from '../utils/calcProtocol' // v3.8.205 数值题可算必验
+import { recallBlock } from '../utils/recall' // v3.8.205 追问召回本人错题/记忆
+import { loadSrs } from '../utils/memorySrs' // v3.8.205 记忆召回数据源
+import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
+import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
+import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
+import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
+import { speakReadyText } from '../utils/speechScript'
+import { MODE_NAMES } from '../kb'
+import { collectChat } from '../utils/chat'
+import { showToast } from '../utils/toast'
+import { gateNow } from '../utils/abilityGate' // 35号批次4-B(2/2)：锚点自测解锁门槛
+import { navOpen, navBack } from '../utils/nav'
+import { buildReview } from '../utils/review'
+import ExamPanel from './ExamPanel.vue'
+import { addPoints as petAddPoints } from '../utils/pet'
+
+// SolidTrain 依赖 three.js（~556KB），按需异步加载，避免拖慢启动
+const SolidTrain = defineAsyncComponent(() => import('./SolidTrain.vue'))
+import DataTrain from './DataTrain.vue'
+import AskWizard from './AskWizard.vue'
+import ChatTools from './ChatTools.vue' // v3.8.195 工具抽屉区子组件
+import ChatMsgs from './ChatMsgs.vue' // v3.8.195 消息渲染区
+import ChatComposer from './ChatComposer.vue' // v3.8.196 输入区+提问助手
+const toolsCollapsed = ref(window.innerWidth <= 640) // 手机端默认收起为「🎯训练」抽屉
+const isNarrow = ref(window.innerWidth <= 640)
+try { if (localStorage.getItem('xc_chat_tools') !== null) toolsCollapsed.value = localStorage.getItem('xc_chat_tools') === '1' } catch (e) {}
+function onToolsResize() {
+  const n = window.innerWidth <= 640
+  if (n !== isNarrow.value) { isNarrow.value = n; if (n) toolsCollapsed.value = true }
+}
+function toggleTools() { toolsCollapsed.value = !toolsCollapsed.value; try { localStorage.setItem('xc_chat_tools', toolsCollapsed.value ? '1' : '0') } catch (e) {} }
+// 打开全屏训练浮层（资料速算/立体图推）前先收起手机端训练抽屉：
+// 抽屉本体(322)与其全屏遮罩(321)层级高于旧版浮层(90/91)，不收起会把浮层压在下面，
+// 表现为「进去后界面显示不全/点不到」——移动端反馈的显示异常根因之一。
+function collapseTools() {
+  if (toolsCollapsed.value) return
+  toolsCollapsed.value = true
+  try { localStorage.setItem('xc_chat_tools', '1') } catch (e) {}
+}
+// 对话使用说明书弹窗
+const guideShow = ref(false)
+const guideOpen = ref({})
+const guideQaOpen = ref({})
+function toggleGuideSec(si) { guideOpen.value[si] = !guideOpen.value[si] }
+function toggleGuideQa(si, ii) { const k = si + '-' + ii; guideQaOpen.value[k] = !guideQaOpen.value[k] }
+const text = ref(''),
+  imgs = ref([]),
+  linkShow = ref(false),
+  linkUrl = ref(''),
+  recogOn = ref(false)
+const quickMode = ref(localStorage.getItem('xc_quick_mode') === '1') // 🧠深度(思考模型,准) / ⚡快答(快模型,快)
+function toggleQuickMode() {
+  quickMode.value = !quickMode.value
+  try { localStorage.setItem('xc_quick_mode', quickMode.value ? '1' : '0') } catch (e) {}
+  showToast(
+    quickMode.value
+      ? '⚡ 快答已开启：用「对话快模型」秒回（适合简单/熟练题；难题建议切回深度）'
+      : '🧠 深度解析已开启：用思考模型更准（适合难题/文字截图题；较慢）',
+    'info'
+  )
+}
+// ===== 提问助手（v3.8.76）：输入即分析板块/题型/意图/缺失，并在输入区轻量引导 =====
+const ask = ref(null) // AskAnalysis | null
+const askShow = computed(() => store.cfg.askAssist !== false && !!ask.value && !ask.value.empty)
+const sendGuard = ref(0) // 温柔校验让行计数：0=首次提醒不发送，≥1=强行发送
+const askWarn = ref('') // 温柔校验提示文案（可一键忽略，非阻塞弹窗）
+let _askT = null
+function reAnalyze() {
+  if (store.cfg.askAssist === false) { ask.value = null; return }
+  ask.value = analyzeAsk(text.value, { hasImg: imgs.value.length > 0, curQ: store.curQ })
+}
+watch(text, () => {
+  if (store.cfg.askAssist === false) { ask.value = null; return }
+  sendGuard.value = 0 // 内容变了，重新计一次让行
+  clearTimeout(_askT)
+  _askT = setTimeout(reAnalyze, 200) // 200ms 防抖，纯本地正则，不阻塞输入
+})
+watch(() => imgs.value.length, () => { if (store.cfg.askAssist !== false && text.value.trim()) reAnalyze() })
+// 低置信时用户点选板块 → 一次性覆盖自动识别（用户纠正优先级最高）
+function confirmPlate(name) {
+  store.cfg.pendingPlate = name
+  saveCfg()
+  if (ask.value) { ask.value.plate = { name, score: 99, conf: 1 }; ask.value.lowConf = false; ask.value.candidates = [] }
+  showToast('✅ 已按「' + name + '」的方法论作答', 'success')
+}
+// ===== 四步发题向导（AskWizard）：发送前 板块→细分→题型→意图 手动定位，runChat 按路径定向注入 =====
+const wzOpen = ref(false)
+const wzSel = ref(null) // { plate, sub, type, mode }
+function wizardModeLabel(m) {
+  const mm = MODE_MAP[m]
+  return mm ? mm.label : (m || '')
+}
+function wzConfirm(sel) {
+  wzSel.value = { plate: sel.plate || '', sub: sel.sub || '', type: sel.type || '', mode: sel.mode || 'solve' }
+  store.cfg.pendingPlate = wzSel.value.plate
+  saveCfg()
+  if (ask.value) { ask.value.plate = { name: wzSel.value.plate, score: 99, conf: 1 }; ask.value.lowConf = false; ask.value.candidates = [] }
+  wzOpen.value = false
+  showToast('🎯 已锁定：' + wzSel.value.plate + (wzSel.value.sub ? '·' + wzSel.value.sub : '') + (wzSel.value.type ? '·' + wzSel.value.type : '') + ' · ' + wizardModeLabel(wzSel.value.mode) + '。发送后 AI 按此路径作答，可随时取消', 'success')
+  nextTick(() => { const ta = document.querySelector('.e-dock textarea'); if (ta) ta.focus() })
+}
+function wzCancel() {
+  if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+  wzSel.value = null
+}
+// 快捷 chip：把模板文本追加进输入框（不覆盖已有内容）
+function applyChip(ins) {
+  const cur = text.value
+  text.value = cur ? cur.replace(/\s+$/, '') + '\n' + ins : ins
+  nextTick(() => {
+    const ta = document.querySelector('.e-dock textarea')
+    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length }
+  })
+}
+// ✨ 增强提问：纯规则结构化改写（零 API、不编造题干数据）
+function enhanceAskBtn() {
+  const r = enhanceAsk(text.value, { hasImg: imgs.value.length > 0, curQ: store.curQ })
+  if (!r.changed) { showToast('ℹ️ 已是结构化提问，无需增强', 'info'); return }
+  text.value = r.text
+  showToast('✨ 已结构化：把留空处补上，AI 会更精准', 'success')
+  nextTick(() => {
+    const ta = document.querySelector('.e-dock textarea')
+    if (ta) ta.focus()
+  })
+}
+function setDepth(d) {
+  store.cfg.answerDepth = d
+  saveCfg()
+  showToast(d === 'flash' ? '⚡ 只给秒杀结论' : d === 'brief' ? '📝 简答模式' : '🔍 详讲模式', 'info')
+}
+const DEPTH_LABEL = { detail: '详', brief: '简', flash: '秒' }
+function closeAssist() {
+  store.cfg.askAssist = false
+  saveCfg()
+  ask.value = null
+  askWarn.value = ''
+  showToast('已关闭提问助手；下次输入题目时可在输入框上方一键重开', 'info')
+}
+function openAssist() {
+  store.cfg.askAssist = true
+  saveCfg()
+  reAnalyze()
+  showToast('🧭 提问助手已开启：会实时识别板块·题型并提示补全', 'success')
+}
+// 温柔校验条：仍要发送 / 去补充
+function forceSend() { askWarn.value = ''; sendGuard.value = 1; send() }
+function gotoFix() {
+  askWarn.value = ''
+  nextTick(() => {
+    const ta = document.querySelector('.e-dock textarea')
+    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length }
+  })
+}
+const live = ref(null) // 当前流式消息 {role:'ai', text, think, thinkOpen}
+const msgsBox = ref(null)
+const atBottom = ref(true) // 是否在最新处（用于"回到最新"按钮显隐）
+function sumMsgsScroll() {
+  const el = msgsBox.value
+  if (!el) return
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight
+  atBottom.value = near < 80
+}
+function backToLatest() {
+  scroll()
+}
+// 「回到最新」可拖拽定位（记忆位置，避免遮挡其他按钮）
+const blPos = ref(null)
+try {
+  const _p = JSON.parse(localStorage.getItem('xc_bl_pos') || 'null')
+  // 防御：保存位置若落在底部输入区附近（可能遮挡按钮），忽略回默认
+  if (_p && (_p.left != null || _p.right != null) && !(_p.top != null && _p.top > window.innerHeight - 130)) blPos.value = _p
+} catch (e) {}
+const blStyle = computed(() => {
+  if (!blPos.value) return {}
+  return blPos.value.left != null
+    ? { left: blPos.value.left + 'px', top: blPos.value.top + 'px', right: 'auto', bottom: 'auto' }
+    : { right: blPos.value.right + 'px', bottom: blPos.value.bottom + 'px', left: 'auto', top: 'auto' }
+})
+// 窗口尺寸变化时按当前视口钳制「回到最新」位置，避免缩窗/旋转后按钮跑到屏幕外
+function clampBl() {
+  if (!blPos.value) return
+  const btn = document.querySelector('.back-latest')
+  const w = (btn && btn.offsetWidth) || 90
+  const h = (btn && btn.offsetHeight) || 34
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  if (blPos.value.left != null) {
+    blPos.value = {
+      left: Math.max(4, Math.min(vw - w - 4, blPos.value.left)),
+      top: Math.max(4, Math.min(vh - h - 4, blPos.value.top))
+    }
+  } else if (blPos.value.right != null) {
+    blPos.value = {
+      right: Math.max(4, Math.min(vw - w - 4, blPos.value.right)),
+      bottom: Math.max(4, Math.min(vh - h - 4, blPos.value.bottom))
+    }
+  }
+}
+clampBl()
+window.addEventListener('resize', clampBl)
+function onBlDown(e) {
+  e.preventDefault()
+  const btn = e.currentTarget
+  const r = btn.getBoundingClientRect()
+  const sx = e.clientX, sy = e.clientY
+  const ox = sx - r.left, oy = sy - r.top
+  let moved = false
+  try { btn.setPointerCapture(e.pointerId) } catch (_) {}
+  const onMove = (ev) => {
+    const x = ev.clientX - ox, y = ev.clientY - oy
+    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true
+    const w = r.width || 90, h = r.height || 34
+    blPos.value = { left: Math.max(4, Math.min(window.innerWidth - w - 4, x)), top: Math.max(4, Math.min(window.innerHeight - h - 4, y)) }
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove, true)
+    window.removeEventListener('pointerup', onUp, true)
+    try { btn.releasePointerCapture(e.pointerId) } catch (_) {}
+    if (blPos.value) { try { localStorage.setItem('xc_bl_pos', JSON.stringify(blPos.value)) } catch (_) {} }
+    if (!moved) backToLatest()
+  }
+  window.addEventListener('pointermove', onMove, true)
+  window.addEventListener('pointerup', onUp, true)
+}
+
+// 选择题结构化：识别 AI 出题 → 对话页可点选项作答（新增消息与历史消息水合共用）
+function buildQuizFromMsg(m, askReq) {
+  if (!m || m.role !== 'assistant' || typeof m.content !== 'string' || m.err || m.stopped || m.quiz) return
+  if (!askReq) return // 非“叫我出题”的回复（真实题解析/复盘）一律不包装成可点选项卡
+  if (!looksLikeQuiz(m.content)) return
+  const quiz = parseQuiz(m.content)
+  if (quiz) { m.quiz = quiz; return }
+  // 出题练习模式：AI 只给题干+选项（不给答案，让用户先选）→ 生成"选后 AI 判题"卡片
+  const opts = extractChoices(m.content)
+  if (opts.length >= 2) {
+    const lines = String(m.content).split('\n')
+    const lineRe = /^\s*[*_`]*\s*([A-D])[.、．:：]/
+    const first = lines.findIndex((l) => lineRe.test(l))
+    let stem = first >= 0 ? lines.slice(0, first).join('\n').trim() : String(m.content).replace(/\s[A-D][.、．:：].*$/s, '').trim()
+    if (stem) m.quiz = { stem, options: opts, answer: '', needAi: true }
+  }
+}
+// 历史消息水合：从本地恢复的旧消息（早期版本或当时未成功解析）也补建可点作答卡片
+function hydrateQuizCards() {
+  let changed = false
+  let prevUserTxt = ''
+  store.msgs.forEach((m) => {
+    if (m.role === 'user') { prevUserTxt = String(typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''); return }
+    if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped) {
+      const askReq = isQuizAsk(prevUserTxt)
+      if (m.quiz) {
+        // 清理历史误判：早期把「讲解/解析长文/真实题解析」误建成卡片的，水合时移除（截图整理卡 orgCard 保留）
+        if (!m.orgCard && (!askReq || !looksLikeQuiz(m.content))) {
+          delete m.quiz
+          changed = true
+        }
+      } else if (askReq) {
+        const before = m.quiz
+        buildQuizFromMsg(m, true)
+        if (m.quiz && m.quiz !== before) changed = true
+      }
+    }
+  })
+  if (changed) { try { saveMsgs() } catch (e) {} }
+}
+function addMsg(m) {
+  // 批次5-P5-5 稳定消息 key（重发/删除不丢定位）
+  if (!m.id) m.id = (m.t || Date.now()) + '_' + Math.random().toString(36).slice(2, 7)
+  // 记录作答用时：AI 回复与最近一次用户提问之间的耗时
+  if (m.role === 'assistant' && lastAskAt) {
+    const sec = Math.round((Date.now() - lastAskAt) / 1000)
+    m.answerTime = sec >= 60 ? `${Math.floor(sec / 60)}分${sec % 60}秒` : `${sec}秒`
+    m.answerSec = sec
+  }
+  if (m.role === 'user') {
+    lastAskAt = Date.now()
+    m.answerTime = undefined
+    const t = typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''
+    lastAskText = t
+    // 考场计时：开启后按问数限时（1 问=1 分钟）；默认关闭，避免每问弹提示打扰
+    if (store.cfg.examMode) startStopwatch(countQuestions(t) * 60)
+  }
+  if (m.role === 'assistant') {
+    stopStopwatch()
+    // 归属板块：基于最近一次用户提问识别（与消息头/存错题同源）
+    // 出题意图 / 学习诊断 提问跳过板块识别，避免「出一题图形…」「学习诊断」等请求被误标为图形推理并触发补画
+    const _askT = String(lastAskText || '')
+    const _isQuizAsk = isQuizAsk(_askT) || /学习诊断|诊断/.test(_askT)
+    m.bk = _isQuizAsk ? '' : (detectBanKuai(_askT) || '')
+    // 考场计时开启时才弹用时统计（默认关闭避免打扰）；停止/失败/无耗时则不弹
+    if (store.cfg.examMode && !m.err && !m.stopped && runSec.value > 0) {
+      const t0 = assessTime()
+      if (t0.over > 0) {
+        showToast(`⏱ 用时 ${fmtSec(t0.used)} · 超时 ${t0.over} 秒（限 ${fmtSec(t0.limit)}）`, 'error')
+      } else {
+        showToast(`✅ 本题用时 ${fmtSec(t0.used)}，未超时（限 ${fmtSec(t0.limit)}）`, 'success')
+      }
+    }
+  }
+  store.msgs.push(m)
+  if (!m.t) m.t = Date.now()
+  if (m.role === 'assistant' && !m.err) petAddPoints(1)
+  // 选择题结构化：仅当用户在"叫我出题/练题"时，才把 AI 输出包装成可点作答卡（真实题的解析/复盘绝不自动加卡）
+  if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped && !m.quiz && isQuizAsk(String(lastAskText || ''))) {
+    const quiz = parseQuiz(m.content)
+    if (quiz) m.quiz = quiz
+    else {
+      // 出题练习模式：AI 只给题干+选项（不给答案，让用户先选）→ 生成"选后 AI 判题"卡片
+      const opts = extractChoices(m.content)
+      if (opts.length >= 2) {
+        const lines = String(m.content).split('\n')
+        const lineRe = /^\s*([A-D])[.、．:：]/
+        const first = lines.findIndex((l) => lineRe.test(l))
+        let stem = first >= 0 ? lines.slice(0, first).join('\n').trim() : String(m.content).replace(/\s[A-D][.、．:：].*$/s, '').trim()
+        if (stem) m.quiz = { stem, options: opts, answer: '', needAi: true }
+      }
+    }
+  }
+  // 对话里 AI 出的选择题也支持萌宠「读题」
+  if (m.role === 'assistant' && m.quiz) {
+    const qz = m.quiz
+    const opts = (qz.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || o || '').replace(/<[^>]+>/g, ' ')).join('。')
+    store.readCtx = { type: 'chat', title: '对话出题·' + (detectBanKuai(String(qz.stem || '')) || '综合'), text: (String(qz.stem || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '')).slice(0, 1200) }
+    store.curQ = { plate: detectBanKuai(String(qz.stem || '')) || '综合', kind: '对话出题', stem: qz.stem, options: qz.options || [], answer: qz.answer || '', explain: qz.explain || '' }
+  }
+  // 萌宠对话记忆库（v3.8.75）：记录每条问答（用户提问+萌宠回复），供"批量加错题"指令检索
+  if (m.role === 'assistant' && !m.err) {
+    const _a = typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''
+    recordPetChat(lastAskText, _a, {
+      refId: m.id,
+      bk: m.bk || '',
+      quiz: m.quiz ? { stem: m.quiz.stem, options: m.quiz.options, answer: m.quiz.answer, picked: m.quiz.picked, correct: m.quiz.correct, explain: m.quiz.explain } : null
+    })
+  }
+  saveMsgs()
+  scroll()
+}
+// 最近一次用户提问文本（用于板块归属）
+let lastAskText = ''
+let lastAskAt = null
+// 考场倒计时：按问题数限时（1 问=1 分钟），回复完成弹统计
+const left = ref(60)
+const runSec = ref(0) // 实际已走秒数（供耗时统计）
+let limitSec = 60 // 本次限时（秒）
+const limitShow = ref(60) // 模板显示的限时（秒）
+let stopTimer = null
+// 估算问题中的问数（按问号，至少 1）
+function countQuestions(txt) {
+  const t = String(txt || '')
+  const m = (t.match(/[?？]/g) || []).length
+  return Math.max(1, m)
+}
+function startStopwatch(limit) {
+  limitSec = Math.max(1, limit || 60)
+  limitShow.value = limitSec
+  left.value = limitSec
+  runSec.value = 0
+  if (stopTimer) clearInterval(stopTimer)
+  stopTimer = setInterval(() => {
+    runSec.value++
+    left.value = Math.max(0, left.value - 1)
+    if (left.value <= 0 && stopTimer) {
+      clearInterval(stopTimer)
+      stopTimer = null
+    }
+  }, 1000)
+}
+function stopStopwatch() {
+  if (stopTimer) {
+    clearInterval(stopTimer)
+    stopTimer = null
+  }
+}
+// 评估本题用时：返回是否超时与超时秒数
+function assessTime() {
+  const used = runSec.value
+  const over = Math.max(0, used - limitSec)
+  return { used, limit: limitSec, over, ok: over === 0 }
+}
+function fmtSec(s) {
+  const m = Math.floor(s / 60)
+  const ss = s % 60
+  return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+}
+async function scroll() {
+  await nextTick()
+  if (msgsBox.value) msgsBox.value.scrollTop = msgsBox.value.scrollHeight
+}
+async function pickImage(ev) {
+  const files = ev.target.files || []
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue
+    const raw = await new Promise((res) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result)
+      r.onerror = () => res(null)
+      r.readAsDataURL(f)
+    })
+    if (!raw) continue
+    // 入列前压缩：既控 localStorage 体积（避免大图被 saveMsgs 清理导致历史丢失），也减小 API 载荷
+    imgs.value.push(await compressImage(raw, 1000, 0.78))
+  }
+  ev.target.value = ''
+}
+function addImageUrl() {
+  const u = linkUrl.value.trim()
+  if (!u) {
+    showToast('请粘贴图片链接', 'info')
+    return
+  }
+  fetch(u)
+    .then((r) => {
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.blob()
+    })
+    .then((b) => {
+      if (!b.type.startsWith('image/')) {
+        showToast('该链接不是图片', 'error')
+        return
+      }
+      const rd = new FileReader()
+      rd.onload = async (e) => {
+        imgs.value.push(await compressImage(e.target.result, 1000, 0.78))
+        linkShow.value = false
+        linkUrl.value = ''
+      }
+      rd.readAsDataURL(b)
+    })
+    .catch((e) => showToast('加载图片失败：' + e.message, 'error'))
+}
+function rmImg(i) {
+  imgs.value.splice(i, 1)
+}
+let abortCtrl = null
+function stopGenerate() {
+  if (abortCtrl) {
+    try {
+      abortCtrl.abort()
+    } catch (e) {}
+  }
+}
+// 萌宠指令识别：是否要求批量把今天的错题加入错题集
+const ADD_TODAY_WRONG_CMD = '帮我把今天问过的所有错题一次性添加到错题集中'
+function isAddTodayWrongCmd(t) {
+  if (!t) return false
+  const s = String(t).trim()
+  if (s === ADD_TODAY_WRONG_CMD) return true
+  // 兼容轻微变体：同时包含关键片段即视为同一指令
+  return s.includes('今天问过的所有错题') && s.includes('错题集') && s.includes('添加')
+}
+async function send() {
+  if (store.busy) return
+  store.busy = true
+  abortCtrl = new AbortController()
+  const txt = text.value.trim()
+  // 萌宠指令：批量把"今天"答错的题加入错题集（命中则本地处理，不发起对话）
+  if (isAddTodayWrongCmd(txt)) {
+    lastAskText = txt
+    const res = addTodaysWrongToWq()
+    addMsg({ role: 'assistant', content: '🐾 ' + res.msg, t: Date.now() })
+    try { showToast(res.count > 0 ? '✅ 已批量加入错题集' : 'ℹ️ 今天还没有错题', res.count > 0 ? 'success' : 'info') } catch (e) {}
+    text.value = ''
+    imgs.value = []
+    scroll()
+    store.busy = false
+    return
+  }
+  if (!txt && !imgs.value.length) {
+    store.busy = false
+    return
+  }
+  // 提问助手·温柔校验（v3.8.76）：仅提醒一次，再次点发送必定发出，绝不阻塞
+  if (store.cfg.askAssist !== false && !sendGuard.value && txt) {
+    let a = ask.value && !ask.value.empty ? ask.value : null
+    if (!a) { try { a = analyzeAsk(txt, { hasImg: imgs.value.length > 0, curQ: store.curQ }) } catch (e) { a = null } }
+    if (a && !a.empty && (a.intent === '求解' || a.intent === '判错解释') && a.missing.length) {
+      ask.value = a
+      askWarn.value = '本题似乎缺：' + a.missing.join('、') + '。直接发送 AI 只能基于有限信息作答。'
+      sendGuard.value = 1
+      store.busy = false
+      return
+    }
+  }
+  askWarn.value = ''
+  const hasImg = imgs.value.length > 0
+  const imgData = hasImg ? imgs.value[0] : ''
+  const c = activeCfg(hasImg)
+  if (!c || !c.key) {
+    store.busy = false
+    showToast('请先在设置配置模型 API Key（文字模型用于作答；发图时会智能识别：纯文字图走文字模型，含图形图走视觉模型或图形增强读图）', 'error')
+    return
+  }
+  // 智能识图路由：图片永远接收，不拒收
+  // ① 主视觉模型可识图（智谱/通义/OpenAI）→ 直接发图给它看；
+  // ② 主视觉不能识图（如 DeepSeek 纯文本）→ 用「图形增强」视觉模型读图（区分纯文字/含图形）→ 文字模型作答；
+  // ③ 两者都没有 → 仍接收图片，注入系统提示让模型礼貌引导，而非假装看到或拒收。
+  let figRead = null
+  if (hasImg && !supportsVision(c)) {
+    const fc = figCfg()
+    if (fc) {
+      try {
+        showToast('🖼 正在用图形增强模型读取图片…', 'info')
+        figRead = await readQuestionFromImage(imgData, txt)
+      } catch (e) {
+        figRead = null
+      }
+      if (figRead && figRead.ok) {
+        showToast(figRead.type === 'graph' ? '📐 图片含图形，已读取文字部分（图形题建议配视觉模型更准）' : '📄 图片为纯文字，已读取', 'success')
+      }
+    }
+  }
+  const userMsg = { role: 'user', content: hasImg ? { text: txt, imgs: imgs.value.slice() } : txt }
+  if (figRead && figRead.ok) {
+    userMsg._curImgRead = (figRead.text || txt) + (figRead.fig ? '\n【图形特征】' + figRead.fig : '')
+    userMsg._imgType = figRead.type || 'text'
+  }
+  // 出题意图检测：用户要求「出题/让我做/直接选」→ 让 AI 输出带完整选项与【正确答案】标记的可点作答题目
+  userMsg._askQuiz = isQuizAsk(txt) // 仅“帮我出题/练题”请求才走可点作答；真实提问不生成选项卡
+  pushRecent(txt)
+  addMsg(userMsg) // 经 addMsg 统一处理（含考场倒计时启动/保存/滚动）
+  text.value = ''
+  imgs.value = []
+  ask.value = null // 提问助手：发送后复位
+  askWarn.value = ''
+  sendGuard.value = 0
+  scroll()
+  // 截图完整题目 → 先整理成可作答卡片，询问「直接讲解 / 先做一遍」，不直接解析
+  if (hasImg && figRead && figRead.ok) {
+    let imgQuiz = parseQuiz(figRead.text || '')
+    if (!imgQuiz) { const io = extractChoices(figRead.text || ''); if (io.length >= 2) imgQuiz = { stem: String(figRead.text || '').replace(/\s[A-D][.、．:：].*$/s, '').trim(), options: io, answer: '', needAi: true } }
+    const wantDo = !txt.trim() || /整理|做一遍|先做|让我(做|选|答)|直接选|出题|作答/.test(txt)
+    if (imgQuiz && wantDo) {
+      const _orgId = 'oc_' + Date.now()
+      store.msgs.push({ id: _orgId, role: 'assistant', content: '📋 **已整理题目**（来自你的截图）：\n\n' + (figRead.text || '') + '\n\n你可以在下方题目卡片直接点选项作答（✍️ 先做一遍）；或点「📖 直接讲解」让我解析。作答后点「💬 发到对话深挖」可继续追问。', quiz: imgQuiz, orgCard: true, orgImg: (userMsg.content && userMsg.content.imgs) ? userMsg.content.imgs.slice() : [], t: Date.now() })
+      // 萌宠记忆库：截图整理的题目卡也记入记忆（refId 关联，答错时便于批量加错题）
+      recordPetChat(lastAskText, figRead.text || '', { refId: _orgId, bk: detectBanKuai(String(imgQuiz.stem || '')) || '', quiz: { stem: imgQuiz.stem, options: imgQuiz.options, answer: imgQuiz.answer, picked: '', correct: null, explain: '' } })
+      saveMsgs()
+      store.busy = false
+      scroll()
+      return
+    }
+  }
+  await runChat()
+}
+// ===== 发起对话（含智能识图路由与失败降级重试） =====
+async function runChat() {
+  const lastMsg = store.msgs[store.msgs.length - 1]
+  const curIsImg = !!(lastMsg && lastMsg.role === 'user' && lastMsg.content && lastMsg.content.imgs && lastMsg.content.imgs.length)
+  const curFigRead = lastMsg && lastMsg._curImgRead
+  const curTxt = lastMsg ? (typeof lastMsg.content === 'string' ? lastMsg.content : (lastMsg.content && lastMsg.content.text) || '') : ''
+  const sentImgs = curIsImg ? lastMsg.content.imgs.slice() : []
+  // 🚀 对话快模型（非思考模型秒回）：留空=跟随文字模型（思考模型慢）
+  let replyC = activeCfg(curIsImg)
+  let chatFast = ''
+  let needImgRead = false
+  try {
+    chatFast = String(localStorage.getItem('xc_chat_fast_model') || localStorage.getItem('xc_fast_gen_model') || '').trim()
+    if (chatFast && quickMode.value) {
+      const fastC = { ...replyC, model: chatFast }
+      const fv = supportsVision(fastC)
+      if (!curIsImg || !fv) {
+        replyC = fastC
+        if (curIsImg && !fv && figCfg()) needImgRead = true
+      }
+    }
+  } catch (e) {}
+  // 图片 + 快模型不能识图 → 用图形增强模型预读图片内容（快模型据此作答）
+  if (needImgRead && lastMsg && !lastMsg._curImgRead) {
+    try {
+      showToast('🚀 快模型不识别图片，正在用图形增强读图…', 'info')
+      const fr = await readQuestionFromImage(lastMsg.content.imgs[0], curTxt)
+      if (fr && fr.ok) {
+        lastMsg._curImgRead = (fr.text || curTxt) + (fr.fig ? '\n【图形特征】' + fr.fig : '')
+        lastMsg._imgType = fr.type || 'graph'
+      }
+      else replyC = activeCfg(curIsImg) // 读图失败回退主模型（慢但能看图）
+    } catch (e) { replyC = activeCfg(curIsImg) }
+  }
+  // 板块 KB 注入：先定板块、再组装 sys
+  // ⚠️ v3.8.76 修正：原实现在末尾用 sys = buildSys(...) 重建，会把下方「出题/读图/快答」片段全部冲掉
+  // 优先级：用户在提问助手里点选确认的板块（pendingPlate） > 自动识别（detectBanKuai）
+  let _plate = ''
+  let _taskShape = null
+  if (store.mode === 'all' && store.cfg.kb !== false) {
+    // P0-1b 换题/追问状态机：追问锁上一轮板块/细分；换题/刷新则重建并记忆
+    const _pr = probe(curTxt, { hasImg: curIsImg })
+    _taskShape = taskShape(curTxt, { imgRead: curFigRead || '' })
+    const _nx = _lastAskCtx ? nextContext(_lastAskCtx, _pr) : null
+    _plate = store.cfg.pendingPlate || (_nx && _nx.kind === 'followup' && _nx.plate6 ? _nx.plate6 : (_pr.plate6 || (_nx && _nx.plate6) || detectBanKuai(curTxt) || ''))
+    if (_nx && (_nx.kind === 'newQ' || _nx.kind === 'refresh')) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _nx.sub || _pr.sub, text: curTxt }
+    else if (!_nx) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _pr.sub, text: curTxt }
+  }
+  let sys = buildSys(_plate ? PLATE_MODE[_plate] || '' : undefined, curTxt)
+let _vtType = '' // v3.8.192 命中 canonical 题型则非空
+  // ===== 四步发题向导：用户手动锁定 板块→细分→题型→意图，定向注入（覆盖自动猜测，本次发送即消费） =====
+  let wzMode = ''
+  try {
+    if (wzSel.value && wzSel.value.plate) {
+      const ws = wzSel.value
+      wzMode = ws.mode || 'solve'
+      const _wpath = [ws.plate, ws.sub, ws.type].filter(Boolean).join('·')
+      sys += '\n【发题向导·用户指定路径】用户已在发送前锁定本题路径：' + (_wpath || ws.plate) + '。请严格按该定位作答：判定确属此题型后调用对应专属方法，不要再猜其他板块/题型，也不要泛泛复述整个板块。'
+      if (ws.mode === 'wrong') {
+        // 错题复盘：文本若已含“做错/选我…”自动块已覆盖则不再叠加；否则按板块错因框架补一次
+        if (!/(做错|错题|答错|为什么错|错在哪|我选|判我|分析.*错)/.test(curTxt)) {
+          const _wp = wrongExplainPrompt(normalizePlate(ws.plate || ''))
+          if (_wp) sys += _wp
+        }
+      } else if (ws.mode && ws.mode !== 'solve') {
+        const _wm = askModeSys(ws.mode)
+        if (_wm) sys += _wm
+      }
+      if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+      wzSel.value = null
+    }
+  } catch (e) {}
+  if (lastMsg && lastMsg._askQuiz) {
+    sys += '\n【用户要求出题练习】请按用户要求出一道完整的行测题：题干 + 完整 A/B/C/D 四个选项（每个选项单独一行）。**不要输出答案和解析**，让用户先选择；用户选完后系统会再让你判题讲解。'
+  }
+  if (curFigRead) {
+    sys += '\n【重要·图片已读取，直接作答】用户刚发了一张图片，图片数据已由专业 OCR 完整提取为文字（见用户消息中【图片内容】标记），数据准确可信。请【直接据此作答】：不要讨论自己能否看图、是否纯文本模型、OCR 是否完整，不要复述提取过程，不要自我怀疑——直接给出答案与解析即可；若确有数据缺失，再请用户补充。'
+  } else if (curIsImg && !supportsVision(replyC)) {
+    sys += '\n【重要】用户发了一张图片，但当前模型看不到图片内容。请礼貌地请用户用文字描述题目/图形关键信息，或提示到设置配置视觉模型；不要假装看到了图片。'
+  }
+  // 行测快答节奏：仅快答模式（深度解析模式保持完整推理与质量）
+  if (quickMode.value) {
+    sys += '\n【行测快答节奏】这是行测考试题：先直接给出答案，再用简明 2-5 句讲清关键思路（图推先点规律再分步）；控制篇幅、勿长篇大论、勿反复自我怀疑。'
+  }
+  // ===== 提问助手（v3.8.76）：题型级注入 / 子意图驱动 / 上一题对比 / 锚定本题 / 回答深度 =====
+  if (store.cfg.askAssist !== false) {
+    try {
+      // forcePlate=实际用于注入 KB 的板块，保证「题型」与「板块」始终同源，不会错配
+      const aa = analyzeAsk(curTxt, { hasImg: curIsImg, curQ: store.curQ, forcePlate: _plate })
+      if (!aa.empty) {
+        // ① 题型级：让模型直接用该题型的专属解法，而不是泛讲整个板块
+        if (aa.sub && aa.sub.name && aa.plate.name) {
+          sys += '\n【本题题型已识别】' + aa.plate.name + '·' + aa.sub.name + '题：请直接调用该题型的专属解法与高频陷阱，不要泛泛复述整个板块的方法论。'
+        }
+        // ② 子意图片段（出题已由上方 _askQuiz 处理，避免重复下发）
+        if (aa.intent !== '出题' && INTENT_SYS[aa.intent]) sys += INTENT_SYS[aa.intent]
+        // P0-2 分场景协议：补 askAssist 未细化的输出顺序（方法总结/变式/出题/讲解/对答案等）
+        try { const _sp = buildScenarioPrompt(curTxt, { hasImg: curIsImg, plate: _plate }); if (_sp) sys += _sp } catch (e) {}
+        // ③ 上一题对比：把 curQ 喂进去，实现真正的"对比讲解"
+        if (aa.intent === '对比' && store.curQ) {
+          const q = store.curQ
+          sys += '\n【上一题信息·供对比】板块=' + (q.plate || '未知') + ' 题型=' + (q.kind || '未知') + '\n题干：' + String(q.stem || '').slice(0, 300) + '\n正确答案：' + (q.answer || '未知')
+        }
+        // ④ 锚定本题：仅对真正在解题的意图追加（出题/概念/秒杀不适用）
+        const _anchorOk = !_taskShape || (_taskShape.kind !== 'batchN' && _taskShape.kind !== 'genericHow')
+    if (_anchorOk && (aa.intent === '求解' || aa.intent === '判错解释' || aa.intent === '对比')) { let _vi = null; try { const _pp6 = normalizePlate(_plate || aa.plate.name || detectBanKuai(curTxt) || ''); _vi = resolveVariant({ plate6: _pp6, sub: (wzSel.value && wzSel.value.sub) || aa.sub.name || '', type: (wzSel.value && wzSel.value.type) || '', detected: aa.sub.name || '' }) } catch (e) {} _vtType = _vi ? (_vi.sub + '·' + _vi.type) : ''; sys += ANCHOR_PROTOCOL + (_vtType ? variantStepPrompt(_vi) : STEP_PROMPT) }
+      }
+    } catch (e) {}
+    // ⑤ 回答深度
+    const dep = DEPTH_SYS[store.cfg.answerDepth || 'detail']
+    if (dep) sys += dep
+    // pendingPlate 一次性生效：消费后立即清空，不污染后续提问
+    if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
+    // P-A 任务形态：排序流程 / 批答纪律（仅确认场景追加，泛问不额外加码）
+    try {
+      if (_taskShape && _taskShape.sort) { const _sp2 = sortScenarioPrompt(); if (_sp2) sys += _sp2 }
+      if (_taskShape && _taskShape.kind === 'batchN' && _taskShape.n > 1) sys += batchScenarioPrompt(_taskShape.n)
+      // P-B 判型先行：仅深单题(言语/判断等主观判断题型)启用，批答/泛问不加码
+      if (_taskShape && _taskShape.kind === 'deepOne' && !_taskShape.sort && /(言语理解|判断推理|图形推理|定义判断|类比推理)/.test(_plate || '')) { const _tp = typeFirstPrompt(); if (_tp) sys += _tp }
+      if (_taskShape && _taskShape.kind === 'deepOne') { const _hp = honestyPrompt(); if (_hp) sys += _hp }
+      // 错题讲解（做错/错题/为什么错/我选X）：按板块错因框架讲，不重讲整套
+      if (/(做错|错题|答错|为什么错|错在哪|我选|判我|分析.*错)/.test(curTxt)) {
+        const _wp = wrongExplainPrompt(normalizePlate(_plate || detectBanKuai(curTxt) || ''))
+        if (_wp) sys += _wp
+      }
+      // 泛化口吻→意图轻路由（重讲/易错点/总结考点），不覆盖错题通道
+      try {
+        const _md = detectMode(curTxt)
+        if (_md && _md !== wzMode) { const _ms = askModeSys(_md); if (_ms) sys += _ms }
+      } catch (e) {}
+    } catch (e) {}
+  }
+  // 质量优先：历史尽量完整保留（不激进省 token），保障「解决具体提问」不缺上文。
+  const visOk = supportsVision(replyC)
+  // P-① 方法卡命中透明化：算出本次命中卡并给模型“引用纪律”，回复脚注让用户核对是否真按卡作答
+  let _hitNote = ''
+  try {
+    const _pp6 = normalizePlate(_plate || detectBanKuai(curTxt) || '')
+    const _hits = retrieveDetailed(_pp6, curTxt, 3)
+    if (_hits.length) {
+      _hitNote = '📚 依据卡：' + _hits.map((x) => '[' + x.card.plate + '·' + x.card.type + ']' + (x.strong ? '✓' : '')).join(' ')
+      sys += '\n【引用纪律】凡按已蒸馏方法作答，请在解析开头写出处卡名（如〔言语·中心理解·转折结构〕）；若某一步不是卡内方法，请明说“此处为通用推理”，不得冒充卡内方法。'
+    } else {
+      _hitNote = '📚 提示：未匹配到已蒸馏方法，以下按通用思路作答，请谨慎核对'
+    }
+  } catch (e) {}
+  const _AICAP = 4000 // 单条 assistant 回答最多发送字符
+  const _HIS = 20 // 最多 20 条
+  const _BUDGET = 35000 // 历史总字符预算，超出才丢更早
+  // P-M 图文记忆：当前模型不可看图时，若最近一张截图缺文字纪要则补读一次并固化（追问/换模型不失忆）
+  if (!visOk && typeof figCfg === 'function') {
+    try {
+      const fc = figCfg()
+      if (fc) {
+        const chg = await ensureImgNotesForHistory(store.msgs, (d, t) => readQuestionFromImage(d, t))
+        if (chg.changed) saveMsgs()
+      }
+    } catch (e) {}
+  }
+  // P-M 统一历史组装：旧图纪要转文字注入、仅最新一条带图消息附 image_url、纯图无文字也可带图
+  const history = buildChatHistory(store.msgs, { limit: _HIS, budget: _BUDGET, maxAiChars: _AICAP, visOk })
+  // P-M 截图题目目录注入：支持“第N题/第二题/上一题”指代，不要求用户重发截图
+  try {
+    const topics = lastImgTopics(store.msgs, 6)
+    if (topics.length) sys += '\n【本会话最近看过的截图题目】\n' + topics.join('\n') + '\n（用户若说“第N题/上一题/这道”即指以上题目，直接据此作答，勿要求重发截图）'
+  } catch (e) {}
+  // ===== v3.8.205 对话深化三件套 =====
+  // P-C2 长历史自动摘要：被条数/预算截掉的更早对话压缩进 sys（防断片，不静默丢上下文）
+  try {
+    const _dig = digestOlder(store.msgs, { keep: _HIS, cap: 2200 })
+    if (_dig.text) sys += _dig.text
+  } catch (e) {}
+  // P-C3 数值题「可算必验」：数量/资料解题要求 算式→代入→【验算】=数值，供 verifyCalc 复核
+  try {
+    const _pp6c = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+    const _cps = calcVerifySys(_pp6c, curTxt)
+    if (_cps) sys += _cps
+  } catch (e) {}
+  // P-C4 追问召回：追问/短问时自动带出本人相关错题 + 记忆词条，让讲解贴着“我的历史”
+  try {
+    const _pp6r = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+    const _rb = recallBlock({ wqs: store.wqs, srs: loadSrs(), query: curTxt, plate6: _pp6r })
+    if (_rb) sys += _rb
+  } catch (e) {}
+  live.value = { text: '', think: '', thinkOpen: false }
+  scroll()
+  try {
+    let full = await chatStream([{ role: 'system', content: sys }, ...history], replyC, (d) => {
+      if (d.type === 'think') {
+        live.value.think = d.think
+      } else {
+        // 出题中（提问助手「出一道题」）：流式预览同样只展示题目，解析作答后才揭晓
+        live.value.text = lastMsg && lastMsg._askQuiz ? quizHideAnalysis(d.text) : d.text
+      }
+      scrollThrottled()
+    }, abortCtrl.signal)
+    live.value = null
+    // P-C3b 本地数值自查（v3.8.205）：模型附【验算】且题干有选项 → 程序求值复核，不符即正文追加提示
+    try {
+      const _pp6v = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))
+      if ((_pp6v === '数量关系' || _pp6v === '资料分析') && /【验算】/.test(String(full || ''))) {
+        const optsV = extractChoices(curTxt || '')
+        const ansM = String(full || '').match(/答案[:：]?\s*([A-D])/i) || String(full || '').match(/选\s*([A-D])\b/i)
+        if (ansM && optsV.length >= 2) {
+          const cv = calcRecheck({ answer: String(ansM[1]).toUpperCase(), options: optsV }, full)
+          if (cv && cv.ok === false) full = full + '\n\n⚠️ **本地数值自查**：' + cv.reason + '（请以算式实际结果为准复核，勿直接照抄答案选项）'
+        }
+      }
+    } catch (e) {}
+    // 高效复盘指引：模型已按 SYS 输出则以模型为准；缺失时按板块本地复盘库兜底
+    const review = buildReview(full, detectBanKuai(curTxt), curTxt)
+    const finalContent = review ? full + '\n\n' + review : full
+    // P1-1b 回复自查（replyVerify 五查）：不污染正文，高危(选非方向)才提示
+    try {
+      const _vr = verifyReply({ question: curTxt, reply: full, plate6: detectBanKuai(curTxt) || '', askDir: detectAskDir(curTxt) })
+      if (!_vr.pass && _vr.warnings.length) {
+        console.warn('[replyVerify]', _vr.warnings)
+        if (_vr.warnings.some((x) => x.includes('选非'))) showToast('⚠ 自查提示：' + _vr.warnings[0], 'warn')
+      }
+    } catch (e) {}
+    const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '')
+addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
+    // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
+    if (sentImgs.length && shouldFigEnhance(curTxt, lastMsg && lastMsg._imgType)) {
+      const lastAi = store.msgs[store.msgs.length - 1]
+      maybeFigEnhance(lastAi, sentImgs, curTxt)
+    }
+    // 图推解析保障：若回复没画出标注 SVG，单独请求「只画一张标注图」补上
+    const lastAi2 = store.msgs[store.msgs.length - 1]
+    const hasRealSvg = lastAi2 && typeof lastAi2.content === 'string' && /```svg[\s\S]*?```|<svg[\s\S]*?<\/svg>/.test(lastAi2.content)
+    const _isTutu = /图形推理|图推|九宫格|空间重构|截面|三视图|展开图|平面拼合/.test(curTxt)
+    if (!hasRealSvg && _isTutu && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
+      drawTutuAnno(lastAi2, curTxt)
+    }
+    if (store.cfg.ttsOn) autoSpeak(finalContent)
+  } catch (e) {
+    live.value = null
+    if (e.name === 'AbortError') {
+      addMsg({ role: 'assistant', content: live.value && live.value.text ? live.value.text : '⏹ 已停止生成。', stopped: true, _vt: _vtType })
+    } else if (curIsImg && !curFigRead && figCfg()) {
+      // 视觉请求失败（如接口拒收图片）→ 自动用图形增强模型读图后重试一次
+      try {
+        showToast('视觉模型请求失败，正在用图形增强模型读图重试…', 'info')
+        const fr = await readQuestionFromImage(lastMsg.content.imgs[0], curTxt)
+        if (fr && fr.ok) {
+          lastMsg._curImgRead = (fr.text || curTxt) + (fr.fig ? '\n【图形特征】' + fr.fig : '')
+          return runChat()
+        }
+      } catch (_) {}
+      addMsg({ role: 'assistant', content: '❌ 图片请求失败：' + e.message + '（可到设置→图形增强配免费视觉模型自动读图，或视觉模型换智谱 GLM-5V / 通义 Qwen-VL）', err: true, retryKey: Date.now() })
+    } else {
+      addMsg({ role: 'assistant', content: '❌ 请求失败：' + e.message, err: true, retryKey: Date.now() })
+    }
+  }
+  abortCtrl = null
+  store.busy = false
+}
+// 图形增强是否应自动复刻：仅当图片含图形/表格（或提问文字带图相关词）才触发，避免对文字截图/纯文字题浪费 token
+function shouldFigEnhance(q, imgType) {
+  if (imgType === 'graph') return true
+  if (!q) return false
+  // 资料分析截图（哪怕纯文字材料）也要复刻+标注数据位置：材料就是"题"，必须可视化
+  if (detectBanKuai(String(q)) === '资料分析') return true
+  if (imgType === 'text') return false
+  return /图形|图推|几何|表格|图表|柱状|折线|饼图|对称|展开图|立体|坐标|示意图|方格|宫格|一笔画/.test(q)
+}
+// 图推解析「补画标注图」：主回复没带 SVG 时，单独请求模型只输出一张带标注的原图
+async function drawTutuAnno(msg, q) {
+  let c = activeCfg(false)
+  if (!c || !c.key || !msg) return
+  // 优先用「出题快模型」（非思考模型，画图不容易被思考过程截断）
+  try {
+    const fgm = String(localStorage.getItem('xc_fast_gen_model') || localStorage.getItem('xc_chat_fast_model') || '').trim()
+    if (fgm) c = { ...c, model: fgm }
+  } catch (e) {}
+  showToast('📐 正在补画标注图…', 'info')
+  try {
+    const sys = '你是公考图形推理绘图助手。只负责画图，不解释。'
+    const ask =
+      '请针对下面这道图形推理题，只输出【一个】```svg 代码块：重绘题干原图，并在原图上直接标注规律（辅助线/箭头/高亮框/虚线对称轴/圈出变化元素，用不同颜色区分），让规律一眼可见。' +
+      'SVG 必须带 viewBox、元素坐标在界内、图形与题目一致；除这个 SVG 代码块外，不要输出任何文字、标题、解释、前后缀。题目：' +
+      String(q).slice(0, 300)
+    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask }], 3000, 90000)
+    const m = String(reply || '').match(/```svg\s*\n?([\s\S]*?)```|<svg[\s\S]*?<\/svg>/)
+    const svg = m ? (m[1] || m[0]).trim() : ''
+    if (svg && svg.includes('<svg')) {
+      addMsg({ role: 'assistant', content: '📐 原图标注（重绘+标注，辅助看懂规律）：\n\n```svg\n' + svg + '\n```' })
+      showToast('✅ 已补画标注图', 'success')
+    } else {
+      showToast('⚠️ 标注图生成失败（模型未输出有效 SVG；可在出卷参数填「出题快模型」如 deepseek-chat 提速画图）', 'error')
+    }
+  } catch (e) {
+    showToast('⚠️ 标注图生成失败：' + e.message, 'error')
+  }
+}
+
+// ===== 图形理解增强（可选）：独立开源视觉模型复刻原图 =====
+const figView = ref(null)
+function figZoom(f) {
+  if (f && f.svg) figView.value = f
+}
+function closeFigZoom() { figView.value = null }
+// 保存复刻图：SVG → PNG（canvas 光栅化，白底），失败回退下载 .svg
+function figSave(f) {
+  if (!f || !f.svg) return
+  try {
+    const raw = String(f.svg).trim()
+    const xml = new globalThis.XMLSerializer().serializeToString(new globalThis.DOMParser().parseFromString(raw, 'image/svg+xml'))
+    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    let w = 900, h = 600
+    const vb = raw.match(/viewBox\s*=\s*["']([\d.-]+)[\s,]+([\d.-]+)[\s,]+([\d.-]+)[\s,]+([\d.-]+)["']/)
+    if (vb) { w = Math.round(Number(vb[3])); h = Math.round(Number(vb[4])) }
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas')
+        cv.width = w; cv.height = h
+        const ctx = cv.getContext('2d')
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        cv.toBlob((b) => {
+          if (b) downloadBlob(b, '复刻图.png')
+          else downloadBlob(blob, '复刻图.svg')
+          URL.revokeObjectURL(url)
+        }, 'image/png')
+      } catch (e) { downloadBlob(blob, '复刻图.svg'); URL.revokeObjectURL(url) }
+    }
+    img.onerror = () => { downloadBlob(blob, '复刻图.svg'); URL.revokeObjectURL(url) }
+    img.src = url
+  } catch (e) { showToast('保存失败：' + e.message, 'error') }
+}
+async function capMsg(m, _i) {
+  // v3.8.215：不再克隆实时节点（长内容/嵌套样式下易空白），改用 snapshotMd 整幅白底渲染：
+  // 文字/表格/公式/内嵌图全部可靠输出，并把“我的提问”一起带进分享卡。
+  try {
+    const idx = store.msgs.indexOf(m)
+    let prev = ''
+    for (let j = idx - 1; j >= 0; j--) {
+      const u = store.msgs[j]
+      if (u && u.role === 'user') { prev = String(textOf(u) || '').trim(); break }
+    }
+    const t = String(textOf(m) || '').trim()
+    const md = (prev ? '**🧑 我的提问：**\n' + prev + '\n\n---\n\n' : '') + '**🤖 AI 回复：**\n\n' + t
+    const dataUrl = await snapshotMd(md, {
+      title: '行测AI · AI 答疑分享',
+      sub: '生成时间：' + new Date().toLocaleString('zh-CN', { hour12: false }) + ' · 截图自“行测名师AI小助理”'
+    })
+    if (!dataUrl) { showToast('生成失败，请重试', 'error'); return }
+    await saveImage(dataUrl, 'AI答疑分享_' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14))
+  } catch (e) {
+    showToast('截图失败：' + ((e && e.message) || e), 'error')
+  }
+}
+function downloadBlob(b, name) {
+  const u = URL.createObjectURL(b)
+  const a = document.createElement('a')
+  a.href = u; a.download = name
+  document.body.appendChild(a)
+  a.click()
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(u) }, 500)
+}
+async function maybeFigEnhance(msg, imgs, q) {
+  const c = figCfg()
+  if (!c || !imgs || !imgs.length) return
+  const raw = imgs[0]
+  if (!raw || !String(raw).startsWith('data:image')) return
+  msg.figBusy = true
+  scroll()
+  try {
+    const small = await compressImage(raw, 900, 0.75)
+    const res = await analyzeFigImage(small, q, detectBanKuai(String(q)))
+    if (res && res.ok) {
+      msg.fig = { ok: true, type: res.type, summary: res.summary, rule: res.rule || '', tips: res.tips, svg: res.svg }
+    } else {
+      msg.fig = { ok: false, err: (res && res.err) || '模型未返回可复刻的图形（可能该截图无需画图）' }
+    }
+  } catch (e) {
+    msg.fig = { ok: false, err: (e && e.message) || '未知错误' }
+  }
+  msg.figBusy = false
+  saveMsgs()
+  scroll()
+}
+// 手动/重试图形增强：找到该回复前面最近一条带图提问的图片
+function findPrevUserImg(m) {
+  const idx = store.msgs.indexOf(m)
+  for (let i = idx - 1; i >= 0; i--) {
+    const u = store.msgs[i]
+    if (u.role !== 'user') continue
+    const imgs = u.content && Array.isArray(u.content.imgs) ? u.content.imgs : []
+    const valid = imgs.find(x => x && String(x).startsWith('data:image'))
+    return valid || null
+  }
+  return null
+}
+function prevHasImg(m) {
+  return !!findPrevUserImg(m)
+}
+async function retryFigEnhance(m) {
+  if (m.figBusy) return
+  const img = findPrevUserImg(m)
+  if (!img) { showToast('没有找到对应的题目图片，无法复刻', 'error'); return }
+  m.fig = null
+  m.figBusy = true
+  scroll()
+  try {
+    const small = await compressImage(img, 900, 0.75)
+    const res = await analyzeFigImage(small, textOf(m))
+    m.fig = res && res.ok ? { ok: true, type: res.type, summary: res.summary, rule: res.rule || '', tips: res.tips, svg: res.svg } : { ok: false, err: (res && res.err) || '模型未返回可复刻的图形' }
+  } catch (e) {
+    m.fig = { ok: false, err: (e && e.message) || '未知错误' }
+  }
+  m.figBusy = false
+  saveMsgs()
+  scroll()
+}
+
+function retryLast() {
+  const last = store.msgs[store.msgs.length - 1]
+  if (!last || !last.err) return
+  let idx = store.msgs.length - 2
+  for (; idx >= 0; idx--) {
+    if (store.msgs[idx].role === 'user') {
+      break
+    }
+  }
+  if (idx < 0) {
+    showToast('找不到可重试的提问', 'info')
+    return
+  }
+  const u = store.msgs[idx]
+  store.msgs.splice(store.msgs.length - 1, 1)
+  saveMsgs()
+  const txt = typeof u.content === 'string' ? u.content : (u.content && u.content.text) || ''
+  const imgs = u.content && Array.isArray(u.content.imgs) ? u.content.imgs : []
+  text.value = txt
+  imgs.value = imgs.slice()
+  scroll()
+  send()
+}
+function resendMsg(i) {
+  const u = store.msgs[i]
+  if (!u || u.role !== 'user') return
+  const txt = typeof u.content === 'string' ? u.content : (u.content && u.content.text) || ''
+  const imgs = u.content && Array.isArray(u.content.imgs) ? u.content.imgs : []
+  text.value = txt
+  imgs.value = imgs.slice()
+  scroll()
+  send()
+}
+function saveWrong(m) {
+  const n = store.msgs.length
+  if (!n) {
+    showToast('请先完成一次问答', 'info')
+    return
+  }
+  // 以“被点击的这条 AI 回复”为锚点，从对话历史里挑真正的题目全文：
+  // ① 结构化题目卡(题干+选项) → ② 截图 OCR 全文(_curImgRead/imgNotes) → ③ 最近用户文字提问
+  const anchor = m ? store.msgs.indexOf(m) : n - 1
+  const src = pickWrongSource(store.msgs, anchor)
+  const qFull = String(src.q || '').trim()
+  const imgs = src.imgs || []
+  if (!qFull && !imgs.length) {
+    showToast('找不到题目内容：请粘贴题干文字，或先让 AI 识别截图里的题目', 'info')
+    return
+  }
+  const bk = detectBanKuai(qFull || lastAskText || '') || '判断推理'
+  bkPick.value = bk
+  bkOrigin.value = { q: qFull.slice(0, 3000), imgs, msgIdx: src.msgIdx >= 0 ? src.msgIdx : n - 1, source: src.source || '' }
+  bkShow.value = true
+}
+// ===== 选择题作答：点选选项 → 判对错 + 可存错题本 =====
+function pickQuiz(m, k) {
+  if (!m || !m.quiz || m.quiz.picked) return
+  m.quiz.picked = k
+  if (!m.quiz.answer) { m.quiz.correct = null; quizAiCheck(m); return }
+  m.quiz.correct = k === m.quiz.answer
+  const qz = m.quiz
+  const opts = (qz.options || []).map((o, i) => String(i === 0 ? 'A' : String.fromCharCode(64 + i + 1)) + '、' + String(o.t || o || '').replace(/<[^>]+>/g, ' ')).join('。')
+  store.readCtx = { type: 'chat', title: '对话出题·' + (detectBanKuai(String(qz.stem || '')) || '综合'), text: (String(qz.stem || '').replace(/<[^>]+>/g, ' ').trim() + '。' + (opts ? '选项：' + opts + '。' : '') + '你的答案：' + String(k) + '；正确答案：' + String(qz.answer || '') + '。' + (qz.explain ? '解析：' + String(qz.explain).replace(/<[^>]+>/g, ' ').trim() : '')).slice(0, 1400) }
+  store.curQ = { plate: detectBanKuai(String(qz.stem || '')) || '综合', kind: '对话出题', stem: qz.stem, options: qz.options || [], answer: qz.answer || '', explain: qz.explain || '', your: k, ok: qz.correct }
+  // 无论对错都确保有解析：有答案但没解析段的卡片，选中后即时补讲解（避免答对时看不到解析）
+  if (!qz.explain) ensureQuizExplain(m)
+  saveMsgs()
+  if (m.quiz.correct === null) { showToast('⏳ 已提交，正在让 AI 判题…', 'info'); return }
+  if (m.quiz.correct) showToast('✅ 回答正确，看解析巩固', 'success')
+  else {
+    showToast('❌ 选错了，正确答案是 ' + m.quiz.answer, 'error')
+    // 萌宠记忆库：标记该轮对话为错题，记录作答错误原因（供"批量加错题"指令检索）
+    markPetChatWrong(m.id, {
+      ask: lastAskText, bk: m.bk || '',
+      stem: qz.stem, options: qz.options, answer: qz.answer,
+      picked: k, correct: false, explain: qz.explain,
+      reason: '选择题作答失误：你选 ' + k + '，正确答案 ' + qz.answer
+    })
+  }
+}
+// 无答案出题卡：用户选后调 AI 判对错 + 补解析（"先选，选完弹解析"）
+async function quizAiCheck(m) {
+  if (!m || !m.quiz || m.quiz.checking) return
+  const c = activeCfg(false)
+  if (!c || !c.key) { showToast('请先在设置配置模型 API Key', 'error'); return }
+  m.quiz.checking = true
+  try {
+    const qz = m.quiz
+    const sys = '你是行测老师。请批改下面这道选择题：先给结论（对/错），再给完整解析（考点 + 正确思路 + 干扰项为什么错）。'
+    const prompt = '题目：' + qz.stem + '\n' + (qz.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n用户选择：' + qz.picked + '\n\n请严格按 JSON 输出，不要多余文字：{"answer":"正确选项字母(A-D)","verdict":"right|wrong","explain":"完整解析"}'
+    const reply = await chatOnce(c, [{ role: 'user', content: sys + '\n' + prompt }], 800, 30000)
+    // 答案抽取：① JSON 优先；② 多种自然语言格式兜底（正确选项是X/答案：X/选X/选项X）
+    let ans = ''
+    const rt = String(reply || '').trim()
+    try { const j = JSON.parse(rt.match(/\{[\s\S]*\}/)?.[0] || 'null'); if (j && /^[A-D]$/i.test(String(j.answer || ''))) ans = String(j.answer).toUpperCase() } catch (e) {}
+    if (!ans) {
+      const m2 = rt.match(/(?:正确选项|正确答案|答案|选|选择|选项)\s*[:：是]?\s*([A-D])\b/i) || rt.match(/\b([A-D])\s*(?:项)?\s*(?:正确|对)/i)
+      if (m2) ans = m2[1].toUpperCase()
+    }
+    qz.answer = ans
+    qz.correct = ans ? qz.picked === ans : false
+    qz.checkFailed = !ans
+    qz.aiChecked = !!ans
+    // 解析抽取：① JSON.explain 优先；② "解析：…" 段兜底；③ 退回原始判题回复
+    let exp = ''
+    try { const j = JSON.parse(rt.match(/\{[\s\S]*\}/)?.[0] || 'null'); if (j && j.explain) exp = String(j.explain).trim() } catch (e) {}
+    if (!exp) { const ei = rt.search(/解析\s*[:：]/); if (ei >= 0) exp = rt.slice(ei).replace(/^[\s\S]*?解析\s*[:：]/, '').trim() }
+    // 无论对错都保留解析：便于答对的用户也能回看讲解
+    qz.explain = (qz.explain ? qz.explain + '\n\n' : '') + (exp || ('🤖 判题：' + rt))
+    qz.checking = false
+    saveMsgs()
+    if (qz.correct) showToast('✅ 回答正确！(AI 已按解析核验)', 'success')
+    else if (ans) {
+      showToast('❌ 答错了，正确答案是 ' + ans + '(AI 已按解析核验)', 'error')
+      // 萌宠记忆库：标记该轮对话为错题，记录作答错误原因（AI 判题路径）
+      markPetChatWrong(m.id, {
+        ask: lastAskText, bk: m.bk || '',
+        stem: qz.stem, options: qz.options, answer: qz.answer,
+        picked: qz.picked, correct: false, explain: qz.explain,
+        reason: '选择题作答失误：你选 ' + qz.picked + '，正确答案 ' + qz.answer
+      })
+    }
+    else showToast('⚠️ 未取回答案，不显示猜测字母，请人工核对', 'error')
+  } catch (e) {
+    m.quiz.checking = false
+    showToast('AI 判题失败：' + (e && e.message), 'error')
+  }
+}
+// 有答案但无解析的题（如 AI 直接带了【正确答案】却没写解析段）：用户选中后（无论对错）即时补解析，
+// 确保答对的用户也能在题目卡片里看到完整讲解，而不是只有答错时才出现解析。
+async function ensureQuizExplain(m) {
+  if (!m || !m.quiz) return
+  const qz = m.quiz
+  if (qz.explain) return
+  const c = activeCfg(false)
+  if (!c || !c.key) return
+  qz.checking = true
+  try {
+    const sys = '你是行测老师。请针对下面这道选择题给出完整解析（考点 + 正确思路 + 各干扰项为什么错），不要重复题干与选项。'
+    const prompt = '题目：' + qz.stem + '\n' + (qz.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n正确答案：' + (qz.answer || '未知') + '\n\n请用一段连贯文字输出解析，不要多余格式。'
+    const reply = await chatOnce(c, [{ role: 'user', content: sys + '\n' + prompt }], 800, 30000)
+    const rt = String(reply || '').trim()
+    let exp = ''
+    const ei = rt.search(/解析\s*[:：]/)
+    if (ei >= 0) exp = rt.slice(ei).replace(/^[\s\S]*?解析\s*[:：]/, '').trim()
+    qz.explain = exp || rt
+  } catch (e) {
+    qz.explain = '（解析获取失败：' + (e && e.message) + '）'
+  } finally {
+    qz.checking = false
+    saveMsgs()
+  }
+}
+function saveQuizWrong(m) {
+  if (!m || !m.quiz) return
+  const qz = m.quiz
+  const stem = qz.stem
+  const subject = detectBanKuai(stem) || m.bk || '判断推理'
+  addWrong({
+    id: Date.now(),
+    subject,
+    question: stem + '\n\n' + qz.options.map((o) => o.k + '. ' + o.t).join('\n'),
+    answer: qz.answer ? '正确答案 ' + qz.answer : '',
+    your: qz.picked || '',
+    reasons: qz.picked && !qz.correct ? ['选择题作答失误'] : [],
+    time: new Date().toLocaleString(),
+    at: Date.now(),
+    wrongCount: 1,
+    correctStreak: 0,
+    mastery: 0,
+    digested: false
+  }, { allowNoAnswer: true })
+  saveWqs()
+}
+// ===== 萌宠指令：把"今天"对话里答错的题批量加入错题集（每条内嵌错因） =====
+function addTodaysWrongToWq() {
+  const todays = getTodaysPetChat().filter((e) => e.wrong && e.quiz && e.quiz.stem)
+  if (!todays.length) {
+    return { count: 0, msg: '🐾 今天还没记录到答错的题目呢～在对话里做完题、答错时我会自动记下来；到时候再跟我说这句，我把它们一次性收进错题集！' }
+  }
+  let added = 0, skipped = 0, failed = 0
+  for (const e of todays) {
+    const qz = e.quiz
+    const opts = (qz.options || []).map((o) => o.k + '. ' + o.t).join('\n')
+    const qText = String(qz.stem || '').trim() + (opts ? '\n\n' + opts : '')
+    const ansText = qz.answer ? '正确答案 ' + qz.answer : ''
+    const reason = e.reason || (qz.picked ? ('作答错误：你选 ' + qz.picked + (qz.answer ? ('，正确答案 ' + qz.answer) : '')) : '作答错误')
+    const askCtx = String(e.q || '').trim()
+    const reasons = [
+      reason,
+      askCtx ? ('提问经过：' + askCtx.slice(0, 140)) : '',
+      qz.picked ? ('你的答案：' + qz.picked + (qz.answer ? ('；正确答案：' + qz.answer) : '')) : ''
+    ].filter(Boolean)
+    const wq = {
+      id: Date.now() + '_' + Math.floor(Math.random() * 100000),
+      subject: detectBanKuai(String(qz.stem || '')) || e.bk || '判断推理',
+      question: qText,
+      answer: ansText,
+      your: qz.picked || '',
+      reasons,
+      note: reason,
+      time: new Date().toLocaleString(),
+      at: Date.now(),
+      wrongCount: 1,
+      correctStreak: 0,
+      mastery: 0,
+      digested: false
+    }
+    const r = addWrong(wq, { allowNoAnswer: true, chatWrong: true, silent: true })
+    if (r.ok && !r.dup) added++
+    else if (r.dup) skipped++
+    else failed++
+  }
+  let msg = '🐾 已从今天的对话里找出 ' + todays.length + ' 道错题，成功加入错题集 ' + added + ' 道'
+  if (skipped) msg += '（' + skipped + ' 道之前已在错题集，已自动跳过）'
+  if (failed) msg += '（' + failed + ' 道因内容不完整未能加入）'
+  msg += '。每条都内嵌了你的错因，去错题集复盘吧～'
+  return { count: added, msg }
+}
+// ===== ⛶ 全屏做题：对话出题卡片可弹出卷面化做题窗口（轻量即时判题，同一 m.quiz 对象状态自动同步） =====
+const quizFull = ref(null)
+function quizFullShow(m) {
+  if (!m || !m.quiz) return
+  quizFull.value = m
+}
+function quizFullClose() { quizFull.value = null }
+function quizFullDeep(m) {
+  if (!m || !m.quiz) return
+  quizFullClose()
+  quizDeep(m)
+}
+function quizPlate(m) {
+  const qz = m && m.quiz
+  if (!qz) return ''
+  return detectBanKuai(String(qz.stem || '')) || m.bk || ''
+}
+function quizHasSvg(m) {
+  const qz = m && m.quiz
+  return !!(qz && Array.isArray(qz.options) && qz.options.some((o) => /<svg/i.test(String(o.t || ''))))
+}
+// 答错后「加入错题集？(加入/忽略)」确认条
+function quizWrongAdd(m) {
+  if (!m || !m.quiz) return
+  m.quiz.wrongPrompted = true
+  saveQuizWrong(m)
+}
+function quizWrongIgnore(m) {
+  if (!m || !m.quiz) return
+  m.quiz.wrongPrompted = true
+  saveMsgs()
+}
+// 对话出题卡：完整题目 / 完整解析 截图导出
+function capQuizShot(m, kind) {
+  if (!m || !m.quiz) return
+  const qz = m.quiz
+  const stem = String(qz.stem || '')
+  const opts = (qz.options || []).map((o) => o.k + '. ' + (o.t || '')).join('\n\n')
+  const sub = (m.bk || '') + ' · 对话出题'
+  if (kind === 'q') {
+    downloadMdScreenshot({ title: '行测 · 题目截图', sub, md: stem + (opts ? '\n\n' + opts : ''), name: '对话题目截图' })
+  } else {
+    const parts = []
+    if (qz.picked) parts.push('**我的答案：**' + qz.picked)
+    if (qz.answer) parts.push('**正确答案：**' + qz.answer + (qz.correct != null ? (qz.correct ? '（✅ 正确）' : '（❌ 错误）') : ''))
+    if (qz.explain) parts.push(qz.explain)
+    downloadMdScreenshot({ title: '行测 · 题目解析', sub, md: parts.join('\n\n') || '（暂无解析）', name: '对话题目解析' })
+  }
+}
+// 截图题按钮化：📖 直接讲解（带原图重发，确保 AI 看得到题目）/ ✍️ 先做一遍（定位卡片）
+function quizExplainNow(m) {
+  const org = (m && m.orgImg && m.orgImg.length) ? m.orgImg.slice() : []
+  if (org.length) imgs.value = org
+  const cardTxt = m && typeof m.content === 'string' ? String(m.content).replace(/[#*`>|_]/g, '').replace(/\n+/g, ' ').slice(0, 500) : ''
+  text.value = cardTxt ? '请直接讲解这道题（题目内容已整理如下）：\n' + cardTxt : '直接讲解'
+  scroll()
+  send()
+}
+function quizScrollTo() {
+  scroll()
+  showToast('👆 在上方题目卡片直接点选项作答，做完自动判题+解析', 'info')
+}
+function textOf(m) {
+  return typeof m.content === 'string' ? m.content : (m.content && m.content.text) || ''
+}
+// 把聊天里的题目卡片发回对话，用名师方法深度讲解（结合用户作答情况）
+function quizDeep(m) {
+  if (!m || !m.quiz) return
+  const qz = m.quiz
+  const t =
+    '请用名师方法深度讲解这道题' +
+    (qz.picked ? '（我选了 ' + qz.picked + (qz.correct ? '，答对了' : '，答错了') + '）' : '') +
+    '：\n' + qz.stem + '\n' + qz.options.map((o) => o.k + '. ' + o.t).join('\n') +
+    '\n正确答案：' + qz.answer +
+    (qz.explain ? '\n原解析：' + qz.explain : '')
+  text.value = t
+  scroll()
+  send()
+}
+// 存错题板块选择器
+const bkShow = ref(false)
+const examShow = ref(false) // 统一：模拟组卷
+const examPanelSrc = ref('ai') // ai=AI出题 / import=导入 / wrong=错题
+const examOffline = ref(false) // 离线练习：打开单题快练并默认启用本地生成器
+const examPaperData = ref(null) // 外部传入待重做/查看的卷子
+function openExam(src) {
+  examPanelSrc.value = src || 'ai'
+  examShow.value = true
+  store.examOpen = true
+  store.uiCtx.panel = 'exam'
+  const EXAM_LABEL = { single: '⚡ 单题快练', ai: '🎲 AI 整卷出题', import: '📂 导入材料', wrong: '📚 错题集组卷', zhenti: '📋 真题快练', morning: '🌅 晨练包', weekRedo: '📅 每周重做', anchor: '📐 锚点自测' }
+  navOpen({ id: 'exam', label: EXAM_LABEL[src] || '统一考场' })
+}
+function closeExam() {
+  examShow.value = false
+  store.examOpen = false
+  store.uiCtx.panel = null
+  examPaperData.value = null
+  navBack()
+}
+// 35号批次4-B(2/2)：锚点自测——需累计 ≥100 次作答解锁（doc35 §3.2 冷启动门槛）
+function openAnchor() {
+  const g = gateNow().gate
+  if (!g.anchorReady) {
+    showToast('📐 锚点自测需累计作答 ' + g.total + '/100 题后解锁（锚点是固定真题，用来绝对校准能力值，样本太少没意义）', 'info')
+    return
+  }
+  openExam('anchor')
+}
+function openPaperData(paper) {
+  examPaperData.value = paper || null
+  examPanelSrc.value = 'ai'
+  examShow.value = true
+  store.examOpen = true
+  navOpen({ id: 'exam', label: (paper && paper.name) ? paper.name : '模拟组卷' })
+}
+function openSolid() {
+  collapseTools()
+  solidShow.value = true
+  store.uiCtx.panel = 'solid'
+  navOpen({ id: 'solid', label: '立体图推' })
+}
+function closeSolid() {
+  solidShow.value = false
+  store.uiCtx.panel = null
+  navBack()
+}
+function openDataTrain() {
+  collapseTools()
+  dtShow.value = true
+  store.uiCtx.panel = 'data'
+  navOpen({ id: 'data', label: '资料速算' })
+}
+function closeDataTrain() {
+  dtShow.value = false
+  store.uiCtx.panel = null
+  navBack()
+}
+function onNavBack(e) {
+  const ids = (e && e.detail) || []
+  if (ids.includes('exam')) { examShow.value = false; store.examOpen = false; store.uiCtx.panel = null }
+  if (ids.includes('solid')) { solidShow.value = false; store.uiCtx.panel = null }
+  if (ids.includes('data')) { dtShow.value = false; store.uiCtx.panel = null }
+}
+const solidShow = ref(false) // 立体图推训练
+const dtShow = ref(false) // 资料分析四层能力训练
+const bkPick = ref('逻辑判断与推理') // v3.8.210 默认大板块全称
+const bkOrigin = ref({ q: '', imgs: [], msgIdx: -1 })
+const BK_OPTIONS = ['逻辑判断与推理', '言语理解与表达', '资料分析', '数量关系', '常识判断', '政治理论'] // v3.8.210 板块=六大组全称（杜绝 组/细分 混选歧义）
+// 压缩图片：存错题时用缩略图控制 localStorage 体积（最长边 max 像素）
+function compressImage(dataUrl, max = 760, quality = 0.72) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > height && width > max) {
+        height = Math.round((height * max) / width)
+        width = max
+      } else if (height > max) {
+        width = Math.round((width * max) / height)
+        height = max
+      }
+      const c = document.createElement('canvas')
+      c.width = width
+      c.height = height
+      const g = c.getContext('2d')
+      g.drawImage(img, 0, 0, width, height)
+      try {
+        resolve(c.toDataURL('image/jpeg', quality))
+      } catch (e) {
+        resolve(dataUrl)
+      }
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+async function confirmSaveWrong() {
+  // 压缩原题截图后存入错题本（避免 localStorage 超限）
+  const raw = bkOrigin.value.imgs || []
+  const imgs = []
+  for (const it of raw) imgs.push(it.startsWith('data:') ? await compressImage(it) : it)
+  const qRaw = (bkOrigin.value.q || '').trim()
+  const q = (qRaw || (imgs.length ? '（截图题目，见下方原图；建议配置可识图模型或图形增强以自动识别文字）' : '')).slice(0, 3000)
+  addWrong({
+    id: Date.now(),
+    subject: bkPick.value,
+    question: q,
+    imgs,
+    msgIdx: bkOrigin.value.msgIdx,
+    reasons: [],
+    time: new Date().toLocaleString(),
+    at: Date.now(),
+    wrongCount: 1,
+    correctStreak: 0,
+    mastery: 0,
+    digested: false
+  })
+  saveWqs()
+  bkShow.value = false
+}
+function getLastUserText() {
+  const c = collectChat()
+  let x = null
+  for (let i = c.length - 1; i >= 0; i--) {
+    if (c[i].role === 'user') {
+      x = c[i].text
+      break
+    }
+  }
+  return x || ''
+}
+// 找"最近一轮 AI 出题消息"（含 A/B/C/D 选项），作为变式题的完整原题上下文。
+// 修复：此前取 getLastUserText()，用户在选择题点选后最后一条用户消息只是选项字母（如"C"），
+// 导致变式题发给 AI 的是残缺文本、无法出题。
+function getLastQuizText() {
+  const quizRe = /^\s*[A-D][.、．:：]/m
+  for (let i = store.msgs.length - 1; i >= 0; i--) {
+    const m = store.msgs[i]
+    if (!m || m.role !== 'assistant' || m.err || m.stopped || m.live) continue
+    const t = textOf(m)
+    if (!t) continue
+    const hasOptions = (m.quiz && Array.isArray(m.quiz.options) && m.quiz.options.length >= 2) || quizRe.test(t)
+    if (hasOptions) return t.slice(0, 1600)
+  }
+  return ''
+}
+// 变式题：记录当前打开难度菜单的消息（关闭其他）；确保点哪道题的「变式题」就出哪道题的变式
+const variantMenu = ref(null)
+// 还原某条消息对应的完整题目文本（优先用 quiz 结构化字段，含答案/解析，便于 AI 出同考点变式）
+function quizFullText(m) {
+  if (!m) return ''
+  if (m.quiz && (m.quiz.stem || (Array.isArray(m.quiz.options) && m.quiz.options.length))) {
+    const qz = m.quiz
+    let s = String(qz.stem || '')
+    if (Array.isArray(qz.options)) s += '\n' + qz.options.map((o) => (o.k || '') + '. ' + (o.t || '')).join('\n')
+    if (qz.answer) s += '\n【正确答案】' + qz.answer
+    if (qz.explain) s += '\n解析：' + qz.explain
+    return s.slice(0, 1600)
+  }
+  return textOf(m).slice(0, 1600)
+}
+// 出指定难度的变式题：变式题消息记 variantPrev，使「再出变式」始终基于同一道原题
+function doVariant(m, diff) {
+  variantMenu.value = null
+  const prev = m && m.variantPrev ? m.variantPrev : quizFullText(m)
+  train('variant', { prev, difficulty: diff })
+}
+// 主动展示解析：缺解析则即时补取，再提示位置（满足"未给解析时主动询问用户是否查看"）
+function showVariantExplain(m) {
+  if (!m || !m.quiz) return
+  if (!m.quiz.explain) { ensureQuizExplain(m); showToast('🔍 正在为你调取本题解析…', 'info') }
+  else showToast('📖 本题解析已在题目卡片下方', 'info')
+  scroll()
+}
+// 聚焦输入框，便于用户提出新问题
+function focusInput() {
+  scroll()
+  const tb = document.querySelector('.input-bar textarea')
+  if (tb) tb.focus()
+}
+const trainPlate = ref('判断推理')
+const plates = Object.keys(PLATE_MODE)
+const modeHint = {
+  all: '输入题目或问题，或直接提问某个知识点',
+  luoji: '请教一道论证/形式逻辑题，我用薛睿五步法给你讲',
+  yanyu: '把文段粘贴进来，三师帮你找准主旨',
+  tutu: '上传图推截图，我按薛睿24诀帮你找规律',
+  ziliao: '粘贴资料材料+问题，我帮你列公式并速算',
+  shuliang: '发一道数量题，我教你可秒杀的思路',
+  zhengzhi: '问政治理论考点，小黑口诀帮你记',
+  changshi: '问一道常识题，我给你考点和蒙题思路',
+  leibi: '发一个类比题，用三步定位法帮你拆',
+  dingyi: '发一道定义判断，我按五要件帮你核对'
+}
+const inputPh = computed(() => modeHint[store.mode] || '输入题目或问题… (可语音/传图)')
+const dStat = computed(() => ({
+  q: store.msgs.filter((m) => m.role === 'user').length,
+  w: store.wqs.length,
+  r: store.wqs.filter((v) => v.reviewed).length
+}))
+const motos = [
+  '日拱一卒，功不唐捐',
+  '把错题当补药，吃一颗涨一分',
+  '你不是不会，只是还差一次次复盘',
+  '稳定发挥 = 会的都对、错的不再错',
+  '今日刷题，明日上岸',
+  '方法对了，努力才有价值'
+]
+const motto = ref(motos[Math.floor(Math.random() * motos.length)])
+function collectStat() {
+  const bc = {}
+  collectChat().forEach((m) => {
+    if (m.role !== 'user') return
+    const t = m.text || ''
+    if (!t) return
+    const bk = detectBanKuai(t) || '综合'
+    bc[bk] = bc[bk] + 1 || 1
+  })
+  const wqBy = {},
+    rs = {}
+  ;(store.wqs || []).forEach((q) => {
+    wqBy[q.subject || '未分类'] = wqBy[q.subject || '未分类'] + 1 || 1
+    ;(q.reasons || []).forEach((r) => (rs[r] = rs[r] + 1 || 1))
+  })
+  return (
+    '各板块提问次数：' +
+    Object.entries(bc)
+      .map(([k, v]) => k + ' ' + v + '次')
+      .join('、') +
+    '\n各板块错题数：' +
+    Object.entries(wqBy)
+      .map(([k, v]) => k + ' ' + v + '题')
+      .join('、') +
+    '\n错因分布：' +
+    Object.entries(rs)
+      .map(([k, v]) => k + '×' + v)
+      .join('、') +
+    '\n已复盘/总错题：' +
+    store.wqs.filter((q) => q.reviewed).length +
+    '/' +
+    store.wqs.length
+  )
+}
+// 有序生成保护：变式/出题流式阶段只展示「题目」部分（题干+选项），
+// 答案【正确答案】X 与 答案解析/考点/秒杀规律 等一律等到用户作答后才揭晓，
+// 避免生成过程中提前泄漏解析，确保用户始终「先看到题、后看到解析」。
+const QUIZ_ANALYSIS_MARK =
+  /【正确答案】|【答案】|#{1,6}\s*✅\s*答案解析|#{1,6}\s*答案解析|#{1,6}\s*解析|#{1,6}\s*🎯\s*考点|#{1,6}\s*⚡\s*秒杀规律|#{1,6}\s*📊\s*难度自评|#{1,6}\s*🧠\s*命题人设计说明/i
+function quizHideAnalysis(text) {
+  const s = String(text || '')
+  const idx = s.search(QUIZ_ANALYSIS_MARK)
+  if (idx < 0) return s
+  return s.slice(0, idx).replace(/\s+$/g, '')
+}
+function isQuizStream(kind) {
+  return kind === 'variant' || kind === 'quiz'
+}
+
+async function train(kind, opts = {}) {
+  const c = activeCfg(false)
+  if (!c || !c.key) {
+    showToast('请先在设置配置文字模型 API Key', 'error')
+    return
+  }
+  if (store.busy) return
+  const sys = buildTaskSys(kind, opts)
+  let userText
+  if (kind === 'quiz') userText = '请为【' + (opts.plate || '所选板块') + '】出一道仿真模拟题。'
+  else if (kind === 'variant') {
+    const diffMap = {
+      easy: '简单（仅做基础素材替换：换数字/换主体/换场景，陷阱设计与原题一致，降低迷惑度）',
+      hard: '困难（加大命题陷阱：复合变形、增设强干扰项、提高迷惑度，接近真题难题水准）'
+    }
+    const diffReq =
+      opts.difficulty === 'easy' || opts.difficulty === 'hard'
+        ? '\n本次变式难度要求：' + diffMap[opts.difficulty] + '。'
+        : '\n本次变式难度要求：中等（常规变形：题干素材全新，保持原题考点与陷阱设计）。'
+    userText =
+      '请针对我刚才问的那道题，出一道【考点题型完全相同、题干素材全新】的变式检验题。' +
+      diffReq +
+      '\n原题：' +
+      String(opts.prev || getLastQuizText() || getLastUserText()).slice(0, 1500)
+  } else if (kind === 'diag') {
+    userText = '我的学习数据如下，请诊断：\n' + collectStat()
+  } else return
+  const userMsg = { role: 'user', content: userText }
+  addMsg(userMsg) // 经 addMsg 统一处理（含考场倒计时启动）
+  live.value = { text: '', think: '', thinkOpen: false }
+  store.busy = true
+  abortCtrl = new AbortController()
+  scroll()
+  try {
+    const full = await chatStream(
+      [
+        { role: 'system', content: sys },
+        { role: 'user', content: userText }
+      ],
+      c,
+      (d) => {
+        if (d.type === 'think') {
+          live.value.think = d.think
+        } else {
+          // 变式/出题：流式预览只给「题目」，解析在用户作答后揭晓
+          live.value.text = isQuizStream(kind) ? quizHideAnalysis(d.text) : d.text
+        }
+        scrollThrottled()
+      },
+      abortCtrl.signal
+    )
+    live.value = null
+    addMsg({ role: 'assistant', content: full })
+    if (kind === 'variant') { const vm = store.msgs[store.msgs.length - 1]; if (vm) vm.variantPrev = String(opts.prev || '').slice(0, 1600) }
+    if (store.cfg.ttsOn) autoSpeak(full)
+  } catch (e) {
+    live.value = null
+    if (e.name === 'AbortError') {
+      addMsg({ role: 'assistant', content: '⏹ 已停止生成。', stopped: true })
+    } else {
+      addMsg({ role: 'assistant', content: '❌ 生成失败：' + e.message })
+    }
+  }
+  abortCtrl = null
+  store.busy = false
+}
+// 找出薄弱板块：错题最多的分类
+function findWeakPlate() {
+  const cnt = {}
+  store.wqs.forEach((q) => {
+    const k = detectBanKuai(q.subject || '')
+    if (k) cnt[k] = (cnt[k] || 0) + 1
+  })
+  let best = null
+  for (const k in cnt) if (cnt[k] > 0 && (!best || cnt[k] > best.n)) best = { k, n: cnt[k] }
+  return best ? { plate: best.k, count: best.n, mode: PLATE_MODE[best.k] } : null
+}
+function trainWeak() {
+  const w = findWeakPlate()
+  if (!w) {
+    showToast('暂无错题，先做一些题吧', 'info')
+    return
+  }
+  showToast('正在针对薄弱板块「' + w.plate + '」出题…', 'info')
+  train('quiz', { plate: w.plate, mode: w.mode, difficulty: 'mid' })
+}
+function autoSpeak(t) {
+  if (store.cfg.ttsOn !== false && t)
+    speak(String(t).replace(/[#*`>|_]/g, ''), {
+      scene: store.cfg.ttsScene,
+      rate: store.cfg.ttsRate,
+      pitch: store.cfg.ttsPitch
+    })
+}
+function toggleTts() {
+  store.cfg.ttsOn = store.cfg.ttsOn === false
+  saveCfg()
+  if (store.cfg.ttsOn === false) stopSpeak()
+  showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
+}
+// v3.8.88：手动「🔊 朗读消息」时若启用语音阅读大模型 → 先改口语讲稿再朗读；否则原文直读
+function speakMsgTxt(txt, onEnd) {
+  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, onEnd }
+  const rd = store.cfg && store.cfg.rd
+  if (rd && rd.on && rd.key && rd.url && rd.model) {
+    speakReadyText(txt)
+      .then((t) => speak(t && t.length ? t : txt, base))
+      .catch(() => speak(txt, base))
+  } else {
+    speak(txt, base)
+  }
+}
+function toggleSpeak(ev) {
+  const btn = ev.currentTarget
+  const msg = btn.closest('.msg')
+  if (!msg) return
+  if (speaking()) {
+    stopSpeak()
+    btn.textContent = '🔊 朗读'
+    return
+  }
+  const c = msg.cloneNode(true)
+  // 只朗读「回复正文」：移除功能按钮行 / 元信息标签（AI批改·时间·板块）/ 折叠按钮 / 图形头部与加载失败提示 / 思考过程
+  ;['.msg-actions', '.ans-tag', '.fold-btn', '.fig-hd', '.fig-busy', '.fig-fail', '.quiz-acts', '.think-box', '.code-copy'].forEach((sel) => {
+    c.querySelectorAll(sel).forEach((el) => el.remove())
+  })
+  const txt = c.innerText || ''
+  btn.textContent = txt && store.cfg.rd && store.cfg.rd.on ? '⏳ 准备讲稿…' : '🔇 停止'
+  speakMsgTxt(txt, () => {
+    btn.textContent = '🔊 朗读'
+  })
+}
+function toggleMic() {
+  const ok = startRecog((t) => {
+    text.value += t
+    scroll()
+  })
+  if (!ok) {
+    showToast('当前浏览器不支持语音输入（请用Chrome/Edge）', 'error')
+    return
+  }
+  recogOn.value = recogActive()
+}
+const modeOpen = ref(false)
+// 模式分组（用于顶部紧凑选择器）
+const MODE_GROUPS = [
+  { k: 'all', t: '🌟 综合模式', items: ['all'] },
+  { k: 'pd', t: '🧠 判断推理', items: ['luoji', 'leibi', 'dingyi', 'tutu'] },
+  { k: 'yy', t: '📖 言语理解', items: ['zhanggong', 'yanyu'] },
+  { k: 'zl', t: '📈 资料 / 数量', items: ['ziliao', 'shuliang'] },
+  { k: 'cs', t: '🏛️ 常识 / 政治', items: ['zhengzhi', 'changshi'] }
+]
+function modeIcon(m) {
+  return String(MODE_NAMES[m] || '🧭').split(/[\s·]/)[0] || '🧭'
+}
+function modeName(m) {
+  // 去掉名称前的 emoji，图标单独展示，避免重复
+  return String(MODE_NAMES[m] || m).replace(/^\S+\s*/, '')
+}
+function setMode(m) {
+  store.mode = m
+  localStorage.setItem('xc_mode', m)
+}
+const quickCards = [
+  { ic: '🧠', t: '逻辑判断', s: '薛睿五步法', bg: 'a', mode: 'luoji', q: '讲解论点削弱/支持的五步分析和拆桥论证' },
+  { ic: '📖', t: '言语理解', s: '三师片段', bg: 'g', mode: 'yanyu', q: '分析这段文字的意图（附上题干即可）' },
+  { ic: '🔷', t: '图形推理', s: '图推 24 诀', bg: 'b', mode: 'tutu', q: '这道图推题怎么找规律（上传图片）' },
+  { ic: '📊', t: '资料分析', s: '四大神器', bg: 'y', mode: 'ziliao', q: '基期比重公式是什么，何时用' },
+  { ic: '🏛️', t: '政治理论', s: '小黑口诀', bg: 'p', mode: 'zhengzhi', q: '新思想五大新发展理念和口诀' },
+  { ic: '🔢', t: '数量关系', s: '四层金字塔', bg: 'r', mode: 'shuliang', q: '工程问题设最小公倍数的秒杀法' },
+  { ic: '🧊', t: '立体图推', s: '空间重构训练', bg: 'c', mode: 'luoji', q: '空间重构/立体图形的三视图怎么快速判断？请讲方法' },
+  { ic: '✍️', t: '出题考我', s: '打开单题快练', bg: 'g', act: 'single' },
+  { ic: '🎯', t: '考点总结', s: '高频考点', bg: 'y', mode: 'all', q: '行测判断推理模块有哪些高频考点？请按考频排序总结' },
+  { ic: '⚡', t: '秒杀技巧', s: '快解套路', bg: 'b', mode: 'all', q: '资料分析有哪些秒杀速算技巧？举例说明' },
+  { ic: '📝', t: '错题诊断', s: '错因分析', bg: 'p', mode: 'all', q: '请分析我最近的错题，指出共性错因和改进方法' }
+]
+// 立体图推 → 发到主对话继续深挖
+function onSolidQuestion(q) {
+  const t = String(q || '').trim()
+  if (!t) return
+  text.value = t
+  scroll()
+  send()
+}
+// ===== 提问历史（最近提问，点击快速重发）=====
+const recentQs = ref([])
+try { recentQs.value = JSON.parse(localStorage.getItem('xc_recent_qs') || '[]') || [] } catch (e) {}
+function pushRecent(t) {
+  const k = String(t || '').trim()
+  if (!k || k.length < 4) return
+  recentQs.value = [k, ...recentQs.value.filter((x) => x !== k)].slice(0, 8)
+  try { localStorage.setItem('xc_recent_qs', JSON.stringify(recentQs.value)) } catch (e) {}
+}
+function useRecent(t) {
+  text.value = t
+  scroll()
+  send()
+}
+// ===== 草稿自动保存 =====
+let draftTimer = null
+watch(text, (v) => {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(() => {
+    try { localStorage.setItem('xc_chat_draft', String(v || '')) } catch (e) {}
+  }, 600)
+})
+function restoreDraft() {
+  try {
+    const d = localStorage.getItem('xc_chat_draft')
+    if (d && !text.value) { text.value = d; localStorage.removeItem('xc_chat_draft') }
+  } catch (e) {}
+}
+// ===== 回复反馈 / 追问 / 收藏 =====
+function toggleFb(m, v) {
+  if (!m) return
+  m.fb = m.fb === v ? '' : v
+  saveMsgs()
+  showToast(m.fb ? (v === 1 ? '👍 已标记有用' : '👎 已标记待改进') : '已取消标记', 'info')
+}
+function followUp(m) {
+  const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
+  const brief = String(t).replace(/[#*`>|_]/g, '').slice(0, 200)
+  text.value = '请基于你刚才的讲解（' + brief + '…）继续深入：'
+  scroll()
+  const tb = document.querySelector('.input-bar textarea')
+  if (tb) tb.focus()
+}
+function collectMsg(m) {
+  const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
+  if (!t) { showToast('没有可收藏的内容', 'info'); return }
+  const title = String(t).replace(/[#*`>|_]/g, '').slice(0, 24) + '…'
+  store.notes.unshift({ title: '📌 ' + title, body: t, t: new Date().toLocaleString() })
+  saveNotes()
+  showToast('✅ 已收藏到我的笔记', 'success')
+}
+// 长回复折叠
+const expanded = ref({})
+function toggleExpand(i) { expanded.value[i] = !expanded.value[i] }
+// 板块归属修正：点击消息板块标签 → 弹出九板块选择 → 回写 m.bk（历史消息与统计归属同步修正）
+function fixPlate(m, _ev) {
+  m.bkEditing = !m.bkEditing
+  saveMsgs()
+}
+function applyPlate(m, bp) {
+  m.bk = bp
+  m.bkEditing = false
+  saveMsgs()
+  showToast('📐 板块归属已修正为「' + bp + '」，统计同步更新', 'success')
+}
+function isLong(t) { return String(t || '').length > 700 }
+function askQuick(c) {
+  if (c.act === 'single') {
+    // 出题考我：统一进「单题快练」面板，板块/子题型/难度/组量都在那里选（与组卷设置一致，不重复）
+    openExam('single')
+    return
+  }
+  store.mode = c.mode
+  text.value = c.q
+  scroll()
+  const tb = document.querySelector('.input-bar textarea')
+  if (tb) tb.focus()
+}
+// 图片预览：全屏遮罩 + 可下载原图
+const imgView = ref(null)
+function viewImg(src) {
+  imgView.value = src
+}
+function closeImg() {
+  imgView.value = null
+}
+// ===== 回复内 SVG 图 / ECharts 图表 统一灯箱（放大 / 保存 / 关闭）=====
+const svgBox = ref(null) // { type:'svg'|'chart', html }
+function openSvgBox(type, html) {
+  if (!html) return
+  svgBox.value = { type, html }
+}
+function closeSvgBox() { svgBox.value = null }
+function saveSvgBox() {
+  const b = svgBox.value
+  if (!b) return
+  if (b.type === 'svg') {
+    figSave({ svg: b.html }) // 复用复刻图保存：SVG→PNG
+  } else {
+    // ECharts 图表：用 echarts 实例导出 PNG
+    try {
+      const el = document.querySelector('.gen-chart[data-echarts]')
+      const inst = el && window.echarts ? window.echarts.getInstanceByDom(el) : null
+      if (inst && inst.getDataURL) {
+        const a = document.createElement('a')
+        a.href = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' })
+        a.download = '统计图.png'
+        document.body.appendChild(a); a.click(); a.remove()
+        return
+      }
+    } catch (e) {}
+    showToast('该图表暂不支持保存（可截图保存）', 'info')
+  }
+}
+// 点击消息里的 SVG / ECharts → 打开灯箱（内容为 v-html，用事件委托）
+function onMsgFigClick(ev) {
+  const svg = ev.target && ev.target.closest ? ev.target.closest('.gen-svg svg') : null
+  const chart = ev.target && ev.target.closest ? ev.target.closest('.gen-chart') : null
+  if (svg) { openSvgBox('svg', svg.outerHTML); return }
+  if (chart && chart.getAttribute('data-echarts')) { openSvgBox('chart', chart.outerHTML) }
+}
+function downloadImg() {
+  const src = imgView.value
+  if (!src) return
+  try {
+    if (src.startsWith('data:')) {
+      const a = document.createElement('a')
+      a.href = src
+      a.download = '题目图片_' + Date.now() + '.png'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      showToast('✅ 已开始下载原图', 'success')
+    } else {
+      fetch(src)
+        .then((r) => {
+          if (!r.ok) throw new Error('HTTP ' + r.status)
+          return r.blob()
+        })
+        .then((blob) => {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = '题目图片_' + Date.now() + '.png'
+          document.body.appendChild(a)
+          a.click()
+          a.remove()
+          URL.revokeObjectURL(url)
+          showToast('✅ 已下载/打开原图', 'success')
+        })
+        .catch(() => {
+          // 下载受限时改用新窗口打开
+          window.open(src, '_blank')
+        })
+    }
+  } catch (e) {
+    showToast('下载失败：' + e.message, 'error')
+  }
+}
+function onAsk(e) {
+  text.value = e.detail || ''
+  scroll()
+}
+// 定位到某条消息（从错题跳回原对话）
+const hlIdx = ref(-1)
+let hlTimer = null
+function onGotoMsg(e) {
+  const idx = Number(e.detail)
+  if (idx < 0 || idx >= store.msgs.length) return
+  hlIdx.value = idx
+  if (hlTimer) clearTimeout(hlTimer)
+  setTimeout(() => {
+    hlTimer = null
+    const el = msgsBox.value && msgsBox.value.querySelector('.msg[data-i="' + idx + '"]')
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('hl')
+      setTimeout(() => el.classList.remove('hl'), 2000)
+    }
+  }, 120)
+}
+// ===== 消息文字选区工具栏：选中后弹出 复制/全选/复制全文 =====
+const selBar = ref({ show: false, x: 0, y: 0, msgIdx: -1 })
+let selTimer = null
+function updateSelBar() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) { selBar.value.show = false; return }
+  const node = sel.anchorNode
+  // 兼容 anchor 是文本节点或元素节点两种情况
+  const msgEl =
+    node && node.nodeType === 1
+      ? node.closest('.msg')
+      : node && node.parentElement
+        ? node.parentElement.closest('.msg')
+        : null
+  if (!msgEl) { selBar.value.show = false; return }
+  const r = sel.getRangeAt(0).getBoundingClientRect()
+  selBar.value = { show: true, x: Math.max(60, Math.min(window.innerWidth - 60, r.left + r.width / 2)), y: Math.max(90, r.top - 8), msgIdx: Number(msgEl.dataset.i) }
+}
+function onDocMouseUp() { if (selTimer) clearTimeout(selTimer); selTimer = setTimeout(updateSelBar, 10) }
+function onSelChange() { if (selTimer) clearTimeout(selTimer); selTimer = setTimeout(updateSelBar, 80) }
+function hideSelBar() { selBar.value.show = false }
+function selMsg() {
+  return store.msgs[selBar.value.msgIdx] || null
+}
+async function copySelected() {
+  const t = window.getSelection() ? window.getSelection().toString() : ''
+  if (!t) return
+  const ok = await setClipboard(t)
+  showToast(ok ? '✅ 已复制选中内容' : '复制失败', ok ? 'success' : 'error')
+  hideSelBar()
+}
+function selectAllMsg() {
+  const m = selMsg()
+  if (!m) return
+  const el = msgsBox.value && msgsBox.value.querySelector('.msg[data-i="' + selBar.value.msgIdx + '"]')
+  if (!el) return
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel.removeAllRanges()
+  sel.addRange(range)
+  selBar.value = { show: true, x: selBar.value.x, y: selBar.value.y, msgIdx: selBar.value.msgIdx }
+}
+async function copyFullMsg() {
+  const m = selMsg()
+  if (!m) return
+  const ok = await setClipboard(textOf(m))
+  showToast(ok ? '✅ 已复制整条消息' : '复制失败', ok ? 'success' : 'error')
+  hideSelBar()
+}
+
+// ===== 知识库/看板/复盘 → 对话页 联动：pendingAsk 预填输入框（可见可改，一键发送） =====
+// 之前是 onMounted 里 onAsk 自动发送：但页面用 .pg.on 切换、ChatPage 常驻挂载，onMounted 不再触发，
+// 导致点「问 AI」跳回来输入框空白、用户还要重新写。改为 watch 预填 + 聚焦，用户点发送即问。
+function fillPendingAsk() {
+  if (!store.pendingAsk) return
+  const t = String(store.pendingAsk)
+  store.pendingAsk = ''
+  if (!t) return
+  text.value = t
+  scroll()
+  nextTick(() => {
+    const tb = document.querySelector('.input-bar textarea')
+    if (tb) tb.focus()
+  })
+  showToast('📋 已按该知识卡预填提问，可直接发送（也可先修改）', 'info')
+}
+watch(() => store.pendingAsk, fillPendingAsk)
+watch(() => store.pendingOpenPaper, (p) => { if (!p) return; const saved = p; store.pendingOpenPaper = null; openPaperData(saved) })
+
+onMounted(() => {
+  restoreDraft(); hydrateQuizCards()
+  evOn('xc-ask', onAsk)
+  fillPendingAsk() // 启动兜底：若挂载前已设置 pendingAsk 也预填
+})
+onMounted(() => document.addEventListener('click', onMsgFigClick))
+onUnmounted(() => document.removeEventListener('click', onMsgFigClick))
+function onOpenExam() { openExam('ai') }
+function onOpenPaperData(e) { openPaperData(e && e.detail) }
+function onModePickOutside(e) { if (modeOpen.value && !(e.target && e.target.closest && e.target.closest('.mode-pick'))) modeOpen.value = false }
+function onOpenPaper() { openExam('import') }
+onMounted(() => {
+  evOn('xc-open-exam', onOpenExam)
+  evOn('xc-open-paper-data', onOpenPaperData)
+  document.addEventListener('click', onModePickOutside)
+  evOn('xc-open-paper', onOpenPaper)
+})
+onUnmounted(() => evOff('xc-ask', onAsk))
+onUnmounted(() => {
+  window.removeEventListener('resize', clampBl)
+  evOff('xc-open-exam', onOpenExam)
+  evOff('xc-open-paper-data', onOpenPaperData)
+  document.removeEventListener('click', onModePickOutside)
+  evOff('xc-open-paper', onOpenPaper)
+})
+onMounted(() => window.addEventListener('app:nav-back', onNavBack))
+onUnmounted(() => window.removeEventListener('app:nav-back', onNavBack))
+onMounted(() => document.addEventListener('mouseup', onDocMouseUp))
+onMounted(() => document.addEventListener('selectionchange', onSelChange))
+onUnmounted(() => document.removeEventListener('mouseup', onDocMouseUp))
+onUnmounted(() => document.removeEventListener('selectionchange', onSelChange))
+
+onMounted(() => evOn('xc-goto-msg', onGotoMsg))
+onUnmounted(() => evOff('xc-goto-msg', onGotoMsg))
+
+// ===== 代码块复制（事件委托）=====
+async function copyRaw(text) {
+  await setClipboard(text)
+}
+function flashBtn(btn, doneText = '✅ 已复制') {
+  const old = btn.textContent
+  btn.textContent = doneText
+  btn.classList.add('done')
+  setTimeout(() => {
+    btn.textContent = old
+    btn.classList.remove('done')
+  }, 1500)
+}
+async function copyCode(btn) {
+  const wrap = btn.closest('.code-wrap')
+  if (!wrap) return
+  const pre = wrap.querySelector('pre')
+  if (!pre) return
+  const text = pre.innerText || ''
+  await copyRaw(text)
+  flashBtn(btn)
+}
+async function copyMsg(ev) {
+  const btn = ev.currentTarget
+  const msg = btn && btn.closest('.msg')
+  const text = msg.innerText || ''
+  await copyRaw(text)
+  flashBtn(btn)
+}
+function onDocClick(ev) {
+  const btn = ev.target.closest && ev.target.closest('.code-copy')
+  if (btn) copyCode(btn)
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onMounted(() => window.addEventListener('resize', onToolsResize))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+onUnmounted(() => window.removeEventListener('resize', onToolsResize))
+defineEmits(['export-review'])
+
+// v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
+const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, sendGuard, askWarn, _askT, reAnalyze, confirmPlate, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, applyChip, enhanceAskBtn, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, gotoFix, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+
+</script>
+<template>
+  <div class="page on" style="display: flex; flex-direction: column; height: 100%">
+    <div class="page-inner" style="display: flex; flex-direction: column; flex: 1; min-height: 0">
+    <ChatTools :ctx="fpctx" />
+    <ChatMsgs :ctx="fpctx" />
+      <div v-if="imgs.length" class="img-strip">
+        <div v-for="(im, i) in imgs" :key="i" class="img-thumb">
+          <img :src="im" @click="viewImg(im)" />
+          <button class="x" @click="rmImg(i)">×</button>
+        </div>
+      </div>
+      <div v-if="linkShow" style="padding: 0 14px 6px">
+        <input
+          v-model="linkUrl"
+          placeholder="粘贴图片链接，如 https://.../题目.png"
+          style="
+            flex: 1;
+            padding: 8px 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: var(--card);
+            color: var(--text);
+            font-size: 13px;
+          "
+        />
+        <button class="btn btn-pri" style="margin-top: 6px" @click="addImageUrl()">添加该图片</button>
+      </div>
+      <div v-if="recentQs.length" class="recent-bar">
+        <span class="rb-t">🕘</span>
+        <div class="rb-list">
+          <button v-for="(rq, ri) in recentQs.slice(0, 6)" :key="ri" class="rb-chip" :title="rq" @click="useRecent(rq)">{{ rq.slice(0, 18) }}</button>
+        </div>
+        <button class="rb-clear" title="清空提问历史" @click="recentQs = []; try{localStorage.removeItem('xc_recent_qs')}catch(e){}">✕</button>
+      </div>
+    <ChatComposer :ctx="fpctx" />
+    </div>
+  </div>
+  <!-- 对话使用说明书弹窗 -->
+  <div v-if="guideShow" class="ov show guide-ov" @click.self="guideShow = false">
+    <div class="pnl guide-pnl">
+      <div class="pnl-top">
+        <button class="pnl-top-b" @click="guideShow = false">← 返回</button>
+        <span class="pnl-top-t">📖 对话使用说明书</span>
+      </div>
+      <div class="guide-body">
+        <p class="guide-intro">想让人工智能回复「更准更快」，关键在于<strong>给全信息 + 说清诉求</strong>。下面按板块/场景给你提问示范，点开即看。</p>
+        <div v-for="(sec, si) in USAGE_GUIDE" :key="si" class="guide-sec">
+          <div class="guide-sec-hd" @click="toggleGuideSec(si)">{{ sec.t }} <span class="guide-arr">{{ guideOpen[si] ? '▾' : '▸' }}</span></div>
+          <div v-show="guideOpen[si]" class="guide-sec-bd">
+            <div v-for="(it, ii) in sec.items" :key="ii" class="guide-qa">
+              <div class="guide-q" @click="toggleGuideQa(si, ii)">❓ {{ it.q }} <span class="guide-arr">{{ guideQaOpen[si + '-' + ii] ? '▴' : '▾' }}</span></div>
+              <div v-show="guideQaOpen[si + '-' + ii]" class="guide-a">💡 {{ it.a }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 消息文字选区工具栏 -->
+  <div v-if="selBar.show" class="sel-bar" :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }" @mousedown.prevent>
+    <button @click="copySelected()">📋 复制选中</button>
+    <button @click="selectAllMsg()">全选本消息</button>
+    <button @click="copyFullMsg()">复制全文</button>
+  </div>
+
+  <!-- 图片全屏预览 -->
+  <div v-if="imgView" class="img-view" @click.self="closeImg()">
+    <img :src="imgView" class="iv-img" @click.stop />
+    <div class="iv-bar">
+      <button type="button" class="iv-btn" @click.stop.prevent="downloadImg()">💾 保存原图</button>
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeImg()">✕ 关闭</button>
+    </div>
+  </div>
+
+  <!-- 回复内 SVG / ECharts 统一灯箱 -->
+  <div v-if="svgBox" class="img-view" @click.self="closeSvgBox()">
+    <div v-if="svgBox.type === 'svg'" class="iv-body fig-zoom" v-html="svgBox.html"></div>
+    <div v-else class="iv-body fig-zoom">
+      <div v-html="svgBox.html"></div>
+    </div>
+    <div class="iv-bar">
+      <button type="button" class="iv-btn" @click.stop.prevent="saveSvgBox()">💾 保存图片</button>
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeSvgBox()">✕ 关闭</button>
+    </div>
+  </div>
+
+  <!-- 图形增强放大弹窗 -->
+  <div v-if="figView" class="img-view" @click.self="closeFigZoom()">
+    <div class="iv-body fig-zoom" v-html="figView.svg"></div>
+    <div class="iv-bar">
+      <button type="button" class="iv-btn" @click.stop.prevent="figSave(figView)">💾 保存图片</button>
+      <button type="button" class="iv-btn iv-close" @click.stop.prevent="closeFigZoom()">✕ 关闭</button>
+    </div>
+  </div>
+
+  <!-- 存错题板块选择器 -->
+  <div v-if="bkShow" class="img-view bk-sheet">
+    <div class="bk-sheet-card">
+      <div class="bk-title">📥 加入错题本</div>
+      <div class="bk-sub">请确认所属板块（可修正自动识别）：</div>
+      <div class="bk-options">
+        <button
+          v-for="b in BK_OPTIONS"
+          :key="b"
+          class="bk-opt"
+          :class="{ on: bkPick === b }"
+          @click="bkPick = b"
+        >{{ b }}</button>
+      </div>
+      <div class="bk-acts">
+        <button class="btn btn-gh" @click="bkShow = false">取消</button>
+        <button class="btn btn-pri" @click="confirmSaveWrong()">✓ 确认存入</button>
+      </div>
+    </div>
+  </div>
+  <!-- ⛶ 全屏做题：对话出题卡片卷面化做题窗口（轻量即时判题） -->
+  <Teleport to="body">
+    <div v-if="quizFull" class="ov show quiz-full-ov" @click.self="quizFullClose()">
+      <div class="pnl quiz-full-pnl">
+        <div class="quiz-full-hd">
+          <span class="qf-title">⛶ 全屏做题<span v-if="quizPlate(quizFull)"> · {{ quizPlate(quizFull) }}</span><span v-if="quizFull.quiz && quizFull.quiz.needAi" class="quiz-tag">先选后判</span></span>
+          <button class="btn btn-gh" @click="quizFullClose()">✕ 关闭</button>
+        </div>
+        <div class="quiz-full-body">
+          <div class="quiz-stem" v-html="mdC(quizFull.quiz.stem)"></div>
+          <div class="quiz-opts" :class="{ 'has-svg': quizHasSvg(quizFull) }">
+            <button
+              v-for="o in quizFull.quiz.options"
+              :key="o.k"
+              class="quiz-opt quiz-full-opt"
+              :class="{
+                picked: quizFull.quiz.picked === o.k,
+                right: quizFull.quiz.picked && o.k === quizFull.quiz.answer,
+                wrong: quizFull.quiz.picked && o.k === quizFull.quiz.picked && o.k !== quizFull.quiz.answer
+              }"
+              :disabled="!!quizFull.quiz.picked"
+              @click="pickQuiz(quizFull, o.k)"
+            >
+              <span class="qk">{{ o.k }}</span><span class="qt" v-html="mdC(o.t)"></span>
+            </button>
+          </div>
+          <div v-if="quizFull.quiz.picked" class="quiz-result" :class="quizFull.quiz.checking ? 'pending' : (quizFull.quiz.correct ? 'ok' : 'no')">
+            <template v-if="quizFull.quiz.checking">⏳ AI 判题中…</template>
+            <template v-else-if="quizFull.quiz.correct === null">已提交，等待 AI 判题…</template>
+            <template v-else>{{ quizFull.quiz.correct ? '✅ 回答正确！' : (quizFull.quiz.answer ? '❌ 回答错误，正确答案是 ' + quizFull.quiz.answer : '❌ 回答错误（待人工核对）') }} <span v-if="quizFull.quiz.aiChecked" class="quiz-ai-badge">🤖 已按解析核验</span><span v-else-if="quizFull.quiz.checkFailed" class="quiz-ai-badge warn">⚠️ 未取回答案</span></template>
+          </div>
+          <div v-if="quizFull.quiz.picked && quizFull.quiz.correct === false && !quizFull.quiz.checking && !quizFull.quiz.wrongPrompted" class="quiz-wrong-bar">
+            <span class="qw-t">📌 这道题做错了，加入错题集？</span>
+            <button class="btn btn-pri qw-yes" @click="quizWrongAdd(quizFull)">加入</button>
+            <button class="btn btn-gh" @click="quizWrongIgnore(quizFull)">忽略</button>
+          </div>
+          <div v-if="quizFull.quiz.picked && quizFull.quiz.explain && !quizFull.quiz.checking" class="quiz-explain" v-html="md(quizFull.quiz.explain)"></div>
+          <div v-if="quizFull.quiz.picked && !quizFull.quiz.checking" class="quiz-acts">
+            <button class="btn btn-gh" @click="quizFullDeep(quizFull)">💬 发到对话深挖</button>
+            <button class="btn btn-gh" @click="saveQuizWrong(quizFull)">📌 存错题本</button>
+            <button class="btn btn-pri" @click="quizFullClose()">✕ 关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+  <AskWizard v-if="wzOpen" @close="wzOpen = false" @confirm="wzConfirm" />
+  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" :initial-local="examOffline" @close="closeExam" />
+  
+  <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
+  <DataTrain v-if="dtShow" @close="closeDataTrain" @send-question="onSolidQuestion" />
+</template>

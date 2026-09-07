@@ -1,0 +1,12 @@
+import { buildProfessorPrompt, diffCurve, DIFF_LEVELS } from '../src/api/professor.js'
+const p1 = buildProfessorPrompt('数量关系', 'real', '工程问题')
+console.log('数量·真题级 len:', p1.length)
+console.log('  真题级:', p1.includes('真题级'), '| 数字设计是灵魂:', p1.includes('数字设计是灵魂'), '| 自检清单:', p1.includes('命题自检清单'))
+const p2 = buildProfessorPrompt('言语理解', 'mid', '')
+console.log('言语·中 len:', p2.length, '| 官媒评论:', p2.includes('官媒评论'), '| 高频成语:', p2.includes('浅尝辄止'))
+const p3 = buildProfessorPrompt('资料分析', 'hard', '比重')
+console.log('资料·难 len:', p3.length, '| Markdown表格:', p3.includes('Markdown 表格'), '| 同比vs环比:', p3.includes('同比vs环比'))
+const p4 = buildProfessorPrompt('图形推理', 'easy', '位置规律')
+console.log('图推·易 len:', p4.length, '| 位置规律:', p4.includes('位置规律'), '| 复合规律:', p4.includes('复合规律'))
+console.log('curve(0..9,10):', [0,1,2,3,4,5,6,7,8,9].map(i => diffCurve(i,10)).join(','))
+console.log('levels:', Object.keys(DIFF_LEVELS).join(','))

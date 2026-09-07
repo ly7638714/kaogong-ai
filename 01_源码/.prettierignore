@@ -1,0 +1,10 @@
+dist
+node_modules
+public
+package-lock.json
+pnpm-lock.yaml
+
+# Vue 模板内的内联 JS 多语句会被 Prettier 折行、导致 Vue 编译报错
+# （@click="a; b" 会被展开成多行属性值）。模板格式改由 ESLint + 手写维护，
+# Prettier 只格式化 script/style（.js/.css/.json/.md 等）。
+src/**/*.vue
