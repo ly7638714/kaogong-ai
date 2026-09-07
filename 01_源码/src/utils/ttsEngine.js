@@ -31,7 +31,7 @@ function setStatus(state, msg) {
   ttsStatus.at = Date.now()
 }
 
-export async function slideSynthesize(chunks, worker, onChunk, W = 4) {
+export async function slideSynthesize(chunks, worker, onChunk, W = 5) {
   const results = []
   let nextReq = 0
   let nextEmit = 0
@@ -210,7 +210,7 @@ async function gapDecode(bytes, mime) {
     if (!ctx || _gap.fallback) { _gap.fallback = true; return null }
     if (ctx.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
     if (ctx.state !== 'running') { _gap.fallback = true; return null }
-    const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes) : bytes
+    const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes, { fade: false }) : bytes
     return await ctx.decodeAudioData(gapBytes(data).slice(0))
   } catch (e) {
     return null

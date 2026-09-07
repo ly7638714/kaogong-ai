@@ -1,5 +1,5 @@
 // tts/wav.js —— WAV 平滑纯函数（批次6B拆分：自 ttsEngine.js 纯移动，未改动）
-export function smoothWavBytes(input) {
+export function smoothWavBytes(input, opts = {}) {
   try {
     const u8 = input instanceof Uint8Array ? input : new Uint8Array(input)
     if (u8.length < 64) return input
@@ -87,10 +87,13 @@ export function smoothWavBytes(input) {
     dv.setUint16(32, blockAlign, true); dv.setUint16(34, bits, true)
     dv.setUint32(40, newDataLen, true)
     const fadeFrames = Math.max(1, Math.floor(rate * 0.006))
+    const applyFade = opts.fade !== false
     for (let fi = 0; fi < newFrames; fi++) {
       let f = 1
-      if (fi < fadeFrames) f = fi / fadeFrames
-      else if (fi > newFrames - fadeFrames - 1) f = (newFrames - 1 - fi) / fadeFrames
+      if (applyFade) {
+        if (fi < fadeFrames) f = fi / fadeFrames
+        else if (fi > newFrames - fadeFrames - 1) f = (newFrames - 1 - fi) / fadeFrames
+      }
       const o = 44 + fi * blockAlign
       for (let c = 0; c < ch; c++) {
         const v = read(start + fi, c)
