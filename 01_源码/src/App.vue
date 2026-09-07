@@ -3336,10 +3336,11 @@ onUnmounted(() => {
         </div>
         <div v-if="expType === 'wrong'" class="sec-t">📐 错题打印模板（决定答案/解析是否随题导出）</div>
         <div v-if="expType === 'wrong'" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
-          <button class="btn btn-gh" :class="{ on: expTpl === 'full' }" @click="expTpl = 'full'">完整（含答案/错因）</button>
-          <button class="btn btn-gh" :class="{ on: expTpl === 'stems' }" title="只导出题干，不含任何答案与解析，适合纯重做自测" @click="expTpl = 'stems'">只题干</button>
-          <button class="btn btn-gh" :class="{ on: expTpl === 'separate' }" title="题干在前，答案与解析集中到末尾（打印重做友好）" @click="expTpl = 'separate'">题答分离</button>
+          <button class="btn btn-gh" :class="{ on: expTpl === 'full' }" :aria-pressed="expTpl === 'full'" @click="expTpl = 'full'"><span v-if="expTpl === 'full'">✓ </span>完整（含答案/错因）</button>
+          <button class="btn btn-gh" :class="{ on: expTpl === 'stems' }" :aria-pressed="expTpl === 'stems'" title="只导出题干，不含任何答案与解析，适合纯重做自测" @click="expTpl = 'stems'"><span v-if="expTpl === 'stems'">✓ </span>只题干</button>
+          <button class="btn btn-gh" :class="{ on: expTpl === 'separate' }" :aria-pressed="expTpl === 'separate'" title="题干在前，答案与解析集中到末尾（打印重做友好）" @click="expTpl = 'separate'"><span v-if="expTpl === 'separate'">✓ </span>题答分离</button>
         </div>
+        <div v-if="expType === 'wrong'" class="exp-tpl-note">当前模板：<b>{{ expTpl === 'full' ? '完整（含答案/错因）' : expTpl === 'stems' ? '只题干' : '题答分离' }}</b>。{{ expTpl === 'full' ? '每题后跟答案与错因，适合打印后直接复盘' : expTpl === 'stems' ? '不含答案/解析，适合先重做再对照' : '题干在前，答案与解析集中到文件末尾，适合边做边翻答案' }}</div>
         <div class="sec-t">✨ 让 AI 整理后导出（推荐：梳理考点/错因/秒杀规律）</div>
         <div class="exp-choices">
           <button class="btn btn-pri" @click="runExport('docx', true)">AI整理 → Word</button>

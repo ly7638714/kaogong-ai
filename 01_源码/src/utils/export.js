@@ -1,5 +1,5 @@
 /* global btoa */
-import { downloadText, downloadBlob, printPdf, pdfHtml, printImages, exportPdfFile } from './export/writers'
+import { downloadText, downloadBlob, printPdf, pdfHtml, printImages, pagesToPdfBlob, exportPdfFile } from './export/writers'
 import { isNativeHost } from './platform'
 import { snapshotMd } from './capture'
 import { exportMdDocx, buildDocx, itemsToParagraphs, itemsToTables } from './export/docx'
@@ -386,13 +386,13 @@ function itemsToMdPages(items) {
   flush()
   return pages
 }
-export async function exportPdfShots(title, pages) {
+export async function exportPdfShots(title, pages, fallbackItems) {
   const shots = []
   for (const pg of pages) {
     try { shots.push(await snapshotMd(pg.md, { title: pg.title || title })) } catch (e) {}
   }
   if (!shots.length) {
-    if (isNativeHost()) { try { showToast('PDF 生成失败：页面渲染失败，请稍后重试或改用 Word/Markdown 导出', 'error') } catch (e) {} } else printPdf(title, [])
+    if (isNativeHost()) { try { showToast('PDF 生成失败：页面渲染失败，请稍后重试或改用 Word/Markdown 导出', 'error') } catch (e) {} } else if (fallbackItems && fallbackItems.length) printPdf(title, fallbackItems)
     return
   }
   if (isNativeHost()) {
@@ -400,7 +400,15 @@ export async function exportPdfShots(title, pages) {
     try { await exportPdfFile(title, shots) } catch (e) { showToast('PDF 生成失败：' + (e && e.message || e), 'error') }
     return
   }
-  printImages(title, shots)
+  try {
+    try { showToast('🧾 正在合成 PDF…（' + shots.length + ' 页）', 'info') } catch (e) {}
+    const blob = await pagesToPdfBlob(shots)
+    const safeName = (String(title || '导出').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)) + '.pdf'
+    await downloadBlob(blob, safeName)
+    try { showToast('✅ PDF 已生成：' + safeName, 'success') } catch (e) {}
+  } catch (e) {
+    printImages(title, shots)
+  }
 }
 export async function exportPaper(paper, marks, meta, format, polish, separate) {
   const ms = marks || []

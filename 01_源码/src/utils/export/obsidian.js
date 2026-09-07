@@ -1,12 +1,11 @@
 import { store } from '../../store'
 import { showToast } from '../toast'
 import { getPayload } from './payload'
-import { downloadText, printPdf } from './writers'
+import { downloadText } from './writers'
 import { exportMdDocx, exportItemsDocx } from './docx'
-import { isNativeHost } from '../platform'
-import { exportPdfShots } from '../export' // 手机端：PDF 生成真文件
+import { exportPdfShots } from '../export' // 网页/iPad/手机端统一生成真 PDF 文件
 import { aiPolish } from '../../api'
-// ===== 手机端 PDF：把 items(段落/表格/图) 转成分页 Markdown → 真 .pdf 文件；桌面保持原打印 =====
+// ===== PDF：把 items(段落/表格/图) 转成分页 Markdown → 真 .pdf 文件 =====
 function pdfItemsToPages(title, items) {
   const pages = []
   const rows = []
@@ -31,14 +30,10 @@ function pdfItemsToPages(title, items) {
   return pages
 }
 function pdfFromItems(title, items) {
-  if (isNativeHost()) {
-    const pages = pdfItemsToPages(title, items)
-    if (!pages.length) { showToast('无可导出的 PDF 内容', 'info'); return }
-    try { showToast('🧾 正在生成 PDF…', 'info') } catch (e) {}
-    exportPdfShots(title, pages).catch((e) => showToast('PDF 失败：' + (e && e.message || e), 'error'))
-    return
-  }
-  printPdf(title, items)
+  const pages = pdfItemsToPages(title, items)
+  if (!pages.length) { showToast('无可导出的 PDF 内容', 'info'); return }
+  try { showToast('🧾 正在排版 PDF…（' + pages.length + ' 页）', 'info') } catch (e) {}
+  exportPdfShots(title, pages, items).catch((e) => showToast('PDF 失败：' + (e && e.message || e), 'error'))
 }
 
 

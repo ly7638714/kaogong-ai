@@ -41,4 +41,25 @@ describe('getPayload 错题导出数据组装', () => {
     store.wqs = []
     expect(getPayload('wrong')).toBeNull()
   })
+
+  it('只题干模板不含答案/错因/秒杀/笔记', () => {
+    const pay = getPayload('wrong', 'stems')
+    expect(pay.title).toContain('只题干')
+    const allText = pay.items.map((x) => x.text || '').join('\n') + '\n' + pay.plain
+    expect(allText).toContain('削弱题')
+    expect(allText).not.toContain('答案：')
+    expect(allText).not.toContain('错因：')
+    expect(allText).not.toContain('秒杀：')
+    expect(allText).not.toContain('笔记：')
+  })
+
+  it('题答分离把答案与复盘集中到文件末尾', () => {
+    const pay = getPayload('wrong', 'separate')
+    expect(pay.title).toContain('题答分离')
+    const idx = pay.items.map((x) => x.type).lastIndexOf('h')
+    const tail = pay.items.slice(idx).map((x) => x.text || '').join('\n')
+    expect(tail).toContain('🔑 参考答案与复盘')
+    expect(tail).toContain('答案：D')
+    expect(tail).toContain('错因：出题人挖坑')
+  })
 })
