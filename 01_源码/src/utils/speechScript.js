@@ -7,6 +7,7 @@
 //  - 复用 chatOnce（OpenAI 兼容协议 + 成本记录 + 自动重试），非流式、小预算、短超时
 import { store } from '../store'
 import { chatOnce } from '../api/client'
+import { stripSpeechNoise } from './tts/clean'
 
 // 当前是否启用并可用
 export function rdCfg() {
@@ -28,7 +29,7 @@ const MAX_CHARS = 1800
 
 // 把原文转成“可直接朗读的讲稿”；不可用/失败一律返回原文
 export async function speakReadyText(raw, maxChars = MAX_CHARS) {
-  const src = String(raw || '').trim()
+  const src = stripSpeechNoise(String(raw || '').trim())
   if (!src) return src
   const c = rdCfg()
   if (!c) return src

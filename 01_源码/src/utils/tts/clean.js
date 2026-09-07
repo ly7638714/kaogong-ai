@@ -38,7 +38,7 @@ export function symbolsToChinese(text) {
   return t.replace(/\s{2,}/g, ' ').trim()
 }
 export function cleanSpeechText(text) {
-  return symbolsToChinese(String(text || '')
+  return symbolsToChinese(stripSpeechNoise(String(text || ''))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/~~~[\s\S]*?~~~/g, ' ')
     .replace(/`[^`]*`/g, ' ')
@@ -54,6 +54,27 @@ export function cleanSpeechText(text) {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\s+/g, ' ')
     .trim())
+}
+
+// 朗读去噪：按行去掉系统/功能提示横幅，只保留真正要听的内容
+const SPEECH_NOISE_RE = /^(?:【|\[)?\s*(?:温馨提示|提示|说明|注意|免责声明|官方说法|官方口径|使用说明|以上说明|未匹配到已蒸馏方法)(?:\]|】)?\s*[：:]?\s*/i
+export function stripSpeechNoise(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => {
+      let l = String(line || '').trim()
+      // 去掉 > 块引用前缀（如 > 📚 提示：…）
+      while (/^\s*>\s*/.test(l)) l = l.replace(/^\s*>\s*/, '').trim()
+      // 去掉行首的功能 emoji（📚/💡/⚠️/🔍 等），保留后面的正文
+      const em = l.match(/^(\s*[📚💡⚠️🔍🔎📌📢🗣🧠📝🎯⏱💰🌐✅❌⚡]+\s*)+(.*)$/)
+      if (em) l = (em[2] || '').trim()
+      // 命中提示/说明类系统横幅 → 整行丢弃
+      if (SPEECH_NOISE_RE.test(l)) return ''
+      return l
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
 }
 
 // ============ 长文分块：按句子边界切，避免一次请求超长 ============
