@@ -35,6 +35,14 @@ describe('cloudSync 多端安全合并', () => {
     expect(Object.keys(scoped).sort()).toEqual(['xc_msgs', 'xc_pet'])
   })
 
+  it('同步时修复 xc_tasks 里被二次序列化的任务数组', () => {
+    const legacy = JSON.stringify({ date: '2026-09-07', items: JSON.stringify([{ k: 'p', done: false }]) })
+    const scoped = syncScopeFromBackup({ data: { xc_tasks: legacy } })
+    const parsed = JSON.parse(scoped.xc_tasks)
+    expect(Array.isArray(parsed.items)).toBe(true)
+    expect(parsed.items).toHaveLength(1)
+  })
+
   it('本机未修改且云端更新时，标量采用云端；本机也改了则本机优先', () => {
     const base = { xc_mode: 'all' }
     const local = { xc_mode: 'all' }

@@ -27,7 +27,31 @@ export function shouldSyncKey(k) {
   return true
 }
 
+function normalizeSyncValue(k, raw) {
+  if (k === 'xc_tasks' && typeof raw === 'string') {
+    try {
+      const obj = JSON.parse(raw)
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && typeof obj.items === 'string') {
+        const arr = JSON.parse(obj.items)
+        if (Array.isArray(arr)) {
+          obj.items = arr
+          return JSON.stringify(obj)
+        }
+      }
+    } catch (e) { /* 保持原值，避免破坏非标准旧备份 */ }
+  }
+  return raw
+}
+
 export function syncScopeFromBackup(obj) {
+  const src = obj && obj.data && typeof obj.data === 'object' ? obj.data : obj
+  if (!src || typeof src !== 'object') return {}
+  const out = {}
+  for (const k in src) if (shouldSyncKey(k)) out[k] = normalizeSyncValue(k, src[k])
+  return out
+}
+
+function rawScopeFromBackup(obj) {
   const src = obj && obj.data && typeof obj.data === 'object' ? obj.data : obj
   if (!src || typeof src !== 'object') return {}
   const out = {}
@@ -233,7 +257,8 @@ export function applyLocalMerge(localAll, remoteRaw, baseline = {}) {
   const remote = remoteRaw ? syncScopeFromBackup(remoteRaw) : {}
   const merged = mergeSyncData(local, remote, baseline)
   const changed = writeMerged(merged)
-  const sameAsRemote = remoteRaw ? fingerprint(syncScopeFromBackup(remoteRaw)) === fingerprint(merged) : false
+  const rawRemote = remoteRaw ? rawScopeFromBackup(remoteRaw) : {}
+  const sameAsRemote = remoteRaw ? fingerprint(rawRemote) === fingerprint(merged) : false
   return { local, remote, merged, changed, sameAsRemote }
 }
 

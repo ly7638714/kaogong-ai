@@ -97,7 +97,11 @@ function refreshTasks() {
     const t = JSON.parse(localStorage.getItem('xc_tasks') || 'null')
     const d = new Date()
     const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
-    tasks.value = t && t.date === key ? (t.items || []) : []
+    let items = t && Array.isArray(t.items) ? t.items : []
+    if (!items.length && t && typeof t.items === 'string') {
+      try { const p = JSON.parse(t.items); if (Array.isArray(p)) items = p } catch (e) { /* 忽略坏数据 */ }
+    }
+    tasks.value = t && t.date === key ? items : []
   } catch (e) {
     tasks.value = []
   }
