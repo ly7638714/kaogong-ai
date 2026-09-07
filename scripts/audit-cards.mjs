@@ -19,7 +19,7 @@ for (const f of files) {
     const exq = (b.match(/example:\s*\{\s*q:\s*'([^']+)'/) || [])[1] || ''
     const optsRaw = (b.match(/opts:\s*\[([^\]]*)\]/) || [])[1] || ''
     const opts = optsRaw ? optsRaw.split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean) : []
-    const realOpts = opts.filter((o) => o && !/^['"ABCDabcd]['"]?$/.test(o))
+    const realOpts = opts.filter((o) => o && !/…|略|…$|\?{3,}/.test(o) && !/^['"ABCDabcd]['"]?$/.test(o))
     if (id) cards.push({ id, file: f, type, tip, detail, exq, opts, realOpts })
   }
 }
@@ -36,10 +36,14 @@ for (const [k, v] of Object.entries(byTip)) if (v.length > 1) dupTips.push({ key
 for (const [k, v] of Object.entries(byDetail)) if (v.length > 1) dupDetails.push({ key: k, ids: v.map((x) => x.replace(/^['"]|['"]$/g, '')) })
 
 const noRealExample = cards.filter((c) => !c.realOpts.length || !c.exq)
+const hasPlaceholderOption = cards.filter((c) => c.opts.length && c.opts.some((o) => /…|略|\?{3,}/.test(o)))
 
 console.log('总卡片数：' + cards.length)
 console.log('重复 tip：' + dupTips.length)
 console.log('重复 detail：' + dupDetails.length)
 console.log('缺真实举例（无题干或仅A/B/C/D占位）：' + noRealExample.length)
+console.log('含…/略占位选项的卡：' + hasPlaceholderOption.length)
 console.log('\n缺真实举例示例：')
 noRealExample.slice(0, 40).forEach((c) => console.log('  ' + c.id + ' | ' + c.type + ' | 题干=' + (c.exq ? c.exq.slice(0, 40) : '无')))
+console.log('\n含占位选项的卡（前 30）：')
+hasPlaceholderOption.slice(0, 30).forEach((c) => console.log('  ' + c.id + ' | ' + c.type))

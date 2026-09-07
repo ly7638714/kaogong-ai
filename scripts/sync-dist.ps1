@@ -49,6 +49,7 @@ foreach ($d in $deployDirs) {
   # 同时清理旧 hash 的 three/pdf 分包（Vite 分包产物），避免残留旧版本
   Get-ChildItem $dstAssets -Filter 'three-*' -ErrorAction SilentlyContinue | Remove-Item -Force
   Get-ChildItem $dstAssets -Filter 'pdf-*' -ErrorAction SilentlyContinue | Remove-Item -Force
+  Get-ChildItem $dstAssets -Filter 'SolidTrain-*' -ErrorAction SilentlyContinue | Remove-Item -Force
   Copy-Item (Join-Path $dist 'assets\*') $dstAssets -Recurse -Force
 
   Write-Host "    ^ $d 已同步" -ForegroundColor Green

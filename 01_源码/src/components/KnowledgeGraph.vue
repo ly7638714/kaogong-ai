@@ -566,6 +566,12 @@ function askSelected() {
   lightUp(selected.value.id)
   emit('ask', selected.value)
 }
+function askExampleSelected() {
+  if (!selected.value) return
+  markLearned(selected.value.id)
+  lightUp(selected.value.id)
+  emit('ask-example', selected.value)
+}
 function onResize() {
   if (!renderer || !holder.value) return
   const el = holder.value
@@ -646,13 +652,9 @@ watch(() => props.cards.length, () => {
       <div v-if="selected.signs && selected.signs.length" class="kg-d-sec"><b>🔍 特征</b><div class="kg-d-tags"><span v-for="s in selected.signs" :key="s" class="kg-d-tag">{{ s }}</span></div></div>
       <div v-if="selected.steps && selected.steps.length" class="kg-d-sec"><b>🪜 步骤</b><ol class="kg-d-ol"><li v-for="(s, i) in selected.steps" :key="i">{{ s }}</li></ol></div>
       <div v-if="selected.traps && selected.traps.length" class="kg-d-sec"><b>⚠️ 陷阱</b><div class="kg-d-tags"><span v-for="t in selected.traps" :key="t" class="kg-d-tag danger">{{ t }}</span></div></div>
-      <div v-if="selected.example" class="kg-d-ex">
-        <div>📝 {{ selected.example.q }}</div>
-        <div v-if="selected.example.opts" class="kg-d-opts"><span v-for="o in selected.example.opts" :key="o">{{ o }}</span></div>
-        <div class="kg-d-ans">✅ {{ selected.example.answer }} · {{ selected.example.path }}</div>
-      </div>
       <div class="kg-d-acts">
-        <button class="btn btn-pri" @click="askSelected()">💬 一键问 AI 讲透</button>
+        <button class="btn btn-gh" @click="askSelected()">💬 问 AI 讲透</button>
+        <button class="btn btn-pri" @click="askExampleSelected()">📚 让 AI 举例</button>
       </div>
     </div>
   </div>

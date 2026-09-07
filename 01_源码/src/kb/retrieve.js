@@ -31,7 +31,6 @@ export function renderCards(cards) {
           (c.formula ? `\n  公式:${c.formula}` : '') +
           `\n  陷阱:${c.traps.join('；')}` +
           (c.detail ? `\n  详解:${c.detail.slice(0, 220)}` : '') +
-          (c.example ? `\n  例:${c.example.q.slice(0, 80)} 答案${c.example.answer}（${c.example.path.slice(0, 60)}）` : '') +
           (c.tip ? `\n  秒杀:${c.tip}` : '')
       )
       .join('\n') +

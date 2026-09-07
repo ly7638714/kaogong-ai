@@ -103,9 +103,7 @@ const quickGroups = computed(() => {
   }))
 })
 function askCard(c) {
-  markLearned(c.id) // 学习印记：一键问 AI = 学过 → 知识图谱星球点亮
-  store.mode = mapMode(c.plate)
-  store.tab = 'chat'
+  gotoAsk(c)
   store.pendingAsk =
     '请把「' + c.type + '」' + (c.source ? '（来源：' + c.source + '）' : '') + '讲透，我要彻底看懂：\n' +
     '① 一句话说清它是什么、适用于什么题型/场景；\n' +
@@ -114,6 +112,24 @@ function askCard(c) {
     '④ 给一句能记住的口诀；\n' +
     '⑤ 出一道检验题（四个选项，最后单独一行【正确答案】X）。\n' +
     '我参考的知识卡内容：\n特征：' + (c.signs || []).join('、') + '\n步骤：' + (c.steps || []).join(' → ') + '\n陷阱：' + (c.traps || []).join('、') + '\n口诀：' + c.tip
+    + (c.detail ? '\n老师讲法：' + c.detail : '')
+}
+function gotoAsk(c) {
+  markLearned(c.id) // 学习印记：一键问 AI = 学过 → 知识图谱星球点亮
+  store.mode = mapMode(c.plate)
+  store.tab = 'chat'
+}
+// 例题不再内嵌占位数据，需要“实战检验”时让 AI 现场生成完整例题
+function askExample(c) {
+  gotoAsk(c)
+  store.pendingAsk =
+    '请根据下面这张知识卡的方法，现场编一道能检验我是否学会的题：\n' +
+    '① 题目要贴近真实行测考试场景，不造生硬概念；\n' +
+    '② 给出 4 个完整选项，不要出现省略号或占位；\n' +
+    '③ 单独一行给出【正确答案】；\n' +
+    '④ 用卡内口诀/步骤解析为什么选它，并指出其它选项错在哪里。\n' +
+    '知识卡：' + c.type + '（' + (c.source || '') + '）\n' +
+    '识别：' + (c.signs || []).join('、') + '\n步骤：' + (c.steps || []).join(' → ') + '\n陷阱：' + (c.traps || []).join('、') + '\n口诀：' + c.tip
     + (c.detail ? '\n老师讲法：' + c.detail : '')
 }
 // 展开/收起知识卡详情；点开查看 = 学过 → 知识图谱星球点亮
@@ -166,13 +182,12 @@ const firstOfPlateMap = computed(() => {
   for (const c of shownCards.value) if (!m[c.plate]) m[c.plate] = c
   return m
 })
-// 收起态也展示卡内有什么：特征/步骤/陷阱/例题 统计；卡片静态，一次性预计算供渲染复用
+// 收起态也展示卡内有什么：特征/步骤/陷阱统计；卡片静态，一次性预计算供渲染复用
 function cardStats(c) {
   const arr = []
   if (c.signs && c.signs.length) arr.push('🔍 特征 ' + c.signs.length)
   if (c.steps && c.steps.length) arr.push('🪜 步骤 ' + c.steps.length)
   if (c.traps && c.traps.length) arr.push('⚠️ 陷阱 ' + c.traps.length)
-  if (c.example) arr.push('📝 例题')
   return arr
 }
 const statsMap = computed(() => new Map(cards.map((c) => [c.id, cardStats(c)])))
@@ -261,7 +276,7 @@ function startRandom() {
             <button class="btn btn-pri" @click="startRandom()">🎲 随机来一张卡</button>
             <button class="btn btn-gh" @click="cardGuide = false">我熟悉了，开始刷</button>
           </div>
-          <div class="kc-guide-tip">💡 每张卡阅读顺序：<b>特征</b>（判断题型）→ <b>操作步骤</b>（怎么做）→ <b>陷阱</b>（易错点）→ <b>例题</b>（检验）→ 卡住就点「💬 问 AI 讲透」</div>
+          <div class="kc-guide-tip">💡 每张卡阅读顺序：<b>特征</b>（判断题型）→ <b>操作步骤</b>（怎么做）→ <b>陷阱</b>（易错点）→ 需要实战检验就点「📚 让 AI 举例」</div>
         </div>
         <!-- 吸顶快捷条：仅一行（搜索+一键收纳+全部展开），不遮挡卡片内容 -->
         <div class="kc-bar">
@@ -333,13 +348,9 @@ function startRandom() {
                     <div v-if="c.steps && c.steps.length" class="kc-sec"><b>🪜 操作步骤</b><ol class="kc-steps"><li v-for="(s, i) in c.steps" :key="i">{{ s }}</li></ol></div>
                     <div v-if="c.traps && c.traps.length" class="kc-sec"><b>⚠️ 常见陷阱</b><div class="kc-tags"><span v-for="t in c.traps" :key="t" class="kc-tag danger">{{ t }}</span></div></div>
                     <div v-if="c.detail" class="kc-sec"><b>📖 老师讲法</b><div class="kc-detail">{{ c.detail }}</div></div>
-                    <div v-if="c.example" class="kc-ex">
-                      <div class="kc-ex-q">📝 {{ c.example.q }}</div>
-                      <div v-if="c.example.opts" class="kc-ex-opts"><span v-for="o in c.example.opts" :key="o" class="kc-opt">{{ o }}</span></div>
-                      <div class="kc-ex-a">✅ 答案：{{ c.example.answer }} · {{ c.example.path }}</div>
-                    </div>
                     <div class="ko-acts">
                       <button class="btn btn-gh" @click.stop="askCard(c)">💬 问 AI 讲透</button>
+                      <button class="btn btn-pri" @click.stop="askExample(c)">📚 让 AI 举例</button>
                     </div>
                   </div>
                 </div>
@@ -353,7 +364,7 @@ function startRandom() {
         </div>
       </template>
       <!-- ========== 神经网络知识图谱 ========== -->
-      <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" />
+      <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" @ask-example="askExample" />
     </div>
   </div>
 </template>
