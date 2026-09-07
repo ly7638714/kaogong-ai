@@ -2,7 +2,7 @@
 import { ref, reactive, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
-import { USAGE_GUIDE } from '../utils/usageGuide'
+import { AI_DISTILL_MAP, USAGE_GUIDE } from '../utils/usageGuide'
 import { parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
 import { downloadMdScreenshot, snapshotMd } from '../utils/capture' // v3.8.215 截图分享(整幅渲染)
 import { saveImage } from '../utils/downloadOut' // v3.8.214 统一保存出口
@@ -94,7 +94,7 @@ function collapseTools() {
 }
 // 对话使用说明书弹窗
 const guideShow = ref(false)
-const guideOpen = ref({})
+const guideOpen = ref({ 0: true })
 const guideQaOpen = ref({})
 function toggleGuideSec(si) { guideOpen.value[si] = !guideOpen.value[si] }
 function toggleGuideQa(si, ii) { const k = si + '-' + ii; guideQaOpen.value[k] = !guideQaOpen.value[k] }
@@ -2134,6 +2134,28 @@ const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch,
       </div>
       <div class="guide-body">
         <p class="guide-intro">想让人工智能回复「更准更快」，关键在于<strong>给全信息 + 说清诉求</strong>。下面按板块/场景给你提问示范，点开即看。</p>
+        <div class="guide-distill">
+          <div class="dm-title">{{ AI_DISTILL_MAP.title }}</div>
+          <p class="dm-lead">{{ AI_DISTILL_MAP.lead }}</p>
+          <div class="dm-track">
+            <div v-for="(s, si) in AI_DISTILL_MAP.stages" :key="si" class="dm-wrap">
+              <div class="dm-stage">
+                <div class="dm-icon">{{ s.icon }}</div>
+                <div class="dm-t">{{ s.t }}</div>
+                <div class="dm-sub">{{ s.sub }}</div>
+                <ul class="dm-points">
+                  <li v-for="(p, pi) in s.points" :key="pi">{{ p }}</li>
+                </ul>
+              </div>
+              <div v-if="si < AI_DISTILL_MAP.stages.length - 1" class="dm-arrow">➜</div>
+            </div>
+          </div>
+          <div class="dm-principles">
+            <div v-for="(pr, pri) in AI_DISTILL_MAP.principles" :key="pri" class="dm-principle">
+              <b>{{ pr.t }}</b><span>{{ pr.d }}</span>
+            </div>
+          </div>
+        </div>
         <div v-for="(sec, si) in USAGE_GUIDE" :key="si" class="guide-sec">
           <div class="guide-sec-hd" @click="toggleGuideSec(si)">{{ sec.t }} <span class="guide-arr">{{ guideOpen[si] ? '▾' : '▸' }}</span></div>
           <div v-show="guideOpen[si]" class="guide-sec-bd">
