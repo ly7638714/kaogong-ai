@@ -7,10 +7,10 @@ import { store } from '../store'
 import { recordCost, getTtsPrice, getCloneFee, beginCost, getBudget, todaySpend } from './costTrack'
 import { showToast } from './toast'
 import { ttsCacheKey, ttsCacheGet, ttsCacheSet } from './ttsCache'
-import { cleanSpeechText, chunkForTts } from './tts/clean'
+import { cleanSpeechText, chunkForTts, speechPauseMs } from './tts/clean'
 import { smoothWavBytes } from './tts/wav'
 // 批次6B拆分：纯函数移至 tts/ 子模块，此处回导出保持既有 import 路径兼容
-export { symbolsToChinese, cleanSpeechText, chunkText, chunkForTts } from './tts/clean'
+export { symbolsToChinese, cleanSpeechText, chunkText, chunkForTts, speechPauseMs } from './tts/clean'
 export { smoothWavBytes } from './tts/wav'
 
 // ============ 引擎元信息 ============
@@ -42,11 +42,12 @@ export async function slideSynthesize(chunks, worker, onChunk, W = 5) {
   const bytesAll = []
   const emit = () => {
     while (results[nextEmit] !== undefined) {
-      const buf = results[nextEmit++]
+      const buf = results[nextEmit]
       if (buf) {
         bytesAll.push(buf)
-        if (onChunk) { try { onChunk(buf) } catch (e) {} }
+        if (onChunk) { try { onChunk(buf, chunks[nextEmit]) } catch (e) {} }
       }
+      nextEmit++
     }
   }
   const pump = () => {
@@ -192,14 +193,14 @@ function gapBytes(buf) {
   return buf
 }
 // 入队：立即并行解码（不等上一块播完），调度仍严格串行 → 后续块提前就绪，块间断流更少、首句更快
-export function gaplessEnqueue(bytes, mime) {
+export function gaplessEnqueue(bytes, mime, meta) {
   const token = _gap.token
   const dec = gapDecode(bytes, mime)
   _gapChain = _gapChain.then(async () => {
     if (token !== _gap.token || _gap.stopping) return // 已停止/新一轮朗读 → 丢弃残留分块，防止叠音
     const audioBuf = await dec
     if (token !== _gap.token || _gap.stopping) return
-    gapStart(audioBuf)
+    gapStart(audioBuf, meta)
   }).catch(() => {})
   return _gapChain
 }
@@ -217,22 +218,34 @@ async function gapDecode(bytes, mime) {
   }
 }
 // 调度（串行）：按 AudioContext 时间轴首尾精确衔接，像真人说话一样无缝隙
-function gapStart(audioBuf) {
+function gapStart(audioBuf, meta) {
   if (!audioBuf || _gap.stopping) return
   const ctx = _gap.ctx
   if (!ctx || _gap.fallback) return
   try {
     _gap.queue.push(audioBuf)
     _gap.active++
-    if (!_gap.started) {
+    const first = !_gap.started
+    if (first) {
       _gap.started = true
       _gap.nextAt = ctx.currentTime + 0.015
     }
     const src = ctx.createBufferSource()
     src.buffer = audioBuf
-    src.connect(ctx.destination)
-    src.start(_gap.nextAt)
-    _gap.nextAt += audioBuf.duration
+    const gain = ctx.createGain()
+    src.connect(gain)
+    gain.connect(ctx.destination)
+    const start = _gap.nextAt
+    const end = start + audioBuf.duration
+    const fade = 0.006
+    // 块首/块尾做 6ms 极短淡入淡出：既不会让上下句断出“滴”，又不会形成可感知停顿
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.linearRampToValueAtTime(1, start + fade)
+    gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
+    gain.gain.linearRampToValueAtTime(0.0001, end)
+    src.start(start, 0, audioBuf.duration + 0.002)
+    const tailPause = (meta && meta.text ? speechPauseMs(meta.text) : 18) / 1000
+    _gap.nextAt = end + tailPause
     src.onended = () => {
       _gap.active--
       if (_gap.active <= 0) _gap.queue = []
@@ -264,6 +277,10 @@ export function gaplessPlaying() {
   return !!(_gap.ctx && _gap.ctx.state === 'running' && _gap.active > 0)
 }
 export function gaplessSetCallbacks(endCb, errCb) { _gap.endCb = endCb; _gap.errCb = errCb }
+
+function enqueueGapless(buf, text, mime) {
+  gaplessEnqueue(buf, mime, { text: String(text || '') })
+}
 
 // ============ ① 智谱 GLM-TTS（超拟人·真人级）============
 export const GLM_PRESET_VOICES = [
@@ -1048,12 +1065,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -1076,7 +1093,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)

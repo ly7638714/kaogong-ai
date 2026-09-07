@@ -4,6 +4,7 @@ import {
   cleanSpeechText,
   chunkText,
   chunkForTts,
+  speechPauseMs,
   slideSynthesize,
   buildTtsUrl,
   clampSpeed,
@@ -40,6 +41,18 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
     expect(out).not.toMatch(/ {2,}/)
     expect(out).toContain('我是')
   })
+
+  it('多行无标点也补上自然停顿标点', () => {
+    const out = cleanSpeechText('第一段没有标点\n第二段也没有标点')
+    expect(out).toContain('第一段没有标点。')
+    expect(out).toContain('第二段也没有标点。')
+  })
+
+  it('分块停顿时长随句末标点区分', () => {
+    expect(speechPauseMs('这是一整句。')).toBe(240)
+    expect(speechPauseMs('这里只是小停顿，')).toBe(120)
+    expect(speechPauseMs('这段真的没有标点')).toBe(90)
+  })
 })
 
 describe('chunkText 长文分块', () => {
@@ -57,6 +70,7 @@ describe('chunkText 长文分块', () => {
   it('无标点的超长句被硬切', () => {
     const parts = chunkText('无标点'.repeat(300), 100)
     expect(parts.length).toBeGreaterThan(2)
+    parts.slice(0, -1).forEach((p) => expect(p.endsWith('，')).toBe(true))
   })
 })
 

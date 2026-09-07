@@ -38,7 +38,7 @@ export function symbolsToChinese(text) {
   return t.replace(/\s{2,}/g, ' ').trim()
 }
 export function cleanSpeechText(text) {
-  return symbolsToChinese(stripSpeechNoise(String(text || ''))
+  const cleaned = stripSpeechNoise(String(text || ''))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/~~~[\s\S]*?~~~/g, ' ')
     .replace(/`[^`]*`/g, ' ')
@@ -52,8 +52,32 @@ export function cleanSpeechText(text) {
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, ' ')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/\s+/g, ' ')
-    .trim())
+    .split(/\r?\n/)
+    .map((line) => String(line || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  // 多行文本保留“行=一次自然停顿”的听感：换行本身就是语境边界，AI 回复常在这里不写标点
+  const lines = cleaned.length > 1 ? cleaned.map(ensureSpeechBoundary) : cleaned
+  return symbolsToChinese(lines.join(' ').trim())
+}
+
+const SPEECH_BOUNDARY_END = /[。！？!?…；;]$/
+const SPEECH_KEEP_PUNCT = /[：:，,、]$/
+const SPEECH_CONTINUE = /(?:就是|就是说|意思是|说明|比如|例如|如|如下|以下|包括|分为|还有)$/
+function ensureSpeechBoundary(line) {
+  const l = String(line || '').trim()
+  if (!l) return l
+  if (SPEECH_BOUNDARY_END.test(l) || SPEECH_KEEP_PUNCT.test(l)) return l
+  // 结尾像“继续展开”的句子用逗号给短停顿，其余补句号给完整停顿
+  return l + (SPEECH_CONTINUE.test(l) ? '，' : '。')
+}
+
+// 分块之间的停顿时长：文本先补过边界标点，这里据此调度真实静音，避免“无标点连读”
+export function speechPauseMs(text) {
+  const t = String(text || '').trim()
+  if (/[。！？…]$/.test(t)) return 240
+  if (/[；;]$/.test(t)) return 170
+  if (/[，,：:]$/.test(t)) return 120
+  return 90
 }
 
 // 朗读去噪：按行去掉系统/功能提示横幅，只保留真正要听的内容
@@ -100,7 +124,12 @@ export function chunkText(text, maxLen = 420) {
   return parts.flatMap((p) => {
     if (p.length <= maxLen) return [p]
     const m = String(p).match(new RegExp('.{1,' + maxLen + '}', 'g')) || []
-    return m.map((s) => s.trim()).filter(Boolean)
+    return m.map((s, i) => {
+      let seg = String(s || '').trim()
+      if (!seg) return ''
+      if (!SPEECH_BOUNDARY_END.test(seg) && i < m.length - 1) seg += '，'
+      return seg
+    }).filter(Boolean)
   })
 }
 
