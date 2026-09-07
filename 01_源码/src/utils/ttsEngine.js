@@ -342,7 +342,7 @@ export async function glmSynthesize(text, opts = {}) {
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => {
+    async (c) => synthChunkCached('glm', cfg, voice, speed, c, async () => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
@@ -353,7 +353,7 @@ export async function glmSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    },
+    }, 'audio/wav'),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -374,6 +374,22 @@ function concatBuffers(buffs) {
     off += b.byteLength
   }
   return out.buffer
+}
+// 付费引擎按“分块”缓存：同一句话+音色+语速只合成一次，重复朗读零扣费、零等待
+function ttsChunkKey(engine, cfg, voice, speed, text) {
+  return ttsCacheKey(engine + ':' + String((cfg && cfg.model) || ''), voice, speed, 0, text)
+}
+async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime) {
+  const ck = ttsChunkKey(engine, cfg, voice, speed, text)
+  try {
+    const hit = await ttsCacheGet(ck)
+    if (hit && hit.bytes) return hit.bytes
+  } catch (e) {}
+  const bytes = await fetchFn()
+  if (bytes && bytes.byteLength > 0) {
+    try { ttsCacheSet(ck, bytes, mime) } catch (e) {}
+  }
+  return bytes
 }
 export function clampSpeed(r) {
   const n = Number(r)
@@ -419,7 +435,7 @@ export async function openaiSynthesize(text, opts = {}) {
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => {
+    async (c) => synthChunkCached('openai', cfg, voice, speed, c, async () => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
@@ -430,7 +446,7 @@ export async function openaiSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    },
+    }, 'audio/mpeg'),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -541,7 +557,7 @@ export async function dashSynthesize(text, opts = {}) {
   try { beginCost({ feature: 'tts', provider: 'dash', model: cfg.model, kind: 'audio' }) } catch (e) {}
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => {
+    async (c) => synthChunkCached('dash', cfg, voice, speed, c, async () => {
       const body = { model: cfg.model, input: { text: c }, parameters: { format: 'mp3' } }
       if (useCustom) body.parameters.voice_design = voiceCustom
       else if (voice) body.input.voice = voice
@@ -564,7 +580,7 @@ export async function dashSynthesize(text, opts = {}) {
         return await ar.arrayBuffer()
       }
       throw new Error('音频字段缺失')
-    },
+    }, 'audio/mpeg'),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -1032,12 +1048,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -1060,7 +1076,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 26, onChunk: (buf) => gaplessEnqueue(buf, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 84, firstChunkSize: 12, onChunk: (buf) => gaplessEnqueue(buf, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)
@@ -1115,5 +1131,3 @@ export function stopSpeakPro() {
 export function speakingPro() {
   return playing() || spPlaying() || gaplessPlaying() || sysSpeaking()
 }
-
-
