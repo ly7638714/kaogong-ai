@@ -273,3 +273,11 @@ node_modules/
 
 # 06_MobileApp-DeepDev：独立 HBuilderX 5+App 克隆副本，避免 155MB 重复产物进入主仓库
 06_MobileApp-DeepDev/
+
+# 网页仓库已清理的旧/本地大目录（仅本机保留，不入库）
+/04_安卓/
+/05_工程与产品评估/
+/archive_旧版本/
+/声音自定义/
+/.idea/
+/.reasonix/
