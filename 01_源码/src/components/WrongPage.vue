@@ -7,7 +7,7 @@ import { useAi } from '../utils/useAi'
 const { run: aiRun } = useAi()
 import { safeGet, safeSet, KEYS } from '../utils/storage'
 import { exportObsidianMd, copyObsidianWrong, exportAnkiCsv } from '../utils/export'
-import { chatOnce, supportsVision } from '../api'
+import { chatOnce, supportsVision, activeCfg } from '../api'
 import { extractChoices, answerLetter } from '../utils/quiz'
 import { renderMd } from '../utils/renderMd'
 import { mountCharts } from '../utils/chartMount' // 统计图(ECharts)：错题详情/重做/卡片等视图渲染后也要挂载
@@ -24,7 +24,7 @@ import { saveText } from '../utils/downloadOut' // v3.8.214 统一保存出口
 import { pickGenCfg } from '../utils/fastMode' // 错题变式也走单题快练/对话快模型的统一快模型路由
 const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
-import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
+import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent, petFastCfg } from '../utils/pet'
 import { GENERIC_REASONS, SUBJ_REASONS } from '../data/wrongReasons'
 
 import WrongVault from './WrongVault.vue'
@@ -1016,19 +1016,55 @@ const coreOrigMd = computed(() => {
 })
 const coreAiBusy = ref(false)
 const coreAiText = ref('')
+function _aiCfgKey(c) {
+  return [String(c && c.key || ''), String(c && c.url || ''), String(c && c.model || '')].join('|')
+}
+async function askAiWithFallback(ask, { label = 'AI' } = {}) {
+  const cfgs = [pickGenCfg(), petFastCfg(), activeCfg(false)]
+  const seen = new Set()
+  let lastErr = ''
+  for (const c of cfgs) {
+    if (!c || !c.key) continue
+    const k = _aiCfgKey(c)
+    if (seen.has(k)) continue
+    seen.add(k)
+    try {
+      const r = String((await ask(c)) || '').trim()
+      if (r) return r
+    } catch (e) {
+      lastErr = String((e && e.message) || e)
+    }
+  }
+  if (!seen.size) showToast('请先配置文字模型 API Key（设置 → 模型）', 'error')
+  else showToast((label || 'AI') + '暂时不可用' + (lastErr ? '：' + lastErr.slice(0, 90) : '（模型返回为空，已重试）'), 'error')
+  return ''
+}
+function localSkeletonFallback(q, tpl) {
+  const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 220)
+  return [
+    '🤖 深度模型暂时不可用，先用本地骨架卡巩固：',
+    '【核心骨架】' + (tpl.tag || '本题核心'),
+    ...(tpl.points || []),
+    '【本题速览】' + (stem || '（本题文本较短，请直接看上方原题）')
+  ].join('\n')
+}
 async function askCoreDeep() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q || coreAiBusy.value) return
   const tpl = CORE_TEMPLATES[q.subject || ''] || CORE_TEMPLATES['常识判断']
   coreAiBusy.value = true
   coreAiText.value = ''
-  const out = await aiRun(async (c) => {
-    const sys = '你是行测名师。请针对这道题做「骨架式深度巩固」——帮用户记住题目的骨架与核心知识点（不是记答案）。输出：1)【考点】一句话点明；2)【骨架/结构】分步拆解；3)【' + (q.subject || '该板块') + '记忆核心要点】2-3 条结合本题的针对性要点；4)【一句话记忆锚点】。'
-    const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 600)
-    return String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【题目】' + stem + '\n\n板块要点参考：' + tpl.points.join('；') }], 700, 30000)) || '').trim() || '（AI 未返回，请重试）'
-  }, { onError: (e) => { coreAiText.value = 'AI 剖析失败：' + (e && e.message) } })
-  if (out != null) coreAiText.value = out
-  coreAiBusy.value = false
+  try {
+    const out = await askAiWithFallback(async (c) => {
+      const sys = '你是行测名师。请针对这道题做「骨架式深度巩固」——帮用户记住题目的骨架与核心知识点（不是记答案）。输出：1)【考点】一句话点明；2)【骨架/结构】分步拆解；3)【' + (q.subject || '该板块') + '记忆核心要点】2-3 条结合本题的针对性要点；4)【一句话记忆锚点】。请直接输出正文，不要只说“无法回答”。'
+      const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 700)
+      const mine = [q.method ? '秒杀：' + q.method : '', q.note ? '笔记：' + q.note : ''].filter(Boolean).join('\n').slice(0, 300)
+      return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '【题目】' + stem + '\n\n板块要点参考：' + tpl.points.join('；') + (mine ? '\n\n【本题个人复盘】' + mine : '') }], maxTokensFor(c, 1800), 90000)
+    }, { label: 'AI 深度剖析' })
+    coreAiText.value = out || localSkeletonFallback(q, tpl)
+  } finally {
+    coreAiBusy.value = false
+  }
 }
 // 全错 → AI 深度横向比较复盘（原题 × 各变式）
 const vtCmpBusy = ref(false)
@@ -1038,14 +1074,27 @@ async function vtDeepCompare() {
   if (!base || vtCmpBusy.value) return
   vtCmpBusy.value = true
   vtCmpText.value = ''
-  const out = await aiRun(async (c) => {
-    const orig = String(base.question || '').replace(/<[^>]+>/g, ' ').slice(0, 420)
-    const vars = vtQueue.value.map((q, i) => '变式' + (i + 1) + '：' + String(q.stem).slice(0, 300)).join('\n')
-    const sys = '你是行测名师。用户原题和变式题全部做错，请做「横向比较复盘」帮其突破瓶颈：1) 一句话点出这组题共同的考点与命题套路；2) 用对比方式指出原题与每道变式的共同点与差异点（改了什么参数/换了什么素材/陷阱如何迁移）；3) 给出一条能贯穿所有题的「核心突破口」口诀。'
-    return String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + orig + '\n\n' + vars }], 700, 30000)) || '').trim() || '（AI 未返回，请重试）'
-  }, { onError: (e) => { vtCmpText.value = '对比失败：' + (e && e.message) } })
-  if (out != null) vtCmpText.value = out
-  vtCmpBusy.value = false
+  try {
+    const out = await askAiWithFallback(async (c) => {
+      const orig = String(base.question || '').replace(/<[^>]+>/g, ' ').slice(0, 520)
+      const vars = vtQueue.value.map((q, i) => '变式' + (i + 1) + '：' + String(q.stem).slice(0, 360) + (q.answer ? '\n变式答案：' + q.answer : '')).join('\n\n')
+      const sys = '你是行测名师。用户原题和变式题全部做错，请做「横向比较复盘」帮其突破瓶颈：1) 一句话点出这组题共同的考点与命题套路；2) 用对比方式指出原题与每道变式的共同点与差异点（改了什么参数/换了什么素材/陷阱如何迁移）；3) 给出一条能贯穿所有题的「核心突破口」口诀。请直接输出可读正文，不要只说“无法回答”。'
+      return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '【原题】' + orig + (base.answer ? '\n原题答案：' + base.answer : '') + '\n\n' + vars }], maxTokensFor(c, 1800), 90000)
+    }, { label: 'AI 横向比较' })
+    vtCmpText.value = out || [
+      '🤖 AI 横向比较暂时不可用，先用这张自查清单对比：',
+      '1. 共同点：原题和每道变式的“考点结构”是否一样？先别被新话题带跑。',
+      '2. 变化点：变式改了素材、数字、条件、问法，还是选项关系？',
+      '3. 最像的陷阱：哪一步是换汤不换药，导致你连续做错？',
+      '4. 下一步：把上方原题和变式复制到对话页，让我继续深讲。'
+    ].join('\n')
+  } finally {
+    vtCmpBusy.value = false
+  }
+}
+function maxTokensFor(c, fallback = 1800) {
+  const m = String(c && c.model || '').toLowerCase()
+  return /thinking|reasoner|r1|v4|kimi|deepseek-reasoner/.test(m) ? 2600 : fallback
 }
 // 卷面化：题干与选项拆分（错题详情像卷子一样展示：题干问法 + 每选项独占一行）
 function splitPaper(text) {
