@@ -77,6 +77,7 @@ const D = () => ({
     model: 'Qwen/Qwen2.5-VL-7B-Instruct'
   },
   webdav: { url: '', user: '', pass: '' },
+  github: { token: '', repo: '' }, // GitHub 私人仓库自动互通（推荐；Token/仓库名仅存本机 xc_cfg）
   szFrom: '2025-10',
   szTo: '',
   // ===== 界面自定义（v3.8.80 新增）：主界面板块/细分功能入口显隐开关（仅隐藏，不删除功能）=====
@@ -424,4 +425,3 @@ export function getTodaysPetChat() {
     return (store.cfg.petChatLog || []).filter((x) => x.date === t)
   } catch (e) { return [] }
 }
-

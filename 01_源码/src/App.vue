@@ -27,6 +27,7 @@ import { nav, navBack, syncNavFromHistory } from './utils/nav'
 import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nativeToast, isNativeHost } from './utils/platform' // ★安卓返回键/宿主桥
 import { webdavUpload, webdavDownload } from './utils/webdav'
 import { runCloudSync, readSyncState, saveSyncState } from './utils/cloudSync'
+import { runGitHubSync } from './utils/githubSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
@@ -1688,16 +1689,26 @@ const wdTpl = (kind) => {
 
 const wdBusy = ref(false)
 const wdStat = ref('')
-const wdAuto = ref(readSyncState().auto)
-let wdAutoTimer = null
-function ensureWdAutoTimer() {
-  if (wdAutoTimer) return
-  wdAutoTimer = setInterval(() => {
-    if (wdAuto.value && !document.hidden) runWdAuto(false).catch(() => {})
+const wdAuto = ref(readSyncState().auto && readSyncState().kind !== 'gh')
+const ghBusy = ref(false)
+const ghStat = ref('')
+const ghAuto = ref(readSyncState().auto && readSyncState().kind === 'gh')
+let syncTimer = null
+function ensureSyncTimer() {
+  if (syncTimer) return
+  syncTimer = setInterval(() => {
+    if (document.hidden) return
+    const st = readSyncState()
+    if (!st.auto) return
+    if (st.kind === 'gh') {
+      if (ghAuto.value) runGhSync(false).catch(() => {})
+    } else if (wdAuto.value) {
+      runWdAuto(false).catch(() => {})
+    }
   }, 45000)
 }
 async function runWdAuto(manual) {
-  if (wdBusy.value) return { ok: false }
+  if (wdBusy.value || ghBusy.value) return { ok: false }
   wdBusy.value = true
   wdStat.value = manual ? '智能同步中…' : '自动互通中…'
   try {
@@ -1719,17 +1730,61 @@ async function runWdAuto(manual) {
   }
 }
 function wdToggleAuto() {
-  wdAuto.value = !wdAuto.value
+  const want = !wdAuto.value
+  wdAuto.value = want
+  ghAuto.value = false
   const st = readSyncState()
-  st.auto = wdAuto.value
+  st.auto = want
+  st.kind = 'wd'
   saveSyncState(st)
-  if (wdAuto.value) {
-    ensureWdAutoTimer()
+  if (want) {
+    ensureSyncTimer()
     wdStat.value = '🟢 自动互通已开启，先执行一次同步'
     runWdAuto(false).catch(() => {})
   } else {
-    if (wdAutoTimer) { clearInterval(wdAutoTimer); wdAutoTimer = null }
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
     wdStat.value = '已关闭自动互通；仍可手动同步'
+  }
+}
+function ghToggleAuto() {
+  const want = !ghAuto.value
+  ghAuto.value = want
+  wdAuto.value = false
+  const st = readSyncState()
+  st.auto = want
+  st.kind = 'gh'
+  saveSyncState(st)
+  if (want) {
+    ensureSyncTimer()
+    ghStat.value = '🟢 GitHub 自动互通已开启，正在连接同步仓库…'
+    runGhSync(false).catch(() => {})
+  } else {
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
+    ghStat.value = '已关闭 GitHub 自动互通；仍可手动同步'
+  }
+}
+async function runGhSync(manual) {
+  if (wdBusy.value || ghBusy.value) return { ok: false }
+  ghBusy.value = true
+  ghStat.value = manual ? 'GitHub 智能同步中…' : 'GitHub 自动互通中…'
+  try {
+    const r = await runGitHubSync()
+    const where = r.repo ? '（' + r.repo + '）' : ''
+    ghStat.value = (r.created ? '✅ 已自动创建私人仓库并上传 ' : '✅ ') + (r.changed ? '已合并并上传云端' : '两端一致') + where + ' ' + new Date(r.ts).toLocaleString()
+    if (r.created) showToast('🔐 已创建私人同步仓库，学习数据不会公开', 'success')
+    if (r.changed) {
+      showToast('☁️ 云端发现新数据，已安全合并，即将刷新', 'success')
+      setTimeout(() => location.reload(), 700)
+    } else if (manual) {
+      showToast('☁️ GitHub 已同步，两端一致', 'success')
+    }
+    return r
+  } catch (e) {
+    ghStat.value = '❌ ' + ((e && e.message) || e)
+    if (manual) showToast('☁️ GitHub 同步失败：' + ((e && e.message) || e), 'error')
+    return { ok: false, error: (e && e.message) || e }
+  } finally {
+    ghBusy.value = false
   }
 }
 async function wdUp() {
@@ -1925,9 +1980,13 @@ if (isNativeHost()) { try { installNativeBackBehavior() } catch (e) {} } // 自�
 onMounted(() => {
   authGateInit()
   clampFloatPos()
-  if (wdAuto.value) {
-    ensureWdAutoTimer()
-    setTimeout(() => runWdAuto(false).catch(() => {}), 2200)
+  if (wdAuto.value || ghAuto.value) {
+    ensureSyncTimer()
+    const st2 = readSyncState()
+    setTimeout(() => {
+      if (st2.kind === 'gh' && ghAuto.value) runGhSync(false).catch(() => {})
+      else if (wdAuto.value) runWdAuto(false).catch(() => {})
+    }, 2200)
   }
   window.addEventListener('keydown', onKey)
   startStudyTrack()
@@ -1937,7 +1996,7 @@ onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
 })
 onUnmounted(() => {
-  if (wdAutoTimer) { clearInterval(wdAutoTimer); wdAutoTimer = null }
+  if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('xc-export-kb', () => openExp('kb'))
   window.removeEventListener('popstate', onPopState)
@@ -2941,8 +3000,27 @@ onUnmounted(() => {
           <button class="btn btn-gh" @click="clearQuizLog()">🧹 清空出题历史</button>
           <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
-<div class="sec-t">☁️ WebDAV 云同步</div>
-        <div class="sec-desc" style="margin-top:4px">网页 / iPad / 安卓互通推荐：两端填同一套 WebDAV 后点「▶ 开启自动互通」。学习数据会安全合并，不整包覆盖另一台；设置与密钥仍各自保存在本机。</div>
+<div class="sec-t">💎 GitHub 自动互通（推荐，网页可直接使用）</div>
+        <div class="sec-desc" style="margin-top:4px">坚果云的 WebDAV 不允许网页跨域读取（会报 Failed to fetch）。改用 GitHub 私人仓库后，网页 / iPad / 安卓都可直接自动互通；Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
+        <div class="fld">
+          <label>GitHub Token（Settings → Developer settings → Personal access tokens，勾选 repo 权限）</label>
+          <input v-model="store.cfg.github.token" type="password" autocomplete="new-password" placeholder="ghp_… 或 github_pat_…" @change="saveCfg()" />
+        </div>
+        <div class="fld">
+          <label>同步仓库（留空 = 自动创建私人仓库 xingce-ai-cloud-sync）</label>
+          <input v-model="store.cfg.github.repo" autocomplete="off" placeholder="ly7638714/xingce-ai-cloud-sync" @change="saveCfg()" />
+        </div>
+        <div class="exp-choices">
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
+          {{ ghStat || '提示：首次点同步会自动新建私人仓库保存学习数据，不会出现在公开源码仓库里。Token 有有效期，到期后在每台设备重新填写即可。' }}
+        </div>
+
+
+        <div class="sec-t">☁️ WebDAV 备选同步（Nextcloud / 自建；坚果云网页会跨域失败）</div>
+        <div class="sec-desc" style="margin-top:4px">仅适合本身允许浏览器跨域的 WebDAV。坚果云 dav.jianguoyun.com 在网页端会报 Failed to fetch，如需免费互通请优先用上方 GitHub 方案。</div>
         <div class="exp-choices" style="margin:4px 0 8px">
           <button class="btn btn-gh" @click="wdTpl('jianguo')">🌰 坚果云模板</button>
           <button class="btn btn-gh" @click="wdTpl('nextcloud')">🏠 Nextcloud/自建模板</button>

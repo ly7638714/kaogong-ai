@@ -45,15 +45,21 @@ export function cloudSyncUrl() {
 export function readSyncState() {
   try {
     const s = JSON.parse(localStorage.getItem(SYNC_STATE_KEY) || 'null') || {}
-    return { auto: !!s.auto, last: Number(s.last) || 0, base: s.base && typeof s.base === 'object' ? s.base : {} }
+    return {
+      auto: !!s.auto,
+      last: Number(s.last) || 0,
+      kind: s.kind === 'gh' ? 'gh' : 'wd',
+      base: s.base && typeof s.base === 'object' ? s.base : {}
+    }
   } catch (e) {
-    return { auto: false, last: 0, base: {} }
+    return { auto: false, last: 0, kind: 'wd', base: {} }
   }
 }
 
 export function saveSyncState(p) {
   try {
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
+      kind: p.kind === 'gh' ? 'gh' : 'wd',
       auto: !!p.auto,
       last: Number(p.last) || Date.now(),
       lastStat: String(p.lastStat || '').slice(0, 300),
@@ -217,6 +223,20 @@ function scalarBaseline(data) {
   return base
 }
 
+export function syncBaseline(data) {
+  return scalarBaseline(data || {})
+}
+
+// 云端下载后统一做“下载 → 安全合并 → 写回本机”，返回是否需要回传云端。
+export function applyLocalMerge(localAll, remoteRaw, baseline = {}) {
+  const local = syncScopeFromBackup(localAll)
+  const remote = remoteRaw ? syncScopeFromBackup(remoteRaw) : {}
+  const merged = mergeSyncData(local, remote, baseline)
+  const changed = writeMerged(merged)
+  const sameAsRemote = remoteRaw ? fingerprint(syncScopeFromBackup(remoteRaw)) === fingerprint(merged) : false
+  return { local, remote, merged, changed, sameAsRemote }
+}
+
 function authHdrs(user, pass) {
   const b64 = (s) => {
     try { return btoa(unescape(encodeURIComponent(s))) } catch (e) { return '' }
@@ -239,21 +259,15 @@ export async function runCloudSync() {
   if (getRes.ok) remoteRaw = await getRes.json()
   else if (getRes.status !== 404) throw new Error('读取云端失败 HTTP ' + getRes.status)
 
-  const localAll = collectAll()
-  const local = syncScopeFromBackup(localAll)
-  const remote = remoteRaw ? syncScopeFromBackup(remoteRaw) : {}
   const state = readSyncState()
-  const merged = mergeSyncData(local, remote, state.base)
-  const changed = writeMerged(merged)
-
-  const sameAsRemote = remoteRaw ? fingerprint(syncScopeFromBackup(remoteRaw)) === fingerprint(merged) : false
+  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
-  if (!sameAsRemote) {
-    const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: merged }
+  if (!plan.sameAsRemote) {
+    const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
     const putRes = await fetch(url, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) })
     if (!putRes.ok) throw new Error('上传云端失败 HTTP ' + putRes.status)
     putTs = body.t
   }
-  saveSyncState({ auto: state.auto, last: putTs, lastStat: '已同步 ' + new Date(putTs).toLocaleString(), base: scalarBaseline(merged) })
-  return { ok: true, changed: changed > 0, ts: putTs, http }
+  saveSyncState({ kind: state.kind, auto: state.auto, last: putTs, lastStat: '已同步 ' + new Date(putTs).toLocaleString(), base: scalarBaseline(plan.merged) })
+  return { ok: true, changed: plan.changed > 0, ts: putTs, http }
 }

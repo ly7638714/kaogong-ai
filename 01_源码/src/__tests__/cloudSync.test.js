@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup } from '../utils/cloudSync'
+import { applyLocalMerge, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup } from '../utils/cloudSync'
+
+const testMem = new Map()
+globalThis.localStorage = {
+  getItem: (k) => (testMem.has(k) ? testMem.get(k) : null),
+  setItem: (k, v) => testMem.set(k, String(v)),
+  removeItem: (k) => testMem.delete(k),
+  key: (i) => [...testMem.keys()][i] ?? null,
+  get length() { return testMem.size }
+}
 
 describe('cloudSync 多端安全合并', () => {
   it('远端/本机不同集合都保留，不整包覆盖', () => {
@@ -39,5 +48,21 @@ describe('cloudSync 多端安全合并', () => {
     const remote = { xc_msgs: JSON.stringify([]) }
     const merged = mergeSyncData(local, remote, {})
     expect(JSON.parse(merged.xc_msgs)).toHaveLength(1)
+  })
+
+  it('applyLocalMerge 下载远端后把两端集合安全合并并写回本机', () => {
+    testMem.clear()
+    testMem.set('xc_msgs', JSON.stringify([{ id: 'm1', t: 1690000000100, role: 'user', text: '本机' }]))
+    const backup = {
+      data: {
+        xc_msgs: JSON.stringify([{ id: 'm2', t: 1690000000300, role: 'assistant', text: '云端' }]),
+        xc_cfg: '{"webdav":{"pass":"secret"}}'
+      }
+    }
+    const plan = applyLocalMerge({ data: { xc_msgs: testMem.get('xc_msgs') } }, backup, {})
+    const localItems = JSON.parse(JSON.parse(JSON.stringify(localStorage.getItem('xc_msgs'))))
+    expect(localItems.map((x) => x.id)).toEqual(['m1', 'm2'])
+    expect(plan.sameAsRemote).toBe(false)
+    expect(localStorage.getItem('xc_cfg')).toBeNull()
   })
 })
