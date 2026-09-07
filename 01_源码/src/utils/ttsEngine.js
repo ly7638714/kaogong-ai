@@ -564,6 +564,7 @@ export function dashCfg() {
 export async function dashSynthesize(text, opts = {}) {
   const cfg = dashCfg()
   if (!cfg) return { ok: false, msg: '未配置通义 DashScope Key（可在 设置·语音·阿里百炼 填写，或复用图形增强/视觉里的通义 Key）' }
+  const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
   const voice = opts.voice != null ? opts.voice : cfg.voice
   // 自定义音色（自然语言指令式，实测可用）：当传入 voiceCustom 时优先用 voice_design，
   // 不再固定某预设音色，实现「自定义 + 多角色」而不依赖本账号未开通的 qwen3-tts-vc/vd 模型。

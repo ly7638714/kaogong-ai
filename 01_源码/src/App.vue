@@ -699,6 +699,7 @@ function doRename() {
 // ===== 背景音乐 / 萌宠浮控件：默认置顶 + 支持拖拽（位置记忆到 localStorage）=====
 const musicPos = ref(null) // {x, y}
 const petPos = ref(null)
+const petDock = ref('') // pet 贴边隐藏方向：left / right（触碰先唤出完整浮球）
 // 位置记忆按视口分档存储（手机拖的位置不影响桌面），兼容旧单档 key
 const vpBucket = () => vpB()
 const readPos = (k) => { try { return JSON.parse(localStorage.getItem(k + '_' + vpBucket()) || localStorage.getItem(k) || 'null') } catch (e) { return null } }
@@ -706,10 +707,44 @@ try {
   const mp = readPos('xc_music_pos')
   const pp = readPos('xc_pet_pos')
   if (mp && typeof mp.x === 'number') musicPos.value = mp
-  if (pp && typeof pp.x === 'number') petPos.value = pp
+  if (pp && typeof pp.x === 'number') {
+    petPos.value = pp
+    const dockSide = petDockSide(pp)
+    if (dockSide) petDock.value = dockSide
+  }
   const ppp = readPos('xc_pet_panel_pos')
   if (ppp && typeof ppp.x === 'number') petPanelPos.value = ppp
 } catch (e) {}
+function petDockSide(p) {
+  if (!p || typeof p.x !== 'number') return ''
+  const w = 54
+  const vw = window.innerWidth
+  const leftGap = p.x
+  const rightGap = vw - p.x - w
+  if (leftGap < 12 && leftGap <= rightGap) return 'left'
+  if (rightGap < 12) return 'right'
+  return ''
+}
+function petDockPos(side) {
+  const ts = topNavSafe()
+  const vw = window.innerWidth
+  const p = petPos.value || {}
+  const x = side === 'left' ? -42 : vw - 12
+  return { x, y: typeof p.y === 'number' ? p.y : ts + 12 }
+}
+function revealPetDock() {
+  const side = petDock.value
+  if (!side) return
+  petDock.value = ''
+  const ts = topNavSafe()
+  const vw = window.innerWidth
+  const p = petPos.value || {}
+  petPos.value = { x: side === 'left' ? 14 : vw - 54 - 14, y: typeof p.y === 'number' ? p.y : ts + 12 }
+  try {
+    const vp = vpBucket()
+    localStorage.setItem('xc_pet_pos_' + vp, JSON.stringify(petPos.value))
+  } catch (e) {}
+}
 // 位置记忆夹回视口（防止窗口变小/分辨率变化后浮窗跑到屏幕外）
 // 悬浮物安全区：避免落在顶部 HUD 区与底部输入/操作区（纯函数见 utils/floatClamp.js，可单测）
 import { floatSafeClamp, vpBucket as vpB, FLOAT_TOP_SAFE } from './utils/floatClamp'
@@ -733,7 +768,8 @@ function topNavSafe() {
 function clampFloatPos() {
   const ts = topNavSafe()
   const vw = window.innerWidth, vh = window.innerHeight
-  if (petPos.value) petPos.value = floatSafeClamp(petPos.value.x, petPos.value.y, 54, 54, vw, vh, ts)
+  if (petDock.value) petPos.value = petDockPos(petDock.value)
+  else if (petPos.value) petPos.value = floatSafeClamp(petPos.value.x, petPos.value.y, 54, 54, vw, vh, ts)
   else petPos.value = { x: vw - 54 - 14, y: ts + 12 } // 无保存位置时给一个避开顶部导航的默认落点
   if (musicPos.value) musicPos.value = floatSafeClamp(musicPos.value.x, musicPos.value.y, 54, 54, vw, vh, ts)
   else musicPos.value = { x: 14, y: ts + 12 }
@@ -797,12 +833,19 @@ function onFloatDragMove(e) {
 }
 function onFloatDragUp() {
   if (!dragState) return
-  const { el } = dragState
+  const { el, key: dKey } = dragState
   dragState = null
   el.classList.remove('dragging')
   document.removeEventListener('pointermove', onFloatDragMove)
   document.removeEventListener('pointerup', onFloatDragUp)
   try {
+    const side = dKey === 'pet' ? petDockSide(petPos.value) : ''
+    if (side) {
+      petDock.value = side
+      petPos.value = petDockPos(side)
+    } else if (dKey === 'pet') {
+      petDock.value = ''
+    }
     const vp = vpBucket()
     localStorage.setItem('xc_music_pos_' + vp, JSON.stringify(musicPos.value))
     localStorage.setItem('xc_pet_pos_' + vp, JSON.stringify(petPos.value))
@@ -812,7 +855,10 @@ function onFloatDragUp() {
 function floatClick(key) {
   if (dragMoved) { dragMoved = false; return }
   if (key === 'music') toggleMusic()
-  else openPet()
+  else {
+    if (petDock.value) { revealPetDock(); return }
+    openPet()
+  }
 }
 
 // ===== 背景（纯色 / 图片壁纸）=====
@@ -3519,7 +3565,7 @@ onUnmounted(() => {
       </div>
     </Transition>
     <!-- 萌宠 -->
-    <div v-if="!uiHiddenOf('pet')" class="pet-float" :style="floatStyle('pet')" title="我的萌宠：点击互动 · 按住可拖动" @click="floatClick('pet')" @pointerdown="startFloatDrag($event, 'pet')">
+    <div v-if="!uiHiddenOf('pet')" class="pet-float" :class="{ dock: !!petDock }" :style="floatStyle('pet')" :title="petDock ? '触碰萌宠先唤出，再点一次进入聊天' : '我的萌宠：点击互动 · 按住可拖动'" @click="floatClick('pet')" @pointerdown="startFloatDrag($event, 'pet')">
       <div v-if="bubble && !petMuted" class="pet-bubble">{{ bubble }}</div>
       <PetAvatar :size="40" class="pet-emoji-av" />
       <span class="pet-mood">{{ petMood.emoji }}</span>

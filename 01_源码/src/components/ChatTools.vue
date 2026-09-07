@@ -4,6 +4,24 @@ import { toRefs, ref } from 'vue'
 import ZhentiPdfLib from './ZhentiPdfLib.vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 const pdfLibShow = ref(false)
+const trainPickShow = ref(false)
+const TRAIN_MODULES = [
+  { id: 'single', ic: '⚡', name: '单题快练', c: '#34d399', tag: '专项速刷：选板块和题型逐题突破，答完即批、错题入库。', pts: ['本地/离线可用', '答错钉同考点', '自动进“出题集”可二刷'] },
+  { id: 'ai', ic: '🎲', name: 'AI 整卷出题', c: '#5cc8ff', tag: '按真实卷面结构 AI 智能组卷：模块、题量、难度、补短都能调。', pts: ['断点续出 / 只补失败', '仿真答题卡模式', '成绩单多格式导出'] },
+  { id: 'import', ic: '📂', name: '导入材料', c: '#fbbf24', tag: '把本地真题/讲义（图片、PDF、Word、txt、tex）识别成可做题。', pts: ['OCR 后先“预览校对”再入库', '可一键存入错题本'] },
+  { id: 'wrong', ic: '📚', name: '错题集组卷', c: '#fb7185', tag: '从错题本组卷二刷：只看未复盘、按错次优先，针对性重做。', pts: ['联动今日复习中枢', '不会重复入库'] },
+  { id: 'zhenti', ic: '📋', name: '真题快练', c: '#a78bfa', tag: '真题库快速练：选年份卷和板块，AI 负责判题与解析。', pts: ['支持按年份/板块选题'] },
+  { id: 'morning', ic: '🌅', name: '晨练包', c: '#f97316', tag: '一键 15 题晨练组合卷，资料、常识与错题二刷一次完成。', pts: ['完成联动看板“晨练”打卡'] },
+  { id: 'weekRedo', ic: '📅', name: '每周重做', c: '#22d3ee', tag: '把本周到期和反复出错的题重新组卷，按规则再卷一遍。', pts: ['到期与复错优先'] }
+]
+function startTrainModule(id) {
+  trainPickShow.value = false
+  openExam.value(id)
+}
+function startOffline() {
+  examOffline.value = true
+  openExam.value('single')
+}
 const {
   isNarrow,
   toolsCollapsed,
@@ -57,28 +75,48 @@ const {
             </div>
           </div>
           <div class="train-bar">
-        <span class="tb-l">🎯 智能训练</span>
-        <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
-          <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
-        </select>
-        <button class="btn btn-gh tb-btn" title="单题快练（原模拟出题）：选板块随机出1题，即时批改·可再来一题·错题入库" @click="openExam('single')">⚡ 单题快练</button>
-        <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="examOffline = true; openExam('single')">📴 离线练习</button>
-        <button class="btn btn-pri tb-btn" title="🌅 每日晨练包：资料速算5 + 常识速测5 + 错题未复盘二刷5，一键15题组合卷" @click="openExam('morning')">🌅 晨练包</button>
-        <button class="btn btn-gh tb-btn" title="📐 锚点自测：每板块10道固定真题校准能力值（累计作答100题后解锁）" @click="openAnchor()">📐 锚点自测</button>
-        <button class="btn btn-gh tb-btn" title="🎲 AI 整卷出题：真实卷面结构·自选模块/题量/难度/补短·断点续出·成绩单多格式导出（导入材料/错题组卷/真题快练等在考场配置页内切换）" @click="openExam('ai')">🎲 AI 整卷出题</button>
-        <button class="btn btn-gh tb-btn" title="📄 本地真题PDF卷库：选择存有历年真题 PDF 的文件夹(国考/各省)，App 内置阅读器直接翻阅；也可用其它 APP 打开/分享" @click="pdfLibShow = true">📄 真题PDF库</button>
-        
-        <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
+            <span class="tb-l">🎯 智能训练</span>
+            <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
+              <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
+            </select>
+            <button class="btn btn-pri tb-btn train-launch" title="统一入口：先选模块，再进入对应训练配置" @click="trainPickShow = true">🎯 训练中心</button>
+            <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="startOffline()">📴 离线练习</button>
+          </div>
+          <div class="train-utils">
+            <span class="tu-l">🧰 快捷工具</span>
+            <button class="btn btn-gh tb-btn" title="📐 锚点自测：每板块10道固定真题校准能力值（累计作答100题后解锁）" @click="openAnchor()">📐 锚点自测</button>
+            <button class="btn btn-gh tb-btn" title="📄 本地真题PDF卷库：选择存有历年真题 PDF 的文件夹(国考/各省)，App 内置阅读器直接翻阅；也可用其它 APP 打开/分享" @click="pdfLibShow = true">📄 真题PDF库</button>
+            <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
+            <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
+            <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
+            <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
             <button
               class="btn tb-btn"
               :class="store.cfg.examMode ? 'btn-pri' : 'btn-gh'"
               title="考场计时：开启后每次提问按问数限时（1 问=1 分钟），AI 回复后统计用时；关闭则不打扰"
               @click="store.cfg.examMode = !store.cfg.examMode; saveCfg()"
             >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
-            <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
-            <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
-            <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
             <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="trainPickShow" class="ov show train-pick-ov" @click.self="trainPickShow = false">
+        <div class="pnl train-pick-pnl">
+          <div class="pnl-top">
+            <button class="pnl-top-b" @click="trainPickShow = false">← 返回</button>
+            <span class="pnl-top-t">🎯 训练中心 · 按需选择</span>
+          </div>
+          <div class="tp-tip">同一个入口进入后按需选择：专项速刷、整卷模考、导入真题、复盘错题，或完成晨练/周重做。</div>
+          <div class="tp-grid">
+            <button v-for="m in TRAIN_MODULES" :key="m.id" class="tp-card" :style="{ borderColor: m.c + '88', background: 'linear-gradient(135deg,' + m.c + '1a, rgba(255,255,255,0.015))' }" @click="startTrainModule(m.id)">
+              <span class="tp-head">
+                <span class="tp-ic" :style="{ color: m.c, background: m.c + '22' }">{{ m.ic }}</span>
+                <span class="tp-name" :style="{ color: m.c }">{{ m.name }}</span>
+                <span class="tp-arrow">›</span>
+              </span>
+              <span class="tp-desc">{{ m.tag }}</span>
+              <span class="tp-pts"><span v-for="p in m.pts" :key="p" class="tp-pt">{{ p }}</span></span>
+            </button>
           </div>
         </div>
       </div>

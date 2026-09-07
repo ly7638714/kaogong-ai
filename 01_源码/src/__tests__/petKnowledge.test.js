@@ -22,7 +22,7 @@ describe('petKnowledge 萌宠功能知识库', () => {
     const t = petFeatureText()
     expect(t.length).toBeGreaterThan(1800)
     expect(t.length).toBeLessThan(5000)
-    for (const kw of ['单题快练', '模拟组卷', '立体图推', '资料速算', '理论课堂', '错题本', 'AI 用量', '音色市场', '3D', '朗读']) {
+    for (const kw of ['训练中心', 'AI 整卷出题', '立体图推', '资料速算', '理论课堂', '错题本', 'AI 用量', '音色市场', '3D', '朗读']) {
       expect(t, '缺少关键词：' + kw).toContain(kw)
     }
   })
