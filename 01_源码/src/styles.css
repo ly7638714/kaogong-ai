@@ -4686,6 +4686,24 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .pc-who { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft, rgba(37,99,235,.15)); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
 .pc-txt { background: var(--glass-dark, rgba(15,23,42,.08)); border-radius: 8px; padding: 5px 8px; color: var(--text, #222); max-width: 82%; word-break: break-word; }
 .pc-msg.pet .pc-txt { background: var(--accent-soft, rgba(37,99,235,.12)); }
+.pet-md { display: block; min-width: 0; width: auto; line-height: 1.62; white-space: normal; overflow-wrap: anywhere; }
+.pet-md > :first-child { margin-top: 0; }
+.pet-md > :last-child { margin-bottom: 0; }
+.pet-md p, .pet-md ul, .pet-md ol { margin: 5px 0; }
+.pet-md ul, .pet-md ol { padding-left: 20px; }
+.pet-md h1, .pet-md h2, .pet-md h3, .pet-md h4 { margin: 8px 0 4px; font-size: 14px; font-weight: 800; color: var(--text, #222); line-height: 1.45; }
+.pet-md h3, .pet-md h4 { font-size: 12.5px; }
+.pet-md table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 11.5px; }
+.pet-md th, .pet-md td { border: 1px solid var(--glass-border, rgba(128,128,128,.3)); padding: 4px 6px; text-align: left; vertical-align: top; }
+.pet-md th { background: var(--accent2, rgba(37,99,235,.12)); }
+.pet-md .table-scroll { max-width: 100%; overflow-x: auto; }
+.pet-md img, .pet-md svg { max-width: 100%; height: auto; display: block; margin: 6px auto; }
+.pet-md pre, .pet-md code { font-family: Consolas, "Microsoft YaHei", monospace; background: var(--glass-bg, rgba(128,128,128,.14)); border-radius: 5px; }
+.pet-md code { padding: 1px 4px; font-size: 11px; }
+.pet-md pre { padding: 6px 8px; overflow-x: auto; white-space: pre-wrap; }
+.pet-md blockquote { margin: 6px 0; padding: 4px 8px; border-left: 3px solid var(--accent, #2563eb); background: var(--accent2, rgba(37,99,235,.08)); border-radius: 0 5px 5px 0; color: var(--text2, #444); }
+.pet-md .code-wrap { position: relative; }
+.pet-md .code-copy { position: absolute; right: 4px; top: 4px; font-size: 10px; padding: 1px 6px; border: 1px solid var(--glass-border); border-radius: 6px; background: var(--glass-bg); color: var(--text2); cursor: pointer; }
 .pc-input-row { display: flex; gap: 6px; align-items: center; }
 
 .pet-plate-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--accent, #2563eb); color: #fff; font-size: 11px; font-weight: 600; vertical-align: middle; }
