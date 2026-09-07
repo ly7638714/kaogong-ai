@@ -114,6 +114,7 @@ function askCard(c) {
     '④ 给一句能记住的口诀；\n' +
     '⑤ 出一道检验题（四个选项，最后单独一行【正确答案】X）。\n' +
     '我参考的知识卡内容：\n特征：' + (c.signs || []).join('、') + '\n步骤：' + (c.steps || []).join(' → ') + '\n陷阱：' + (c.traps || []).join('、') + '\n口诀：' + c.tip
+    + (c.detail ? '\n老师讲法：' + c.detail : '')
 }
 // 展开/收起知识卡详情；点开查看 = 学过 → 知识图谱星球点亮
 function toggleCard(c) {
@@ -331,6 +332,7 @@ function startRandom() {
                     <div v-if="c.signs && c.signs.length" class="kc-sec"><b>🔍 特征</b><div class="kc-tags"><span v-for="s in c.signs" :key="s" class="kc-tag">{{ s }}</span></div></div>
                     <div v-if="c.steps && c.steps.length" class="kc-sec"><b>🪜 操作步骤</b><ol class="kc-steps"><li v-for="(s, i) in c.steps" :key="i">{{ s }}</li></ol></div>
                     <div v-if="c.traps && c.traps.length" class="kc-sec"><b>⚠️ 常见陷阱</b><div class="kc-tags"><span v-for="t in c.traps" :key="t" class="kc-tag danger">{{ t }}</span></div></div>
+                    <div v-if="c.detail" class="kc-sec"><b>📖 老师讲法</b><div class="kc-detail">{{ c.detail }}</div></div>
                     <div v-if="c.example" class="kc-ex">
                       <div class="kc-ex-q">📝 {{ c.example.q }}</div>
                       <div v-if="c.example.opts" class="kc-ex-opts"><span v-for="o in c.example.opts" :key="o" class="kc-opt">{{ o }}</span></div>
@@ -462,6 +464,7 @@ function startRandom() {
 .kc-tag.danger { background: rgba(251, 113, 133, .1); color: #fda4af; border-color: rgba(251, 113, 133, .3); }
 .kc-steps { margin: 4px 0 0 18px; padding: 0; }
 .kc-steps li { margin-bottom: 3px; }
+.kc-detail { margin-top: 4px; font-size: 12.5px; line-height: 1.75; color: var(--text); white-space: pre-line; }
 .kc-ex { background: rgba(59, 130, 246, .08); border: 1px solid rgba(59, 130, 246, .2); border-radius: 10px; padding: 8px 10px; margin: 8px 0; font-size: 12.5px; }
 .kc-ex-q { color: var(--text); }
 .kc-ex-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
