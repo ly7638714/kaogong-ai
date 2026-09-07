@@ -10,6 +10,7 @@ import { exportPaper } from '../utils/export'
 import { renderMd } from '../utils/renderMd'
 import { zhentiIndex, zhentiPaper, zhentiToItems, zhentiTypes } from '../data/zhenti'
 import { allAnchors } from '../data/anchorSet' // 35号批次4-B(2/2)：锚点自测（每板块10道固定真题）
+import { pickGenCfg } from '../utils/fastMode' // 出题/预生成统一快模型路由
 import { petAnalyzeCurrent } from '../utils/pet'
 import { appendAttempt, buildAttempt, backfillFromQuizCol } from '../utils/attemptLog' // 35号批次1-B 作答事件流
 import { autoWrongReasons } from '../utils/trapMap' // 35号批次3-A 陷阱映射→错因
@@ -42,18 +43,8 @@ const fastGenModel = ref(localStorage.getItem('xc_fast_gen_model') || '') // 出
 watch(fastGenModel, (v) => { try { localStorage.setItem('xc_fast_gen_model', String(v || '').trim()) } catch (e) {} })
 const useFigGen = ref(localStorage.getItem('xc_use_fig_gen') === '1') // 出题用智谱快模型（复用图形增强配置）
 watch(useFigGen, (v) => { try { localStorage.setItem('xc_use_fig_gen', v ? '1' : '0') } catch (e) {} })
-// 出题/预生成/解析/质检统一取生成模型：智谱快模型 > 出题快模型名 > 文字模型
-function pickGenC() {
-  let c = activeCfg(false)
-  if (!c || !c.key) return c
-  const DEF_URL = { ds: 'https://api.deepseek.com/chat/completions', zhipu: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', sf: 'https://api.siliconflow.cn/v1/chat/completions', openai: 'https://api.openai.com/v1/chat/completions' }
-  const withUrl = (o) => { if (!o || o.url) return o; return { ...o, url: DEF_URL[o.prov] || DEF_URL.ds } }
-  const fig = store.cfg.fig
-  if (useFigGen.value && fig && fig.key) return withUrl({ prov: fig.prov || 'zhipu', key: fig.key, url: fig.url, model: fig.model || 'glm-4.6-flash' })
-  const fgm = String(fastGenModel.value || '').trim()
-  if (fgm) c = { ...c, model: fgm }
-  return withUrl(c)
-}
+// 出题/预生成/解析/质检统一取生成模型：智谱快模型 > 出题快模型 > 对话快模型 > 文字模型
+function pickGenC() { return pickGenCfg() }
 const difficulty = ref('real') // 出题难度：默认真题级；可自由选 curve(智能曲线) / easy / mid / hard
 const paperDir = ref('auto') // 组卷问法：auto=AI随机(是/非) / is=选是 / not=选非 / custom=自定义
 const paperDirText = ref('')

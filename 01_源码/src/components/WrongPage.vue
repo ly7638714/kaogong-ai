@@ -21,6 +21,7 @@ import { BATCH_MAX, batchReviewSys, batchReviewUser, parseBatchText, batchReview
 import { weakCandidates } from '../utils/weakTask' // 补弱任务（答错>=3同类自动进今日目标）
 import { speak as brSpeak } from '../utils/tts' // 批量复盘报告朗读
 import { saveText } from '../utils/downloadOut' // v3.8.214 统一保存出口
+import { pickGenCfg } from '../utils/fastMode' // 错题变式也走单题快练/对话快模型的统一快模型路由
 const md = (t) => renderMd(t || '')
 import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent } from '../utils/pet'
@@ -786,7 +787,27 @@ const vtAnswers = ref({}) // 题号 -> 作答（选项字母；无选项题用 �
 const vtScore = ref(0)
 const vtOpen = ref({}) // 批改结果里展开的解析题号
 const vtQ = computed(() => vtQueue.value[vtIdx.value] || null)
-const vtMax = computed(() => Math.min(3, Math.max(1, vtQueue.value.length || 3)))
+const vtSource = ref('lib') // 变式来源：lib=错题集同类 / ai=AI 变式
+const vtDifficulty = ref('mid') // AI 难度：easy / mid / hard / mix
+const VT_DIFFS = [
+  { id: 'easy', label: '简单', desc: '只换话题/素材/数字，原题骨架不变' },
+  { id: 'mid', label: '中等', desc: '保留骨架，用等价表述/条件小改考验真懂' },
+  { id: 'hard', label: '困难', desc: '核心考点不变，在原题骨架上复合变形' }
+]
+const VT_DIFF_RULES = {
+  easy: '简单变式：只更换话题、主体、数字或场景，题干描述方式可与原题基本一致，考生会用原题方法就能解出。',
+  mid: '中等变式：保留原题的核心骨架和考点，但更换话题，并把部分条件改为等价但不同的表述、呈现顺序或数值关系，只有真正理解原题骨架才能识别并解出。',
+  hard: '困难变式：核心考点与原题完全一致，但要在原题骨架基础上做复合变形：可增加限制条件、改变设问方向、合并邻近考点、增强干扰项迷惑度，让题目更像真正的难题。'
+}
+function vtDiffPlan(n, level) {
+  if (level === 'mix') {
+    const seq = ['easy', 'mid', 'hard']
+    return Array.from({ length: n }, (_, i) => seq[i % seq.length])
+  }
+  return Array.from({ length: n }, () => level || 'mid')
+}
+const vtLibMax = computed(() => Math.min(3, Math.max(0, relatedQs.value.length)))
+const vtMax = computed(() => (vtSource.value === 'lib' ? Math.max(1, vtLibMax.value) : 3))
 const vtAllWrong = computed(() => vtMode.value === 'result' && vtQueue.value.length > 0 && vtScore.value === 0)
 const origStem = computed(() => {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
@@ -799,16 +820,17 @@ function wrongToVt(wq) {
     options: choices,
     answer: (choices.length >= 2 ? answerLetter(wq.answer || '') : String(wq.answer || '').trim().toUpperCase()) || 'A',
     explain: String(wq.explain || wq.analysis || '') + (wq.designer ? '\n🧠 命题意图与陷阱：' + wq.designer : '') + (wq.method ? '\n⚡ 秒杀：' + wq.method : ''),
-    source: 'lib', subject: wq.subject || '未分类'
+    source: 'lib', subject: wq.subject || '未分类', difficulty: '错题同类'
   }
 }
 function startVariant() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q || vtBusy.value) return
-  const lib = relatedQs.value.slice(0, 3).map((r) => wrongToVt(r.x))
-  vtQueue.value = lib
+  vtSource.value = relatedQs.value.length ? 'lib' : 'ai'
+  vtDifficulty.value = 'mid'
+  vtQueue.value = []
   vtMode.value = 'pick'
-  vtCount.value = Math.min(3, Math.max(1, lib.length || 3))
+  vtCount.value = vtSource.value === 'lib' ? Math.min(3, Math.max(1, relatedQs.value.length)) : 3
   vtAnswers.value = {}
   vtScore.value = 0
   vtOpen.value = {}
@@ -816,32 +838,45 @@ function startVariant() {
   vtPick.value = ''
   vtShow.value = true
 }
+function chooseVtSource(s) {
+  if (s === 'lib' && !relatedQs.value.length) {
+    showToast('当前没有同类错题，可使用 AI 变式', 'info')
+    return
+  }
+  vtSource.value = s
+  vtCount.value = s === 'lib' ? Math.min(3, Math.max(1, relatedQs.value.length)) : Math.min(3, Math.max(1, vtCount.value || 3))
+}
+function chooseVtDiff(d) {
+  vtDifficulty.value = d
+}
 function vtStartDo() {
   const n = vtCount.value
-  if (vtQueue.value.length) {
-    vtQueue.value = vtQueue.value.slice(0, n)
+  vtQueue.value = []
+  vtIdx.value = 0
+  vtPick.value = ''
+  vtAnswers.value = {}
+  if (vtSource.value === 'lib') {
+    if (!relatedQs.value.length) {
+      showToast('当前没有同类错题，请改用 AI 变式', 'info')
+      return
+    }
+    vtQueue.value = relatedQs.value.slice(0, n).map((r) => wrongToVt(r.x))
     vtMode.value = 'do'
-    vtIdx.value = 0
-    vtPick.value = ''
-    vtAnswers.value = {}
   } else {
-    // 错题集无同类 → AI 按题量生成
     vtBusy.value = true
     vtMode.value = 'do'
-    vtQueue.value = []
-    vtIdx.value = 0
-    vtPick.value = ''
-    vtAnswers.value = {}
-    generateAiVariants(n)
+    generateAiVariants(n, vtDifficulty.value)
   }
 }
-async function generateAiVariants(n) {
+async function generateAiVariants(n, level = 'mid') {
   try {
+    const diffs = vtDiffPlan(n, level)
+    const jobs = []
     for (let i = 0; i < n; i++) {
-      const item = await vtAskAi()
-      if (item) vtQueue.value.push(item)
-      else break
+      jobs.push(vtAskAi(i + 1, n, diffs[i] || 'mid'))
     }
+    const items = (await Promise.all(jobs)).filter(Boolean)
+    vtQueue.value.push(...items)
     if (!vtQueue.value.length) { vtClose(); return }
     vtIdx.value = 0
     vtPick.value = ''
@@ -850,15 +885,33 @@ async function generateAiVariants(n) {
     vtBusy.value = false
   }
 }
-async function vtAskAi() {
+async function vtAskAi(idx = 1, n = 1, level = 'mid') {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q) return null
-  const reply = await aiRun(async (c) => {
-    const sys = '你是行测命题老师。请基于原题出一道【考点题型完全相同、题干素材全新】的变式检验题，严格只输出 JSON：{"stem":"题干（含完整 A/B/C/D 四个选项）","answer":"正确选项字母（A-D）","explain":"解题思路 + 考点 + 干扰项陷阱，200 字内"}。注意：JSON 字符串内禁止使用英文双引号，需要强调的词请用中文引号「」或『』，四个选项用换行分隔。'
-    const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 700)
-    return await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + stem + '\n【原答案】' + (q.answer || '') }], 900, 30000)
-  }, { keyHint: '文字模型' })
-  if (reply == null) return null
+  const c = pickGenCfg()
+  if (!c || !c.key) {
+    showToast('请先配置文字模型 API Key（设置 → 模型）', 'error')
+    return null
+  }
+  const diffLabel = (VT_DIFFS.find((d) => d.id === level) || {}).label || '中等'
+  const sys = '你是行测命题老师。请先提炼原题的核心骨架（题型判定、推理/解题链路、答案判定依据），再按指定难度出一道【核心考点与原题一致、题干素材全新】的变式检验题，严格只输出 JSON：{"stem":"题干（含完整 A/B/C/D 四个选项）","answer":"正确选项字母（A-D）","explain":"解题思路 + 核心骨架 + 与难度匹配的干扰项陷阱，200 字内"}。注意：JSON 字符串内禁止使用英文双引号，需要强调的词请用中文引号「」或『』，四个选项用换行分隔。' +
+    '\n本次难度：' + diffLabel + '。' + (VT_DIFF_RULES[level] || VT_DIFF_RULES.mid) +
+    (n > 1 ? '\n这是本轮第 ' + idx + '/' + n + ' 道变式：请与其他变式使用完全不同的素材、数字、主体和场景，避免题干互相雷同。' : '')
+  const stem = String(q.question || q.q || q.stem || '').replace(/<[^>]+>/g, ' ').slice(0, 700)
+  const core = [
+    q.method ? '秒杀规律：' + String(q.method).slice(0, 200) : '',
+    q.note ? '笔记：' + String(q.note).slice(0, 200) : '',
+    q.designer ? '命题设计：' + String(q.designer).slice(0, 260) : '',
+    q.explain ? '解析要点：' + String(q.explain).replace(/<[^>]+>/g, ' ').slice(0, 360) : ''
+  ].filter(Boolean).join('\n').slice(0, 650)
+  let reply = ''
+  try {
+    reply = String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + stem + '\n【原答案】' + (q.answer || '') + (core ? '\n【原题骨架/考点参考】' + core : '') }], 1000, 30000)) || '')
+  } catch (e) {
+    showToast('变式生成失败：' + String((e && e.message) || e).slice(0, 80), 'error')
+    return null
+  }
+  if (!reply) { showToast('变式生成失败：模型未返回内容', 'error'); return null }
   let obj = null
   const rawTxt = String(reply || '').replace(/```json|```/g, '').trim()
   try { obj = JSON.parse(rawTxt) } catch (e) {}
@@ -874,7 +927,7 @@ async function vtAskAi() {
     stem: String(obj.stem).replace(/<[^>]+>/g, ' ').trim(),
     answer: String(obj.answer || '').trim().toUpperCase(),
     explain: String(obj.explain || ''),
-    source: 'ai', subject: (q.subject || '未分类'),
+    source: 'ai', subject: (q.subject || '未分类'), difficulty: diffLabel, diff: level,
     options: extractChoices(String(obj.stem))
   }
 }
@@ -916,6 +969,8 @@ function vtClose() {
   vtScore.value = 0
   vtOpen.value = {}
   vtMode.value = 'pick'
+  vtSource.value = 'lib'
+  vtDifficulty.value = 'mid'
 }
 // 答错的 AI 变式 → 一键加入错题集（错题集来源的同类题已在错题本，无需重复）
 function vtAddWrong(i) {
@@ -1292,7 +1347,8 @@ const wrongCtx = reactive({
   typeStats, vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
   vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,
   vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
-  vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow,
+  vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow, vtSource, vtDifficulty, vtLibMax,
+  chooseVtSource, chooseVtDiff,
 vtStartDo, vtSubmit, vtToggleOpen, wrongSubOf, wrongTypeOf,
 fState, reasonTop, setReasonFilter, startReasonPractice, openHub,
   brBusy, brCancel, brDone, brErr, brLog, brN, brRows, brShow, brPick, brStart, brStop, brExportMd, brSpeakAll,

@@ -41,7 +41,9 @@ const {
   vtCmpBusy,
   vtCmpText,
   vtCount,
+  vtDifficulty,
   vtIdx,
+  vtLibMax,
   vtMax,
   vtMode,
   vtOpen,
@@ -49,7 +51,8 @@ const {
   vtQ,
   vtQueue,
   vtScore,
-  vtShow
+  vtShow,
+  vtSource
 } = toRefs(props.ctx)
 
 // R5：按本题考点检索关联方法卡（≤3），可在详情内展开 / 标记已学 / 跳知识库
@@ -97,6 +100,8 @@ const {
   repairFig,
   openRelated,
   openRename,
+  chooseVtDiff,
+  chooseVtSource,
   removeReason,
   save,
   startVariant,
@@ -367,20 +372,48 @@ function capWrongExplain() {
 
       <!-- ① 选题量 -->
       <div v-if="vtMode === 'pick'" class="vt-pick">
-        <div class="vt-pick-t">请选择本次变式训练题量（最多 <b>{{ vtMax }}</b> 道）</div>
-        <div class="vt-pick-opts">
-          <button v-for="n in vtMax" :key="n" class="btn" :class="vtCount === n ? 'btn-pri' : 'btn-gh'" @click="vtCount = n">{{ n }} 道</button>
+        <div class="vt-step-l">① 选择题目来源</div>
+        <div class="vt-pick-src-row">
+          <button class="vt-src-btn" :class="{ on: vtSource === 'lib' }" :disabled="!relatedQs.length" @click="chooseVtSource('lib')">
+            <b>📚 错题集同类</b>
+            <span>{{ relatedQs.length ? '本错题共有 ' + vtLibMax + ' 道同类可练' : '当前没有同类错题' }}</span>
+          </button>
+          <button class="vt-src-btn" :class="{ on: vtSource === 'ai' }" @click="chooseVtSource('ai')">
+            <b>🤖 AI 变式训练</b>
+            <span>保留原题骨架，按难度重新命题</span>
+          </button>
         </div>
-        <div class="vt-pick-src">{{ vtQueue.length ? '📚 你的错题集有 ' + vtQueue.length + ' 道同类题，直接复用练习' : '🤖 错题集暂无同类题，AI 将按此题生成变式' }}</div>
+
+        <template v-if="vtSource === 'lib'">
+          <div class="vt-step-l">② 选择题量（最多 <b>{{ vtLibMax }}</b> 道）</div>
+          <div class="vt-pick-opts">
+            <button v-for="n in vtLibMax" :key="n" class="btn" :class="vtCount === n ? 'btn-pri' : 'btn-gh'" @click="vtCount = n">{{ n }} 道</button>
+          </div>
+          <div class="vt-pick-src">📚 直接从你的错题集里复用同类题，答案与解析都来自你已收藏的真实错题。</div>
+        </template>
+        <template v-else>
+          <div class="vt-step-l">② 选择难度</div>
+          <div class="vt-diff-row">
+            <button v-for="d in [['easy','简单','只换话题'],['mid','中等','换等价表述考真懂'],['hard','困难','骨架复合变形'],['mix','混合','简+中+难']]" :key="d[0]" class="vt-diff-btn" :class="{ on: vtDifficulty === d[0] }" @click="chooseVtDiff(d[0])">
+              <b>{{ d[1] }}</b><span>{{ d[2] }}</span>
+            </button>
+          </div>
+          <div class="vt-step-l">③ 选择题量（最多 <b>{{ vtMax }}</b> 道）</div>
+          <div class="vt-pick-opts">
+            <button v-for="n in vtMax" :key="n" class="btn" :class="vtCount === n ? 'btn-pri' : 'btn-gh'" @click="vtCount = n">{{ n }} 道</button>
+          </div>
+          <div class="vt-pick-src">🤖 AI 会先提炼原题骨架，再按难度换话题/换表述/复合变形，核心考点保持一致。</div>
+        </template>
+
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="vtClose()">取消</button>
-          <button class="btn btn-pri" @click="vtStartDo()">🚀 开始训练</button>
+          <button class="btn btn-pri" @click="vtStartDo()">{{ vtSource === 'lib' ? '🚀 用同类错题开始' : '🚀 生成 AI 变式并开始' }}</button>
         </div>
       </div>
 
       <!-- ② 答题卡作答（可切换题号、可改答案，全部做完提交统一批改） -->
       <div v-else-if="vtMode === 'do'">
-        <div v-if="vtBusy" class="vt-busy">⏳ AI 正在按此题生成变式题…</div>
+        <div v-if="vtBusy" class="vt-busy">🚀 正在用快模型生成同考点变式…</div>
         <template v-else-if="vtQ">
           <div class="vt-card-nav">
             <span
@@ -392,7 +425,7 @@ function capWrongExplain() {
             >{{ i + 1 }}</span>
             <span class="vt-nav-tip">点题号可跳转 · 已答 {{ Object.keys(vtAnswers).length }} / {{ vtQueue.length }}</span>
           </div>
-          <div class="redo-subj">{{ vtQ.subject }} · {{ vtQ.source === 'ai' ? 'AI 变式' : '错题集同类' }}</div>
+          <div class="redo-subj">{{ vtQ.subject }} · {{ vtQ.source === 'ai' ? 'AI 变式 · ' + (vtQ.difficulty || '') : '错题集同类' }}</div>
           <div class="paper-q">
             <div class="paper-stem" v-html="richMd(vtQ.stem)"></div>
             <div v-if="(vtQ.options || []).length >= 2" class="paper-opts">
