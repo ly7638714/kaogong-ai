@@ -3023,21 +3023,21 @@ onUnmounted(() => {
           <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
 <div class="sec-t">💎 GitHub 自动互通（推荐，网页可直接使用）</div>
-        <div class="sec-desc" style="margin-top:4px">坚果云的 WebDAV 不允许网页跨域读取（会报 Failed to fetch）。改用 GitHub 私人仓库后，网页 / iPad / 安卓都可直接自动互通；Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
+        <div class="sec-desc" style="margin-top:4px">每位用户填自己的 GitHub Token，系统会把数据存到“该 Token 对应账户”下自动创建的私人仓库，互不共用；代码没有写死任何特定账户。Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
         <div class="fld">
           <label>GitHub Token（Settings → Developer settings → Personal access tokens，勾选 repo 权限）</label>
           <input v-model="store.cfg.github.token" type="password" autocomplete="new-password" placeholder="ghp_… 或 github_pat_…" @change="saveCfg()" />
         </div>
         <div class="fld">
-          <label>同步仓库（留空 = 自动创建私人仓库 xingce-ai-cloud-sync）</label>
-          <input v-model="store.cfg.github.repo" autocomplete="off" placeholder="ly7638714/xingce-ai-cloud-sync" @change="saveCfg()" />
+          <label>同步仓库（留空 = 在你自己的 GitHub 下自动创建私人仓库 xingce-ai-cloud-sync）</label>
+          <input v-model="store.cfg.github.repo" autocomplete="off" placeholder="你的GitHub用户名/xingce-ai-cloud-sync（可留空）" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
           <button class="btn btn-pri" :disabled="wdBusy || ghBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
           <button class="btn btn-gh" :disabled="wdBusy || ghBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
-          {{ ghStat || '提示：首次点同步会自动新建私人仓库保存学习数据，不会出现在公开源码仓库里。Token 有有效期，到期后在每台设备重新填写即可。' }}
+          {{ ghStat || '提示：不同用户请各自填自己的 GitHub Token；首次同步会在你自己的账户下新建私人仓库，数据不会写入别人的仓库。Token 有有效期，到期后重新填写即可。' }}
         </div>
 
 
