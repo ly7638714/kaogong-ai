@@ -399,6 +399,8 @@ function initExam() {
     formula: { ok: 0, bad: 0 },
     calc: { ok: 0, bad: 0 }
   }
+  const c = activeCfg(false)
+  if (c && c.key && !examAiBusy.value) setTimeout(() => aiOrganizeExam(), 100)
 }
 function startExamRun() {
   if (!examCurrent.value || examRun.value) return
