@@ -34,7 +34,8 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     expect(a.materialMd.length).toBeGreaterThan(500)
     expect(new Set([a.materialMd, b.materialMd]).size).toBe(1)
     expect(a.qs.every((q) => q.kind)).toBe(true)
-    expect(a.qs.map((q) => q.typeLabel)).toEqual(['增长率', '增长量', '现期比重', '年均增长率', '综合分析'])
+    expect(a.qs[4].typeLabel).toBe('综合分析')
+    expect(new Set(a.qs.slice(0, 4).map((q) => q.typeLabel)).size).toBe(4)
     expect(EXAM_LAYER_KEYS.map((x) => x.k)).toEqual(['type', 'locate', 'formula', 'calc'])
   })
 
@@ -68,6 +69,26 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
       expect(exam.materialMd).not.toContain('50,000')
       const nums = (exam.materialMd.match(/\b\d[\d,]*\b/g) || []).map((x) => Number(x.replace(/,/g, ''))).filter((x) => x > 100)
       expect(nums.some((n) => n % 10 !== 0)).toBe(true)
+    }
+  })
+
+  it('前四题考查顺序随套题变化，综合分析仍放第5题', () => {
+    const orders = new Set()
+    for (let i = 0; i < 20; i++) {
+      const exam = buildDataTrainExam(920000 + i * 433, domainOf('电力'))
+      orders.add(exam.qs.slice(0, 4).map((q) => q.kind).join(','))
+      expect(exam.qs[4].kind).toBe('comp')
+    }
+    expect(orders.size).toBeGreaterThan(1)
+  })
+
+  it('真题式组卷包含高难考点且综合分析需计算占比变化', () => {
+    for (let i = 0; i < 30; i++) {
+      const exam = buildDataTrainExam(930000 + i * 511, domainOf('粮食'))
+      const kinds = exam.qs.map((q) => q.kind)
+      expect(kinds.some((k) => ['base', 'interval', 'shareDiff'].includes(k))).toBe(true)
+      const comp = exam.qs[4]
+      expect(comp.layers.calc.options.find((o) => o.k === comp.layers.calc.answer).t).toContain('比重较2023年')
     }
   })
 })

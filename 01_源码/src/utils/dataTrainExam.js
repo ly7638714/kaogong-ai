@@ -192,7 +192,12 @@ function renderRichMaterial(seed, paper) {
   const tableC = headC + '\n' + sepC + '\n' + rowsC
   const tableNote = '注：①表中数值均为全年累计口径；②增速按可比口径复算；③本材料为训练模拟数据，非官方实际公布值。'
   const tablePick = hashIdx(seed + 5, 3)
-  const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n' + tableNote
+  const rateNote = pickV(seed + 6, [
+    '口径补充：' + main + '2023年同比增速为' + R3 + '%，2024年为' + R4 + '%。',
+    '分年看，2023年' + main + '同比增长' + R3 + '%，2024年同比增长' + R4 + '%。',
+    '其中2023年、2024年' + main + '同比增速分别为' + R3 + '%、' + R4 + '%。'
+  ])
+  const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n' + tableNote + '\n\n' + rateNote
   const chartPick = hashIdx(seed + 9, 3)
   const labels = paper.years.map((y) => y + '年')
   const svg = chartPick === 0 ? chartBarSvg(labels, paper.vals[0]) : chartPick === 1 ? chartLineSvg(labels, paper.vals[0]) : chartComboSvg(labels, paper.vals[0], paper.rates[0])
@@ -207,9 +212,12 @@ function renderRichMaterial(seed, paper) {
   }
 }
 const TYPE_META = {
+  base: { name: '基期量', formula: '基期量 = 现期量 ÷ (1 + 增长率)', locateTip: '现期与增速' },
+  interval: { name: '间隔增长率', formula: '间隔增长率 R = r1 + r2 + r1 × r2', locateTip: '连续两年增速' },
   rate: { name: '增长率', formula: '增长率 = (现期量 − 基期量) ÷ 基期量', locateTip: '先找现期与基期两年' },
   delta: { name: '增长量', formula: '增长量 = 现期量 − 基期量', locateTip: '现期与基期做差' },
   share: { name: '现期比重', formula: '现期比重 = 部分量 ÷ 整体量', locateTip: '先锁定部分与整体' },
+  shareDiff: { name: '两期比重差', formula: '两期比重差 = A/B × (a−b)/(1+a)', locateTip: '部分/整体各带增速' },
   annual: { name: '年均增长率', formula: '年均增长率 = (末年÷首年)^(1/n) − 1', locateTip: '首年与末年，n 年差 n−1' },
   comp: { name: '综合分析', formula: '逐项验证：先排绝对化，再回表验算', locateTip: '逐项回表核对' }
 }
@@ -307,6 +315,101 @@ function makeShareQ(seed, paper, main, sub, U) {
     }
   }
 }
+function makeBaseQ(seed, paper, main, sub, U) {
+  const B = paper.vals[0][4]
+  const R = paper.rates[0][4]
+  const correct = Math.round(B / (1 + R / 100))
+  const dists = [B, Math.round(B * (1 - R / 100)), Math.round(B * (1 + R / 100)), Math.round(B / (1 + R / 100) * 0.97)]
+  const opts = buildLayerOpts([correct], dists, seed, (x) => fmtNum(x) + U)
+  const stems = [
+    '2024年' + paper.area + main + '为' + fmtNum(B) + U + '，同比增长' + R + '%，则2023年该' + main + '约为多少' + U + '？',
+    '若2024年' + paper.area + main + '为' + fmtNum(B) + U + '、同比增速为' + R + '%，则上一年' + main + '最接近：',
+    '材料显示2024年' + main + fmtNum(B) + U + '，同比' + R + '%。据此推算2023年' + main + '约为（　）。'
+  ]
+  const stem = pickV(seed + 23, stems)
+  const typeOpts = buildLayerOpts([TYPE_META.base.name], ['现期量', '增长率', '增长量'], seed + 1)
+  const locateOpts = buildLayerOpts(['2024年' + main + '数值与2024年同比增速'], ['2023年数值与2024年增速', '2023年与2024年两年数值', '2020年与2024年数值'], seed + 2)
+  const formulaOpts = buildLayerOpts(['$A = \\frac{B}{1+r}$'], ['$A = B \\times (1+r)$', '$A = B \\times (1-r)$', '$\\Delta = B-A$'], seed + 3)
+  const explain = '基期量 = 现期量 ÷ (1+增速) = ' + fmtNum(B) + '÷(1+' + R + '%) ≈ **' + fmtNum(correct) + U + '**。\n\n陷阱：增速≤5%时才可近似用现期×(1−r)，本题直接除更严谨。'
+  return {
+    kind: 'base',
+    stem,
+    typeLabel: TYPE_META.base.name,
+    layers: {
+      type: layer('【判题型】已知2024年现期和增速、求2023年，属于哪种题型？', typeOpts, '', '“上年/基期”+现期+增速 → **基期量**。', '看到“上年”先想基期量。'),
+      locate: layer('【找数据】求基期量需要材料中哪些数据？', locateOpts, '', '需要 **2024年现期数值与2024年同比增速**。', '现期÷(1+r)。'),
+      formula: layer('【选公式】基期量的正确公式是？', formulaOpts, '', '基期 = 现期 ÷ (1+r)，不能直接乘。', '除 (1+r)。'),
+      calc: layer(stem, opts, explain, explain, '增长率做分母。')
+    }
+  }
+}
+function makeIntervalQ(seed, paper, main, _sub, _U) {
+  const R3 = paper.rates[0][3]
+  const R4 = paper.rates[0][4]
+  const correct = r1(R3 + R4 + (R3 * R4) / 100)
+  const dists = [r1(R3 + R4), r1(R3 * R4 / 100), r1(R4), r1((Math.pow((1 + R3 / 100) * (1 + R4 / 100), 1 / 2) - 1) * 100)]
+  const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
+  const stems = [
+    '材料口径补充显示：' + paper.area + main + '2023年同比增长' + R3 + '%，2024年同比增长' + R4 + '%。则2024年该' + main + '较2022年约增长：',
+    '已知' + main + '2023年增速为' + R3 + '%、2024年增速为' + R4 + '%，则2024年' + main + '比2022年增长约（　）。',
+    '若' + paper.area + main + '2023年同比增长' + R3 + '%、2024年同比增长' + R4 + '%，问2024年较2022年的累计增速最接近：'
+  ]
+  const stem = pickV(seed + 29, stems)
+  const typeOpts = buildLayerOpts([TYPE_META.interval.name], ['年均增长率', '增长率', '增长量'], seed + 1)
+  const locateOpts = buildLayerOpts(['2023年与2024年该指标同比增速'], ['2022年与2024年数值', '2020年与2024年数值', '2023年与2024年数值'], seed + 2)
+  const formulaOpts = buildLayerOpts(['$R = r_1+r_2+r_1 r_2$'], ['$R = r_1+r_2$', '$\\bar{r} = (\\frac{B}{A})^{\\frac{1}{2}}-1$', '$\\Delta = B-A$'], seed + 3)
+  const explain = '间隔增长率 = ' + R3 + '% + ' + R4 + '% + ' + R3 + '%×' + R4 + '% ≈ **' + correct + '%**。\n\n注意：跨两年必须补交叉项 r1×r2。'
+  return {
+    kind: 'interval',
+    stem,
+    typeLabel: TYPE_META.interval.name,
+    layers: {
+      type: layer('【判题型】“2024年较2022年增长”跨越两年，属于哪种题型？', typeOpts, '', '隔一年求累计增幅 → **间隔增长率**。', '看到“隔一年/比两年前”→间隔。'),
+      locate: layer('【找数据】间隔增长率需要材料中哪两个增速？', locateOpts, '', '需要 **2023年增速与2024年增速** 两个相邻年份同比增速。', '连续两年增速。'),
+      formula: layer('【选公式】间隔增长率的正确公式是？', formulaOpts, '', 'R=r1+r2+r1×r2，不能只相加。', '补交叉项。'),
+      calc: layer(stem, opts, explain, explain, 'r1×r2 别忘了除以100。')
+    }
+  }
+}
+function makeShareDiffQ(seed, paper, main, sub, U) {
+  const whole = paper.vals[0][4]
+  const part = paper.vals[1][4]
+  const b = paper.rates[0][4]
+  const a = paper.rates[1][4]
+  const nowShare = (part / whole) * 100
+  const prevShare = (part / (1 + a / 100)) / (whole / (1 + b / 100)) * 100
+  const diff = r1(prevShare - nowShare)
+  const abs = Math.abs(diff)
+  const dir = diff > 0 ? '上升' : diff < 0 ? '下降' : '不变'
+  const correctTxt = dir === '不变' ? '保持不变' : dir + abs.toFixed(1) + '个百分点'
+  const dists = [
+    dir === '上升' ? '下降' + abs.toFixed(1) + '个百分点' : '上升' + abs.toFixed(1) + '个百分点',
+    r1((a - b) / (1 + a / 100)) >= 0 ? '上升' + r1((a - b) / (1 + a / 100)).toFixed(1) + '个百分点' : '下降' + Math.abs(r1((a - b) / (1 + a / 100))).toFixed(1) + '个百分点',
+    Math.round(part / whole * 100) + '%'
+  ]
+  const opts = buildLayerOpts([correctTxt], dists, seed)
+  const stems = [
+    '2024年' + paper.area + main + '为' + fmtNum(whole) + U + '，同比增长' + b + '%；其中' + sub + '为' + fmtNum(part) + U + '，同比增长' + a + '%。则2024年' + sub + '占' + main + '的比重比上年同期（　）。',
+    '材料显示2024年' + main + '同比' + b + '%、' + sub + '同比' + a + '%，则2024年' + sub + '占' + main + '比重与2023年相比：',
+    '若2024年' + paper.area + main + '为' + fmtNum(whole) + U + '（+'+ b + '%），' + sub + '为' + fmtNum(part) + U + '（+' + a + '%），则' + sub + '占比变化为：'
+  ]
+  const stem = pickV(seed + 31, stems)
+  const typeOpts = buildLayerOpts([TYPE_META.shareDiff.name], ['现期比重', '平均数增长率', '基期比重'], seed + 1)
+  const locateOpts = buildLayerOpts(['2024年' + main + '与' + sub + '数值及其同比增速'], ['2023年两个增速', '2024年数值与2023年数值', '2020年与2024年数值'], seed + 2)
+  const formulaOpts = buildLayerOpts(['$\\Delta p = \\frac{A}{B} \\times \\frac{a-b}{1+a}$'], ['$p = \\frac{A}{B}$', '$m_r = \\frac{a-b}{1+b}$', '$\\Delta p = a-b$'], seed + 3)
+  const explain = '先算占比变化方向：' + sub + '增速' + a + '%、' + main + '增速' + b + '%，部分快于/慢于整体 → ' + dir + '；量值约为 **' + correctTxt + '**。\n\n口诀：先看 a 与 b 定方向，再算 A/B×(a−b)/(1+a)。'
+  return {
+    kind: 'shareDiff',
+    stem,
+    typeLabel: TYPE_META.shareDiff.name,
+    layers: {
+      type: layer('【判题型】“比重比上年上升/下降几个百分点”考什么？', typeOpts, '', '两期比重差，先看部分与整体增速大小。', '看到“比重比上年…个百分点”→两期比重差。'),
+      locate: layer('【找数据】两期比重差需要哪些数据？', locateOpts, '', '需要2024年部分/整体数值，以及它们的2024同比增速。', '数值+增速都要。'),
+      formula: layer('【选公式】两期比重差公式是？', formulaOpts, '', 'Δ=A/B×(a−b)/(1+a)。', '乘 A/B，别只算增速差。'),
+      calc: layer(stem, opts, explain, explain, '比重变化写“个百分点”。')
+    }
+  }
+}
 
 function makeAnnualQ(seed, paper, main, sub, U) {
   const A = paper.vals[0][0]
@@ -339,29 +442,24 @@ function makeAnnualQ(seed, paper, main, sub, U) {
   }
 }
 
-function makeCompQ(seed, paper, main, sub, U) {
-  const A = paper.vals[0][3]
-  const B = paper.vals[0][4]
-  const trueStmts = [
-    '2024年「' + main + '」绝对量高于2023年',
-    '2024年「' + main + '」绝对量高于2020年',
-    '2024年「' + sub + '」绝对量低于「' + main + '」'
-  ]
+function makeCompQ(seed, paper, main, sub, _U) {
+  const nowShare = (paper.vals[1][4] / paper.vals[0][4]) * 100
+  const prevShare = (paper.vals[1][3] / paper.vals[0][3]) * 100
+  const dir = nowShare > prevShare ? '上升' : nowShare < prevShare ? '下降' : '持平'
+  const correctTxt = '2024年「' + sub + '」占「' + main + '」的比重较2023年' + dir
   const falseStmts = [
+    '2024年「' + sub + '」占「' + main + '」的比重较2023年上升',
+    '2024年「' + sub + '」占「' + main + '」的比重较2023年下降',
     '2024年「' + main + '」绝对量低于2023年',
-    '2024年「' + main + '」绝对量低于2020年',
-    '2024年「' + sub + '」绝对量高于「' + main + '」',
     '2020—2024年「' + main + '」逐年下降'
   ]
-  const ti = hashIdx(seed + 9, trueStmts.length)
-  const correctTxt = trueStmts[ti]
   const others = shuffle(falseStmts.filter((x) => x !== correctTxt), seed + 11).slice(0, 3)
   const opts = buildLayerOpts([correctTxt], others, seed + 12)
   const typeOpts = buildLayerOpts([TYPE_META.comp.name], ['现期比重', '增长率', '增长量'], seed + 1)
   const locateOpts = buildLayerOpts(['回表逐项核对数值与趋势'], ['只看题干不看表', '只看最后一列增速', '只比较2024年单年'], seed + 2)
   const formulaOpts = buildLayerOpts(['逐项验证：排绝对→回表验算'], ['只选最大数', '只算一个指标', '按题干直觉直接选'], seed + 3)
-  const trueOpt = String(trueStmts[ti]).includes('高于2023') ? '材料中2024年' + main + '为' + fmtNum(B) + U + '，2023年为' + fmtNum(A) + U + '，故“高于2023年”可由表直接推出。' : String(trueStmts[ti]).includes('高于2020') ? '材料中2024年' + main + '为' + fmtNum(B) + U + '，2020年为' + fmtNum(paper.vals[0][0]) + U + '，趋势上升故可由表推出。' : '表格中' + sub + '始终低于' + main + '，比重不可能超过100%。'
-  const explain = '【综合分析】正确项：' + trueOpt + '\n\n逐项排除：三个干扰项分别与材料数值方向相反或把分项绝对量夸大，均可直接回表排除。\n\n口诀：综合分析先排绝对化与方向反的选项，再回表验证。'
+  const trueOpt = '由材料计算：' + sub + '2024年占' + main + '比重约' + r1(nowShare) + '%，2023年约' + r1(prevShare) + '%，故占比较2023年' + dir + '，可由表验证。'
+  const explain = '【综合分析】正确项：' + trueOpt + '\n\n逐项排除：其余选项分别把占比方向说反、把主指标方向说反或与表中逐年上行趋势矛盾，均不能由材料推出。\n\n口诀：综合分析先算关键比重/增速变化，再回表排除方向反的选项。'
   const stem = '【综合分析】关于材料中2020—2024年' + paper.area + main + '运行情况，能够推出的是（　）'
   return {
     kind: 'comp',
@@ -383,13 +481,23 @@ export function buildDataTrainExam(seed = Date.now() % 100000, dom = null) {
   const main = paper.inds[0]
   const sub = paper.inds[1]
   const U = paper.unit
-  const makers = [
+  const easyMakers = [
     makeRateQ(seed + 101, paper, main, sub, U),
     makeDeltaQ(seed + 207, paper, main, sub, U),
     makeShareQ(seed + 331, paper, main, sub, U),
-    makeAnnualQ(seed + 457, paper, main, sub, U),
-    makeCompQ(seed + 613, paper, main, sub, U)
+    makeAnnualQ(seed + 457, paper, main, sub, U)
   ]
+  const advancedMakers = [
+    makeBaseQ(seed + 509, paper, main, sub, U),
+    makeIntervalQ(seed + 577, paper, main, sub, U),
+    makeShareDiffQ(seed + 641, paper, main, sub, U)
+  ]
+  const advCount = 2 + hashIdx(seed + 73, 2)
+  const coreMakers = [
+    ...shuffle(easyMakers, seed + 731).slice(0, 4 - advCount),
+    ...shuffle(advancedMakers, seed + 733).slice(0, advCount)
+  ]
+  const makers = [...shuffle(coreMakers, seed + 739), makeCompQ(seed + 613, paper, main, sub, U)]
   const seen = new Set()
   const qs = makers.filter((q) => {
     if (!q || seen.has(q.kind)) return false
