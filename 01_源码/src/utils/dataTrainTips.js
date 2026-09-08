@@ -16,6 +16,37 @@ export function findLockWords(mdText) {
   const unit = (t.match(/([0-9]+(?:\.[0-9]+)? ?%|[0-9]+(?:\.[0-9]+)? ?(?:万吨|亿吨|亿元|万人|万辆|万平方米|吨|万桶|万千瓦))/g) || []).slice(0, 4)
   return { time, ind, unit }
 }
+// v3.8.256：只高亮“当前本题所需数据”，不再把材料里所有时间/指标/单位全加粗
+function escRx(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+function wrapHit(t, rx, cls) {
+  return String(t).replace(rx, '<span class="' + cls + '">$&</span>')
+}
+export function smartLockHighlights(mdText, need = {}) {
+  let t = String(mdText || '')
+  const needNums = []
+  ;(need.nums || []).concat(need.texts || []).forEach((s) => {
+    const nums = String(s).match(/\d[\d,.]*(?:%|万|亿|千|吨|辆|件|人|户|元|米|个|次|千瓦|公顷)?/g) || []
+    nums.forEach((n) => { if (/\d{3,}/.test(n) || /%/.test(n)) needNums.push(n.replace(/,/g, '')) })
+  })
+  if (needNums.length) {
+    const uniq = Array.from(new Set(needNums))
+    t = String(t).replace(/(\d[\d,]*(?:\.\d+)?\s?(?:%|万吨|亿吨|亿元|万人|万辆|万平方米|万公顷|万吨公里|亿吨公里|元|台|辆|件|人|户|个|千瓦时|公顷)?)/g, (m) => {
+      const d = m.replace(/,/g, '').trim()
+      if (uniq.some((u) => d === u || d.indexOf(u) === 0)) return '<span class="dt-lock-red">' + m + '</span>'
+      return m
+    })
+  }
+  const words = (need.words || []).concat(need.texts || [])
+    .map((s) => String(s).trim()).filter((s) => s && !/^\d/.test(s))
+    .sort((a, b) => b.length - a.length)
+  const seen = new Set()
+  words.forEach((w) => {
+    if (seen.has(w) || w.length < 2 || w.length > 16) return
+    seen.add(w)
+    if (/^[\w\u4e00-\u9fa5]+$/.test(w)) t = wrapHit(t, new RegExp('(?<!["\'`\\\\])' + escRx(w) + '(?!["\'`\\\\])', 'g'), 'dt-lock-red')
+  })
+  return t
+}
 export const REAL_REF = {
   '国家统计局 · 粮食': '真实参考（离线样本，非实时）：2024 年全国粮食总产量 70650 万吨、比上年增长 1.6%（国家统计局 2024 年统计公报口径）。',
   '国家统计局 · 烟酒': '真实参考（离线样本，非实时）：2024 年全国居民消费价格比上年上涨 0.2%；烟酒类消费价格同比窄幅波动（国家统计局公报口径）。',
@@ -26,4 +57,4 @@ export const REAL_REF = {
   '贵州省统计局 · 进出口': '真实参考（离线样本，非实时）：贵州省近年进出口总额增长较快，其中一般贸易占比提升（贵阳海关/贵州省统计局口径）。',
   '广东省统计局 · 汽车': '真实参考（离线样本，非实时）：广东省汽车制造业增加值居全国前列，新能源汽车产量高速增长（广东省统计局口径）。'
 }
-export default { lockHighlights, REAL_REF }
+export default { lockHighlights, smartLockHighlights, REAL_REF }

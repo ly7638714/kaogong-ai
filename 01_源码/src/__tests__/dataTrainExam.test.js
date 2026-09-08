@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildDataTrainExam, EXAM_LAYER_KEYS } from '../utils/dataTrainExam'
+import { buildDataTrainExam, EXAM_LAYER_KEYS, applyPaperOptions } from '../utils/dataTrainExam'
+import { genDataQ, createSharedPaper } from '../utils/dataTrainGen'
 import { domainOf } from '../data/dataDomains'
 
 describe('dataTrainExam 真题式四层训练引擎', () => {
@@ -100,5 +101,69 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
       const comp = exam.qs[4]
       expect(comp.layers.calc.options.find((o) => o.k === comp.layers.calc.answer).t).toContain('比重较2023年')
     }
+  })
+
+  it('材料排版支持纯文字/纯表格/两两混合/三者混合，且题目结构不受影响', () => {
+    const dom = domainOf('汽车')
+    for (const form of ['text', 'table', 'textTable', 'textChart', 'tableChart', 'all']) {
+      for (let i = 0; i < 12; i++) {
+        const exam = buildDataTrainExam(310000 + i * 179, dom, { form, timeKind: 'annual', chart: 'auto' })
+        expect(exam.materialForm).toBe(form)
+        expect(exam.qs).toHaveLength(5)
+        expect(new Set(exam.qs.map((q) => q.kind)).size).toBe(5)
+        if (form === 'text' || form === 'textTable' || form === 'textChart' || form === 'all') expect(exam.materialMd).toContain('文字资料')
+        else expect(exam.materialMd).not.toContain('文字资料')
+        if (form === 'table' || form === 'textTable' || form === 'tableChart' || form === 'all') expect(exam.materialMd).toContain('主要指标表')
+        else expect(exam.materialMd).not.toContain('主要指标表')
+        if (form === 'textChart' || form === 'tableChart' || form === 'all') expect(exam.materialSvg).toContain('<svg')
+        else expect(exam.materialSvg).toBe('')
+      }
+    }
+  })
+
+  it('统计口径支持年度/累计/半年/季度/单月且年份窗口不固定为2020—2024', () => {
+    const dom = domainOf('粮食')
+    const kinds = new Set()
+    for (let i = 0; i < 80; i++) {
+      const exam = buildDataTrainExam(410000 + i * 271, dom, { form: 'all', timeKind: 'auto', chart: 'auto' })
+      kinds.add(exam.periodKind)
+      expect(exam.periodLabels).toHaveLength(5)
+      expect(exam.materialMd).toContain(exam.periodLabels[4])
+    }
+    expect(kinds.size).toBeGreaterThanOrEqual(4)
+    const fixed = Array.from(kinds).every((k) => k === 'annual')
+    expect(fixed).toBe(false)
+  })
+
+  it('自动随机图型即使在三者混合中也必须让饼形有稳定出现机会', () => {
+    const dom = domainOf('电力')
+    const charts = new Set()
+    for (let i = 0; i < 80; i++) {
+      const exam = buildDataTrainExam(510000 + i * 331, dom, { form: 'all', chart: 'auto' })
+      charts.add(exam.chartKind)
+      expect(exam.materialSvg).toContain('<svg')
+    }
+    expect(charts.has(3)).toBe(true)
+    expect(charts.size).toBeGreaterThanOrEqual(3)
+  })
+
+  it('拆分单题应用自定义排版后四层共用同一篇文字材料且找数据不回表格', () => {
+    const dom = domainOf('汽车')
+    const paper = applyPaperOptions(createSharedPaper(20260907, dom), 20260907, { form: 'text', timeKind: 'annual', chart: 'auto' })
+    expect(paper.materialMd).toContain('文字资料')
+    expect(paper.materialMd).not.toContain('主要指标表')
+    expect(paper.hasTable).toBe(false)
+    const mats = new Set()
+    for (const m of ['type', 'locate', 'formula', 'calc']) {
+      for (let i = 0; i < 30; i++) {
+        const q = genDataQ(m, 610000 + i, 2, undefined, dom, paper)
+        expect(q).toBeTruthy()
+        expect(q.materialMd).toBe(paper.materialMd)
+        expect(q.materialMd).toContain('文字资料')
+        expect(String(q.q)).not.toContain('材料表')
+        mats.add(q.materialMd)
+      }
+    }
+    expect(mats.size).toBe(1)
   })
 })

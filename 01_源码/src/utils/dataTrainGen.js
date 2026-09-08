@@ -1059,6 +1059,10 @@ function buildCalc(seed, level, stage) {
 function richCell(ctx, ci, ri) {
   return { ind: ctx.inds[ci] || ctx.inds[0], v: ctx.vals[ci] ? ctx.vals[ci][ri] : ctx.vals[0][ri], r: ctx.rates[ci] ? ctx.rates[ci][ri] : ctx.rates[0][ri] }
 }
+function ctxL(ctx, i) { return (ctx.periodLabels && ctx.periodLabels[i]) || String(ctx.years[i]) + '年' }
+function ctxRange(ctx) { return ctx.periodRange || ctx.years[0] + '—' + ctx.years[ctx.years.length - 1] + '年' }
+function ctxW(ctx) { return ctx.timeWord || '同比' }
+function ctxWin(ctx) { return ctx.periodWindow || '全年' }
 function findRateCell(ctx, pred) {
   for (let ci = 0; ci < ctx.inds.length; ci++) {
     for (let ri = 1; ri < ctx.years.length; ri++) {
@@ -1076,26 +1080,29 @@ function nearestFraction(r) {
 function buildSharedComp(seed, ctx) {
   const main = richCell(ctx, 0, 4)
   const sub = richCell(ctx, 1, 4)
+  const cur = ctxL(ctx, 4)
+  const first2 = ctxL(ctx, 1)
+  const wd = ctxW(ctx)
   const mr = main.r
   const sr = sub.r
   let compare = '高于'
   if (mr === sr) compare = '持平'
   else if (mr < sr) compare = '低于'
   const trueOpt = compare === '持平'
-    ? '2024年「' + main.ind + '」与「' + sub.ind + '」的同比增速持平'
-    : '2024年「' + main.ind + '」的同比增速（' + mr + '%）' + compare + '「' + sub.ind + '」（' + sr + '%）'
+    ? cur + '「' + main.ind + '」与「' + sub.ind + '」的' + wd + '增速持平'
+    : cur + '「' + main.ind + '」的' + wd + '增速（' + mr + '%）' + compare + '「' + sub.ind + '」（' + sr + '%）'
   const falseOpts = compare === '持平'
-    ? ['2024年「' + main.ind + '」的同比增速高于「' + sub.ind + '」', '2024年「' + main.ind + '」的同比增速低于「' + sub.ind + '」', '2024年「' + main.ind + '」数值较上年同期下降']
+    ? [cur + '「' + main.ind + '」的' + wd + '增速高于「' + sub.ind + '」', cur + '「' + main.ind + '」的' + wd + '增速低于「' + sub.ind + '」', cur + '「' + main.ind + '」数值较上期下降']
     : [
-        '2024年「' + main.ind + '」的同比增速' + (compare === '高于' ? '低于' : '高于') + '「' + sub.ind + '」',
-        '2024年「' + main.ind + '」数值较上年同期下降',
-        '2021年以来「' + main.ind + '」与「' + sub.ind + '」均逐年下降'
+        cur + '「' + main.ind + '」的' + wd + '增速' + (compare === '高于' ? '低于' : '高于') + '「' + sub.ind + '」',
+        cur + '「' + main.ind + '」数值较上期下降',
+        first2 + '以来「' + main.ind + '」与「' + sub.ind + '」均逐期下降'
       ]
   const opts = buildOpts([trueOpt], falseOpts, seed)
   const compareLine = compare === '持平'
-    ? '两指标 2024 年同比增速均为 ' + mr + '%，大小关系为「持平」'
-    : main.ind + '同比增速 ' + mr + '%，' + sub.ind + '同比增速 ' + sr + '%，大小关系为「' + compare + '」'
-  const explain = '【综合判断】回看材料最后一列：' + compareLine + '，对应正确选项可推出。\n\n逐项排除：反方向比较与材料矛盾；材料中' + main.ind + '各年绝对量均高于上年，不存在“下降”；四个分项增速均为正，不存在“逐年下降”。\n\n口诀：综合分析先看绝对数字与增速方向，再比较大小，最后回表验证。'
+    ? '两指标 ' + cur + wd + '增速均为 ' + mr + '%，大小关系为「持平」'
+    : main.ind + wd + '增速 ' + mr + '%，' + sub.ind + wd + '增速 ' + sr + '%，大小关系为「' + compare + '」'
+  const explain = '【综合判断】回看材料中' + cur + '对应数据：' + compareLine + '，对应正确选项可推出。\n\n逐项排除：反方向比较与材料矛盾；材料中' + main.ind + '各期绝对量均高于上一期，不存在“下降”；分项增速均为正，不存在“逐期下降”。\n\n口诀：综合分析先看绝对数字与增速方向，再比较大小，最后回材料验证。'
   return {
     mode: 'type',
     materialType: 'rich',
@@ -1105,8 +1112,8 @@ function buildSharedComp(seed, ctx) {
     options: opts.options,
     answer: opts.answer,
     explain,
-    tip: '口诀：综合分析先排“下降/方向反”等绝对错项，再比较指标大小，答案必须能在表中直接验证。',
-    extra: { name: '综合分析', formula: '逐项验证：先看趋势方向 → 比较增速 → 回表核对' }
+    tip: '口诀：综合分析先排“下降/方向反”等绝对错项，再比较指标大小，答案必须能在材料中直接验证。',
+    extra: { name: '综合分析', formula: '逐项验证：先看趋势方向 → 比较增速 → 回材料核对' }
   }
 }
 function sharedTypeStem(k, ctx) {
@@ -1116,6 +1123,13 @@ function sharedTypeStem(k, ctx) {
   const sub2 = ctx.inds[2]
   const sub3 = ctx.inds[3]
   const u = ctx.unit
+  const Y0 = ctxL(ctx, 0)
+  const Y2 = ctxL(ctx, 2)
+  const Y3 = ctxL(ctx, 3)
+  const Y = ctxL(ctx, 4)
+  const wd = ctxW(ctx)
+  const range = ctxRange(ctx)
+  const win = ctxWin(ctx)
   const V0 = fmt(ctx.vals[0][0])
   const V3 = fmt(ctx.vals[0][3])
   const V = fmt(ctx.vals[0][4])
@@ -1125,21 +1139,21 @@ function sharedTypeStem(k, ctx) {
   const PR = ctx.rates[1][4]
   const QR = ctx.rates[2][4]
   switch (k) {
-    case 'base': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？'
-    case 'now': return '2023年' + a + main + '为' + V3 + u + '，按表中2024年同比增速' + R + '%测算，则2024年该' + main + '约为多少' + u + '？'
-    case 'inc': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2024年该' + main + '比上年增加多少' + u + '？'
-    case 'rate': return '2023年' + a + main + '为' + V3 + u + '，2024年为' + V + u + '，则2024年该' + main + '同比增长约百分之几？'
-    case 'inter': return '2023年' + a + main + '同比增长' + R3 + '%，2024年同比增长' + R + '%，则2024年该' + main + '比2022年约增长百分之几？'
-    case 'annual': return '2020年' + a + main + '为' + V0 + u + '，2024年为' + V + u + '，则2020—2024年该' + main + '年均增速约为百分之几？'
-    case 'share': return '2024年' + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + sub + '占' + main + '的比重约为多少？'
-    case 'bshare': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%；其中' + sub + '为' + PV + u + '，同比增长' + PR + '%。则2023年' + sub + '占' + main + '的比重约为多少？'
-    case 'shareDiff': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%；其中' + sub + '为' + PV + u + '，同比增长' + PR + '%。则2024年' + sub + '占' + main + '的比重比上年约上升/下降多少个百分点？'
-    case 'avg': return '2024年' + a + main + '为' + V + u + '，全年四个季度保持平稳增长，则平均每个季度该' + main + '约为多少' + u + '？'
-    case 'avgRate': return '2024年' + a + sub + '同比增长' + PR + '%，同时' + main + '同比增长' + R + '%，则平均每单位' + main + '对应的' + sub + '同比增长约百分之几？'
-    case 'mult': return '2024年' + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + main + '约是' + sub + '的多少倍？'
-    case 'mix': return '2024年' + a + sub + '同比增速为' + PR + '%，' + sub2 + '同比增速为' + QR + '%，若两者构成' + sub3 + '的分项规模，则合计增速约为百分之几？'
+    case 'base': return Y + a + main + '为' + V + u + '，' + wd + '增长' + R + '%，则' + Y3 + '该' + main + '为多少' + u + '？'
+    case 'now': return Y3 + a + main + '为' + V3 + u + '，按材料中' + Y + wd + '增速' + R + '%测算，则' + Y + '该' + main + '约为多少' + u + '？'
+    case 'inc': return Y + a + main + '为' + V + u + '，' + wd + '增长' + R + '%，则' + Y + '该' + main + '较上期增加多少' + u + '？'
+    case 'rate': return Y3 + a + main + '为' + V3 + u + '，' + Y + '为' + V + u + '，则' + Y + '该' + main + wd + '增长约百分之几？'
+    case 'inter': return Y3 + a + main + wd + '增长' + R3 + '%，' + Y + wd + '增长' + R + '%，则' + Y + '该' + main + '比' + Y2 + '约增长百分之几？'
+    case 'annual': return Y0 + a + main + '为' + V0 + u + '，' + Y + '为' + V + u + '，则' + range + '该' + main + '年均增速约为百分之几？'
+    case 'share': return Y + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + sub + '占' + main + '的比重约为多少？'
+    case 'bshare': return Y + a + main + '为' + V + u + '，' + wd + '增长' + R + '%；其中' + sub + '为' + PV + u + '，' + wd + '增长' + PR + '%。则' + Y3 + sub + '占' + main + '的比重约为多少？'
+    case 'shareDiff': return Y + a + main + '为' + V + u + '，' + wd + '增长' + R + '%；其中' + sub + '为' + PV + u + '，' + wd + '增长' + PR + '%。则' + Y + sub + '占' + main + '的比重较上期约上升/下降多少个百分点？'
+    case 'avg': return Y + a + main + '为' + V + u + '（' + win + '口径），若将本统计期划分为四个等长阶段并保持平稳增长，则平均每个阶段该' + main + '约为多少' + u + '？'
+    case 'avgRate': return Y + a + sub + wd + '增长' + PR + '%，同时' + main + wd + '增长' + R + '%，则平均每单位' + main + '对应的' + sub + wd + '增长约百分之几？'
+    case 'mult': return Y + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + main + '约是' + sub + '的多少倍？'
+    case 'mix': return Y + a + sub + wd + '增速为' + PR + '%，' + sub2 + wd + '增速为' + QR + '%，若两者构成' + sub3 + '的分项规模，则合计增速约为百分之几？'
     case 'comp': return ''
-    default: return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？'
+    default: return Y + a + main + '为' + V + u + '，' + wd + '增长' + R + '%，则' + Y3 + '该' + main + '为多少' + u + '？'
   }
 }
 function buildSharedType(seed, ctx) {
@@ -1169,6 +1183,13 @@ function sharedFormulaCase(tId, ctx) {
   const sub = ctx.inds[1]
   const sub2 = ctx.inds[2]
   const u = ctx.unit
+  const Y0 = ctxL(ctx, 0)
+  const Y2 = ctxL(ctx, 2)
+  const Y3 = ctxL(ctx, 3)
+  const Y = ctxL(ctx, 4)
+  const wd = ctxW(ctx)
+  const range = ctxRange(ctx)
+  const win = ctxWin(ctx)
   const A0 = ctx.vals[0][0]
   const A3 = ctx.vals[0][3]
   const B = ctx.vals[0][4]
@@ -1179,20 +1200,20 @@ function sharedFormulaCase(tId, ctx) {
   const qv = ctx.vals[2][4]
   const qr = ctx.rates[2][4]
   switch (tId) {
-    case 'base': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
-    case 'now': return { q: '2023年' + a + main + '为' + fmt(A3) + u + '，按表中2024年同比增速' + R + '%测算，则2024年该' + main + '约为多少' + u + '？', d: { A: A3, r: R, unit: u } }
-    case 'inc': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2024年该' + main + '比上年增加多少' + u + '？', d: { B, r: R, unit: u } }
-    case 'rate': return { q: '2023年' + a + main + '为' + fmt(A3) + u + '，2024年为' + fmt(B) + u + '，则2024年该' + main + '同比增长约百分之几？', d: { A: A3, B } }
-    case 'inter': return { q: '2023年' + a + main + '同比增长' + R3 + '%，2024年同比增长' + R + '%，则2024年该' + main + '比2022年约增长百分之几？', d: { r1: R3, r2: R } }
-    case 'annual': return { q: '2020年' + a + main + '为' + fmt(A0) + u + '，2024年为' + fmt(B) + u + '，则2020—2024年该' + main + '年均增速约为百分之几？', d: { A: A0, B, n: 4 } }
-    case 'share': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + sub + '占' + main + '的比重约为多少？', d: { A: pv, B } }
-    case 'bshare': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，同比增长' + pr + '%。则2023年' + sub + '占' + main + '的比重约为多少？', d: { A: pv, B, a: pr, b: R } }
-    case 'shareDiff': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，同比增长' + pr + '%。则2024年' + sub + '占' + main + '的比重比上年约上升/下降多少个百分点？', d: { A: pv, B, a: pr, b: R } }
-    case 'avg': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，全年四个季度保持平稳增长，则平均每个季度该' + main + '约为多少' + u + '？', d: { total: B, n: 4 } }
-    case 'avgRate': return { q: '2024年' + a + sub + '同比增长' + pr + '%，同时' + main + '同比增长' + R + '%，则平均每单位' + main + '对应的' + sub + '同比增长约百分之几？', d: { a: pr, b: R } }
-    case 'mult': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + main + '约是' + sub + '的多少倍？', d: { A: B, B: pv } }
-    case 'mix': return { q: '2024年' + a + sub + '同比增速为' + pr + '%，' + sub2 + '同比增速为' + qr + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计增速最接近：', d: { r1: pr, r2: qr, v1: pv, v2: qv } }
-    default: return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
+    case 'base': return { q: Y + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%，则' + Y3 + '该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
+    case 'now': return { q: Y3 + a + main + '为' + fmt(A3) + u + '，按材料中' + Y + wd + '增速' + R + '%测算，则' + Y + '该' + main + '约为多少' + u + '？', d: { A: A3, r: R, unit: u } }
+    case 'inc': return { q: Y + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%，则' + Y + '该' + main + '较上期增加多少' + u + '？', d: { B, r: R, unit: u } }
+    case 'rate': return { q: Y3 + a + main + '为' + fmt(A3) + u + '，' + Y + '为' + fmt(B) + u + '，则' + Y + '该' + main + wd + '增长约百分之几？', d: { A: A3, B } }
+    case 'inter': return { q: Y3 + a + main + wd + '增长' + R3 + '%，' + Y + wd + '增长' + R + '%，则' + Y + '该' + main + '比' + Y2 + '约增长百分之几？', d: { r1: R3, r2: R } }
+    case 'annual': return { q: Y0 + a + main + '为' + fmt(A0) + u + '，' + Y + '为' + fmt(B) + u + '，则' + range + '该' + main + '年均增速约为百分之几？', d: { A: A0, B, n: 4 } }
+    case 'share': return { q: Y + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + sub + '占' + main + '的比重约为多少？', d: { A: pv, B } }
+    case 'bshare': return { q: Y + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，' + wd + '增长' + pr + '%。则' + Y3 + sub + '占' + main + '的比重约为多少？', d: { A: pv, B, a: pr, b: R } }
+    case 'shareDiff': return { q: Y + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，' + wd + '增长' + pr + '%。则' + Y + sub + '占' + main + '的比重较上期约上升/下降多少个百分点？', d: { A: pv, B, a: pr, b: R } }
+    case 'avg': return { q: Y + a + main + '为' + fmt(B) + u + '（' + win + '口径），若将本统计期划分为四个等长阶段并保持平稳增长，则平均每个阶段该' + main + '约为多少' + u + '？', d: { total: B, n: 4 } }
+    case 'avgRate': return { q: Y + a + sub + wd + '增长' + pr + '%，同时' + main + wd + '增长' + R + '%，则平均每单位' + main + '对应的' + sub + wd + '增长约百分之几？', d: { a: pr, b: R } }
+    case 'mult': return { q: Y + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + main + '约是' + sub + '的多少倍？', d: { A: B, B: pv } }
+    case 'mix': return { q: Y + a + sub + wd + '增速为' + pr + '%，' + sub2 + wd + '增速为' + qr + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计增速最接近：', d: { r1: pr, r2: qr, v1: pv, v2: qv } }
+    default: return { q: Y + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%，则' + Y3 + '该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
   }
 }
 function buildSharedFormula(seed, ctx) {
@@ -1219,15 +1240,19 @@ function sharedCalcCase(id, ctx) {
   const main = ctx.inds[0]
   const u = ctx.unit
   const last = ctx.years.length - 1
+  const cur = ctxL(ctx, last)
+  const prev = ctxL(ctx, Math.max(0, last - 1))
+  const wd = ctxW(ctx)
   const B = ctx.vals[0][last]
   const R = ctx.rates[0][last]
   const base = { q: '', d: {} }
   if (id === 'convert') {
     const c = findRateCell(ctx, (r) => r >= 1 && r <= 5) || { ci: 0, ri: last, r: ctx.rates[0][last] }
-    const yr = ctx.years[c.ri]
+    const yr = ctxL(ctx, c.ri)
+    const pv = ctxL(ctx, Math.max(0, c.ri - 1))
     const v = ctx.vals[c.ci][c.ri]
     const ind = ctx.inds[c.ci]
-    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + c.r + '%，则' + (yr - 1) + '年该' + ind + '约为多少' + u + '？', d: { B: v, r: c.r, unit: u } }
+    return { q: yr + a + ind + '为' + fmt(v) + u + '，' + wd + '增长' + c.r + '%，则' + pv + '该' + ind + '约为多少' + u + '？', d: { B: v, r: c.r, unit: u } }
   }
   if (id === 'frac') {
     const c = findRateCell(ctx, (r) => Math.abs(nearestFraction(r).r - r) <= 0.45)
@@ -1235,34 +1260,34 @@ function sharedCalcCase(id, ctx) {
     const v = ctx.vals[cell.ci][cell.ri]
     const ind = ctx.inds[cell.ci]
     const fr = nearestFraction(cell.r)
-    const yr = ctx.years[cell.ri]
-    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + cell.r + '%（接近1/' + fr.n + '），则' + yr + '年该' + ind + '比上年增加约多少' + u + '？', d: { B: v, r: cell.r, n: fr.n, unit: u } }
+    const yr = ctxL(ctx, cell.ri)
+    return { q: yr + a + ind + '为' + fmt(v) + u + '，' + wd + '增长' + cell.r + '%（接近1/' + fr.n + '），则' + yr + '该' + ind + '较上期增加约多少' + u + '？', d: { B: v, r: cell.r, n: fr.n, unit: u } }
   }
   if (id === 'coef') {
     const coefRates = [5, 10, 15, 20, 25, 33.3]
     const c = findRateCell(ctx, (r) => coefRates.some((x) => Math.abs(x - r) <= 0.45)) || { ci: 0, ri: last, r: R }
     const v = ctx.vals[c.ci][c.ri]
     const ind = ctx.inds[c.ci]
-    const yr = ctx.years[c.ri]
+    const yr = ctxL(ctx, c.ri)
     const f = coefRates.reduce((best, x) => (Math.abs(x - c.r) < Math.abs(best - c.r) ? x : best), 10)
     const coeff = { 5: 0.0476, 10: 0.0909, 15: 0.1304, 20: 0.1667, 25: 0.2, 33.3: 0.25 }[f] || 0.0909
-    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + c.r + '%（按约' + f + '%转化系数记忆），则' + yr + '年该' + ind + '比上年增加约多少' + u + '？', d: { B: v, r: c.r, f: coeff, unit: u } }
+    return { q: yr + a + ind + '为' + fmt(v) + u + '，' + wd + '增长' + c.r + '%（按约' + f + '%转化系数记忆），则' + yr + '该' + ind + '较上期增加约多少' + u + '？', d: { B: v, r: c.r, f: coeff, unit: u } }
   }
-  if (id === 'cut') return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '约为多少' + u + '？', d: { A: B, r: R, unit: u } }
+  if (id === 'cut') return { q: cur + a + main + '为' + fmt(B) + u + '，' + wd + '增长' + R + '%，则' + prev + '该' + main + '约为多少' + u + '？', d: { A: B, r: R, unit: u } }
   if (id === 'bai') {
     const c = findRateCell(ctx, (r) => Math.abs(nearestFraction(r).r - r) <= 0.45) || { ci: 0, ri: last, r: R }
     const fr = nearestFraction(c.r)
-    const yr = ctx.years[c.ri]
+    const yr = ctxL(ctx, c.ri)
     const rev = hashIdx(c.ri * 101 + c.ci * 7, 2) === 1
-    if (rev) return { q: '材料中' + yr + '年增速对应的约数 1/' + fr.n + ' 最接近哪个百分数？', d: { r: fr.r, n: fr.n, rev: true } }
-    return { q: '材料中' + yr + '年' + main + '同比增速约' + c.r + '%，最接近下列哪个分数？', d: { r: fr.r, n: fr.n, rev: false } }
+    if (rev) return { q: '材料中' + yr + '增速对应的约数 1/' + fr.n + ' 最接近哪个百分数？', d: { r: fr.r, n: fr.n, rev: true } }
+    return { q: '材料中' + yr + main + wd + '增速约' + c.r + '%，最接近下列哪个分数？', d: { r: fr.r, n: fr.n, rev: false } }
   }
-  if (id === 'split') return { q: '计算：材料中2024年' + main + '规模 ' + fmt(B) + u + ' × ' + R + '% ≈ ？（按乘法拆分口算）', d: { A: B, r: R, unit: u } }
-  if (id === 'doub') return { q: '材料中2024年' + main + '同比增速为' + R + '%，若按此增速持续增长，约需多少年翻一番？', d: { r: R } }
+  if (id === 'split') return { q: '计算：材料中' + cur + main + '规模 ' + fmt(B) + u + ' × ' + R + '% ≈ ？（按乘法拆分口算）', d: { A: B, r: R, unit: u } }
+  if (id === 'doub') return { q: '材料中' + cur + main + wd + '增速为' + R + '%，若按此增速持续增长，约需多少年翻一番？', d: { r: R } }
   if (id === 'mix') {
     const s1 = ctx.inds[1]
     const s2 = ctx.inds[2]
-    return { q: '2024年' + a + s1 + '同比增速为' + ctx.rates[1][last] + '%，' + s2 + '同比增速为' + ctx.rates[2][last] + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计同比增速最接近：', d: { r1: ctx.rates[1][last], r2: ctx.rates[2][last], v1: ctx.vals[1][last], v2: ctx.vals[2][last] } }
+    return { q: cur + a + s1 + wd + '增速为' + ctx.rates[1][last] + '%，' + s2 + wd + '增速为' + ctx.rates[2][last] + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计' + wd + '增速最接近：', d: { r1: ctx.rates[1][last], r2: ctx.rates[2][last], v1: ctx.vals[1][last], v2: ctx.vals[2][last] } }
   }
   if (id === 'cmp') {
     const last2 = last
@@ -1273,7 +1298,7 @@ function sharedCalcCase(id, ctx) {
     const first = f1a / f1b
     const second = f2a / f2b
     const ans = first > second ? '前者 > 后者' : first < second ? '前者 < 后者' : '两者相等'
-    return { q: '比较材料中2024年「' + ctx.inds[1] + '占' + ctx.inds[0] + '比重」（' + fmt(f1a) + '/' + fmt(f1b) + '）与「' + ctx.inds[2] + '÷' + ctx.inds[3] + '」（' + fmt(f2a) + '/' + fmt(f2b) + '）的大小（不用计算器）', d: { a: f1a, b: f1b, c: f2a, d: f2b, ans } }
+    return { q: '比较材料中' + cur + '「' + ctx.inds[1] + '占' + ctx.inds[0] + '比重」（' + fmt(f1a) + '/' + fmt(f1b) + '）与「' + ctx.inds[2] + '÷' + ctx.inds[3] + '」（' + fmt(f2a) + '/' + fmt(f2b) + '）的大小（不用计算器）', d: { a: f1a, b: f1b, c: f2a, d: f2b, ans } }
   }
   return base
 }
@@ -1312,14 +1337,30 @@ function buildSharedCalc(seed, level, stage, ctx) {
   return { ...base, stage: 'practice' }
 }
 function buildSharedLocate(seed, ctx) {
-  const kind = hashIdx(seed, 4)
   const last = ctx.years.length - 1
   const units = ctx.unit
-  if (kind === 0 || kind === 1) {
+  const hasTable = ctx.hasTable !== false
+  const hasTrendChart = ctx.hasChart !== false && ctx.chartKind !== undefined && ctx.chartKind !== 3
+  const useText = !hasTable && !hasTrendChart && ctx.hasText !== false
+  if (useText) {
+    const main = ctx.inds[0]
+    const cur = ctxL(ctx, 4)
+    const opts = buildOpts(['第一段（总体情况）'], ['第二段（分项对比）', '第三段（趋势口径）', '材料之外的推断'], seed)
+    return {
+      mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg,
+      q: '求' + cur + '「' + main + '」的数值，应在文字材料中定位到哪个位置？',
+      options: opts.options, answer: opts.answer,
+      explain: '【定位】材料第一段先给出' + cur + main + '的数值与增速，结构阅读时先锁定“统计期 → 指标 → 单位”。',
+      tip: '口诀：文字材料先看每段第一句主题，再按“时间+指标”找数。', extra: { name: '数据定位', area: ctx.area }
+    }
+  }
+  if (hasTable) {
+    const kind = hashIdx(seed, 2)
     const ci = hashIdx(seed + 1, ctx.inds.length)
     const ri = 1 + hashIdx(seed + 2, ctx.years.length - 1)
     const col = ctx.inds[ci]
-    const yr = ctx.years[ri]
+    const yr = ctxL(ctx, ri)
+    const wd = ctxW(ctx)
     const correct = ctx.vals[ci][ri]
     const cands = []
     for (let r2 = 0; r2 < ctx.years.length; r2++) {
@@ -1329,31 +1370,32 @@ function buildSharedLocate(seed, ctx) {
     }
     if (kind === 0) {
       const opts = buildOpts([fmt(correct)], shuffle(cands, seed + 5).slice(0, 3).map((v) => fmt(v)), seed)
-      const explain = '【定位】行 = **' + yr + '年**、列 = **' + col + '** → 交叉单元格 = **' + fmt(correct) + units + '**。\n\n口诀：先锁「行年份 × 列指标」，再读交叉格。'
-      return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '年「' + col + '」的数值，应读取材料表中哪一行哪一列的交叉格？', options: opts.options, answer: opts.answer, explain, tip: '口诀：行年份 × 列指标，读交叉格。', extra: { name: '数据定位', area: ctx.area } }
+      const explain = '【定位】行 = **' + yr + '**、列 = **' + col + '** → 交叉单元格 = **' + fmt(correct) + units + '**。\n\n口诀：先锁「统计期 × 指标」，再读交叉格。'
+      return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '「' + col + '」的数值，应读取材料表中哪一行哪一列的交叉格？', options: opts.options, answer: opts.answer, explain, tip: '口诀：统计期 × 指标，读交叉格。', extra: { name: '数据定位', area: ctx.area } }
     }
-    const prevYr = ctx.years[ri - 1]
+    const prevYr = ctxL(ctx, Math.max(0, ri - 1))
     const pairs = [
-      yr + '年与' + prevYr + '年',
-      yr + '年与' + ctx.years[Math.max(0, ri - 2)] + '年',
-      prevYr + '年与' + ctx.years[Math.max(0, ri - 2)] + '年',
-      (ctx.years[Math.min(last, ri + 1)]) + '年与' + yr + '年'
+      yr + '与' + prevYr,
+      yr + '与' + ctxL(ctx, Math.max(0, ri - 2)),
+      prevYr + '与' + ctxL(ctx, Math.max(0, ri - 2)),
+      ctxL(ctx, Math.min(last, ri + 1)) + '与' + yr
     ]
     const opts = buildOpts([pairs[0]], pairs.slice(1), seed)
-    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '年「' + col + '」的同比增速，需要材料中哪两年的数据？', options: opts.options, answer: opts.answer, explain: '【定位】求' + yr + '年同比增速需要 **' + yr + '年（现期）与 ' + prevYr + '年（基期）** 两个数据。', tip: '口诀：增速 = (现期−基期)÷基期。', extra: { name: '数据定位', area: ctx.area } }
+    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '「' + col + '」的' + wd + '增速，需要材料中哪两期数据？', options: opts.options, answer: opts.answer, explain: '【定位】求' + yr + wd + '增速需要 **' + yr + '（现期）与 ' + prevYr + '（基期）** 两个数据。', tip: '口诀：增速 = (现期−基期)÷基期。', extra: { name: '数据定位', area: ctx.area } }
   }
-  if (kind === 2) {
+  if (hasTrendChart) {
     const rates = ctx.rates[0]
     let mi = 0
     rates.forEach((r, i) => { if (r > rates[mi]) mi = i })
-    const opts = buildOpts([ctx.years[mi] + '年'], ctx.years.filter((y, i) => i !== mi).map((y) => y + '年'), seed)
-    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '统计图中「' + ctx.inds[0] + '」哪一年的同比增速最快？', options: opts.options, answer: opts.answer, explain: '【读图】增速看红色折线：最高点为 **' + ctx.years[mi] + '年**（' + rates[mi] + '%）。', tip: '口诀：数值看柱、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
+    const opts = buildOpts([ctxL(ctx, mi)], ctx.periodLabels.filter((y, i) => i !== mi), seed)
+    const wd = ctxW(ctx)
+    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '统计图中「' + ctx.inds[0] + '」哪一期的' + wd + '增速最快？', options: opts.options, answer: opts.answer, explain: '【读图】增速看折线/趋势：最高点为 **' + ctxL(ctx, mi) + '**（' + rates[mi] + '%）。', tip: '口诀：数值看柱高/数据点、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
   }
   const ri = 1 + hashIdx(seed + 9, ctx.years.length - 1)
-  const yr = ctx.years[ri]
+  const yr = ctxL(ctx, ri)
   const correct = ctx.vals[0][ri]
   const opts = buildOpts([fmt(correct)], ctx.vals[0].filter((v, i) => i !== ri).map((v) => fmt(v)), seed)
-  return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '图中' + yr + '年「' + ctx.inds[0] + '」的数值约为多少' + ctx.unit + '？', options: opts.options, answer: opts.answer, explain: '【读图】' + yr + '年数值看第' + (ri + 1) + '根柱 → **' + fmt(correct) + ctx.unit + '**。', tip: '口诀：数值看柱高、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
+  return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '图中' + yr + '「' + ctx.inds[0] + '」的数值约为多少' + ctx.unit + '？', options: opts.options, answer: opts.answer, explain: '【读图】' + yr + '数值看对应柱/数据点 → **' + fmt(correct) + ctx.unit + '**。', tip: '口诀：数值看柱高/数据点、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
 }
 function genSharedQ(mode, seed, level, stage, ctx) {
   for (let attempt = 0; attempt < 8; attempt++) {
