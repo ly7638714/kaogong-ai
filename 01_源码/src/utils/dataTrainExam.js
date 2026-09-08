@@ -222,17 +222,16 @@ const TYPE_META = {
   comp: { name: '综合分析', formula: '逐项验证：先排绝对化，再回表验算', locateTip: '逐项回表核对' }
 }
 
-function makeRateQ(seed, paper, main, sub, U) {
+function makeRateQ(seed, paper, main, _sub, _U) {
   const A = paper.vals[0][3]
   const B = paper.vals[0][4]
   const correct = r1(rateBetween(A, B))
   const dists = [r1(rateBetween(B, A)), r1(rateBetween(B, A + Math.round((B - A) * 0.5))), r1(rateBetween(A, Math.round(B * 1.03)))]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
   const stems = [
-    '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '同比增速约为百分之几？',
-    '材料显示，2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '。据此判断，2024年' + main + '的同比增速最接近：',
-    '若2023年' + paper.area + main + '为' + fmtNum(A) + U + '、2024年为' + fmtNum(B) + U + '，则2024年' + main + '比上年增长约（　）。',
-    '已知2023年' + paper.area + main + fmtNum(A) + U + '，2024年' + main + fmtNum(B) + U + '，问2024年' + main + '同比增速约为（　）。'
+    '根据材料，2024年' + paper.area + main + '同比增速约为百分之几？',
+    '结合材料，2024年' + paper.area + main + '的同比增速最接近：',
+    '材料中2024年' + paper.area + main + '比上年增长约（　）。'
   ]
   const stem = pickV(seed + 11, stems)
   const typeOpts = buildLayerOpts([TYPE_META.rate.name], ['增长量', '基期量', '间隔增长率'], seed + 1)
@@ -259,10 +258,9 @@ function makeDeltaQ(seed, paper, main, sub, U) {
   const dists = [Math.round(B - A * 0.9), Math.round(B * 0.9 - A), Math.round(A * ((B - A) / A) * 0.9), Math.round(B - A + 500)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => fmtNum(x) + U)
   const stems = [
-    '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '较上年增加约多少' + U + '？',
-    '2024年' + paper.area + main + '为' + fmtNum(B) + U + '，较2023年' + fmtNum(A) + U + '增加约多少' + U + '？',
-    '与2023年相比，2024年' + paper.area + main + '（' + fmtNum(A) + U + '→' + fmtNum(B) + U + '）的绝对增长量约为：',
-    '若2024年' + main + '为' + fmtNum(B) + U + '，上年为' + fmtNum(A) + U + '，则当年' + main + '较上年增加（　）' + U + '。'
+    '根据材料，2024年' + paper.area + main + '较上年增加约多少' + U + '？',
+    '结合材料，2024年' + paper.area + main + '的绝对增长量约为：',
+    '材料显示，2024年' + paper.area + main + '比上年增加（　）' + U + '。'
   ]
   const stem = pickV(seed + 13, stems)
   const typeOpts = buildLayerOpts([TYPE_META.delta.name], ['增长率', '现期量', '间隔增长率'], seed + 1)
@@ -282,7 +280,7 @@ function makeDeltaQ(seed, paper, main, sub, U) {
   }
 }
 
-function makeShareQ(seed, paper, main, sub, U) {
+function makeShareQ(seed, paper, main, sub, _U) {
   const whole = paper.vals[0][4]
   const part = paper.vals[1][4]
   const correct = r1(shareNow(paper, 1, 4))
@@ -293,10 +291,9 @@ function makeShareQ(seed, paper, main, sub, U) {
   ]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
   const stems = [
-    '2024年' + paper.area + main + '为' + fmtNum(whole) + U + '，其中' + sub + '为' + fmtNum(part) + U + '，则' + sub + '占' + main + '的比重约为多少？',
-    '2024年' + main + '为' + fmtNum(whole) + U + '，其中' + sub + fmtNum(part) + U + '，' + sub + '约占' + main + '的：',
-    '根据材料，2024年' + paper.area + main + '（' + fmtNum(whole) + U + '）中' + sub + '为' + fmtNum(part) + U + '，' + sub + '占' + main + '的比重最接近：',
-    '2024年' + sub + '为' + fmtNum(part) + U + '，同年' + main + '为' + fmtNum(whole) + U + '，则' + sub + '占' + main + '比重约为：'
+    '根据材料，2024年' + paper.area + sub + '占' + main + '的比重约为多少？',
+    '结合材料，2024年' + paper.area + sub + '占' + main + '的比重最接近：',
+    '材料中2024年' + sub + '占' + main + '的比重约为：'
   ]
   const stem = pickV(seed + 17, stems)
   const typeOpts = buildLayerOpts([TYPE_META.share.name], ['平均数', '倍数', '基期比重'], seed + 1)
@@ -322,9 +319,9 @@ function makeBaseQ(seed, paper, main, sub, U) {
   const dists = [B, Math.round(B * (1 - R / 100)), Math.round(B * (1 + R / 100)), Math.round(B / (1 + R / 100) * 0.97)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => fmtNum(x) + U)
   const stems = [
-    '2024年' + paper.area + main + '为' + fmtNum(B) + U + '，同比增长' + R + '%，则2023年该' + main + '约为多少' + U + '？',
-    '若2024年' + paper.area + main + '为' + fmtNum(B) + U + '、同比增速为' + R + '%，则上一年' + main + '最接近：',
-    '材料显示2024年' + main + fmtNum(B) + U + '，同比' + R + '%。据此推算2023年' + main + '约为（　）。'
+    '根据材料，2023年' + paper.area + main + '约为多少' + U + '？',
+    '结合材料，2023年' + paper.area + main + '最接近：',
+    '材料中2023年' + paper.area + main + '约为（　）。'
   ]
   const stem = pickV(seed + 23, stems)
   const typeOpts = buildLayerOpts([TYPE_META.base.name], ['现期量', '增长率', '增长量'], seed + 1)
@@ -350,9 +347,9 @@ function makeIntervalQ(seed, paper, main, _sub, _U) {
   const dists = [r1(R3 + R4), r1(R3 * R4 / 100), r1(R4), r1((Math.pow((1 + R3 / 100) * (1 + R4 / 100), 1 / 2) - 1) * 100)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
   const stems = [
-    '材料口径补充显示：' + paper.area + main + '2023年同比增长' + R3 + '%，2024年同比增长' + R4 + '%。则2024年该' + main + '较2022年约增长：',
-    '已知' + main + '2023年增速为' + R3 + '%、2024年增速为' + R4 + '%，则2024年' + main + '比2022年增长约（　）。',
-    '若' + paper.area + main + '2023年同比增长' + R3 + '%、2024年同比增长' + R4 + '%，问2024年较2022年的累计增速最接近：'
+    '根据材料，2024年' + paper.area + main + '较2022年约增长：',
+    '结合材料，2024年' + paper.area + main + '比2022年增长约（　）。',
+    '材料中2024年' + paper.area + main + '较2022年的累计增速最接近：'
   ]
   const stem = pickV(seed + 29, stems)
   const typeOpts = buildLayerOpts([TYPE_META.interval.name], ['年均增长率', '增长率', '增长量'], seed + 1)
@@ -371,7 +368,7 @@ function makeIntervalQ(seed, paper, main, _sub, _U) {
     }
   }
 }
-function makeShareDiffQ(seed, paper, main, sub, U) {
+function makeShareDiffQ(seed, paper, main, sub, _U) {
   const whole = paper.vals[0][4]
   const part = paper.vals[1][4]
   const b = paper.rates[0][4]
@@ -389,9 +386,9 @@ function makeShareDiffQ(seed, paper, main, sub, U) {
   ]
   const opts = buildLayerOpts([correctTxt], dists, seed)
   const stems = [
-    '2024年' + paper.area + main + '为' + fmtNum(whole) + U + '，同比增长' + b + '%；其中' + sub + '为' + fmtNum(part) + U + '，同比增长' + a + '%。则2024年' + sub + '占' + main + '的比重比上年同期（　）。',
-    '材料显示2024年' + main + '同比' + b + '%、' + sub + '同比' + a + '%，则2024年' + sub + '占' + main + '比重与2023年相比：',
-    '若2024年' + paper.area + main + '为' + fmtNum(whole) + U + '（+'+ b + '%），' + sub + '为' + fmtNum(part) + U + '（+' + a + '%），则' + sub + '占比变化为：'
+    '根据材料，2024年' + paper.area + sub + '占' + main + '的比重比上年同期（　）。',
+    '结合材料，2024年' + paper.area + sub + '占' + main + '的比重与2023年相比：',
+    '材料中2024年' + sub + '占' + main + '的比重变化为：'
   ]
   const stem = pickV(seed + 31, stems)
   const typeOpts = buildLayerOpts([TYPE_META.shareDiff.name], ['现期比重', '平均数增长率', '基期比重'], seed + 1)
@@ -411,7 +408,7 @@ function makeShareDiffQ(seed, paper, main, sub, U) {
   }
 }
 
-function makeAnnualQ(seed, paper, main, sub, U) {
+function makeAnnualQ(seed, paper, main, _sub, _U) {
   const A = paper.vals[0][0]
   const B = paper.vals[0][4]
   const correct = r1((Math.pow(B / A, 1 / 4) - 1) * 100)
@@ -419,10 +416,9 @@ function makeAnnualQ(seed, paper, main, sub, U) {
   const dists = [r1(totalGrow / 4), r1(totalGrow), r1((Math.pow(B / A, 1 / 3) - 1) * 100)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
   const stems = [
-    '2020年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2020—2024年该' + main + '年均增速约为百分之几？',
-    '材料显示，' + paper.area + main + '由2020年' + fmtNum(A) + U + '增长至2024年' + fmtNum(B) + U + '，五年年均增速约为：',
-    '若2020年' + main + '为' + fmtNum(A) + U + '、2024年为' + fmtNum(B) + U + '，则统计期内' + main + '年均增长（　）。',
-    '2020年' + main + fmtNum(A) + U + '，2024年' + main + fmtNum(B) + U + '，计算2020—2024年' + main + '年均增速约（　）。'
+    '根据材料，2020—2024年' + paper.area + main + '年均增速约为百分之几？',
+    '结合材料，统计期内' + paper.area + main + '的年均增速约为：',
+    '材料中2020—2024年' + paper.area + main + '年均增长（　）。'
   ]
   const stem = pickV(seed + 19, stems)
   const typeOpts = buildLayerOpts([TYPE_META.annual.name], ['间隔增长率', '增长率', '增长量'], seed + 1)

@@ -10,6 +10,7 @@ import { lockHighlights, REAL_REF, findLockWords } from '../utils/dataTrainTips'
 import { showToast } from '../utils/toast'
 import { store } from '../store'
 import { chatOnce, activeCfg } from '../api'
+import { pickGenCfg } from '../utils/fastMode'
 
 const emit = defineEmits(['close', 'send-question'])
 const md = (t) => renderMd(t || '')
@@ -36,6 +37,7 @@ const resultShow = ref(false)
 // ===== 真题式 5 问 × 四层（v3.8.244 核心特色） =====
 const exam = ref(null)
 const examGroupSize = ref(5)
+const examReady = ref(false)
 const examQIdx = ref(0)
 const examLayerIdx = ref(0)
 const examPick = ref('')
@@ -107,29 +109,42 @@ function setSrcMode(m) {
 function setSrc(v) {
   dtSrc.value.src = v
   saveDtSrc()
-  if (view.value === 'exam') initExam()
+  if (view.value === 'exam') resetExamDraft()
   else { makePaper(); reset() }
 }
 function setField(v) {
   dtSrc.value.field = v
   dtSrc.value.customField = ''
   saveDtSrc()
-  if (view.value === 'exam') initExam()
+  if (view.value === 'exam') resetExamDraft()
   else { makePaper(); reset() }
 }
 function setCustomField(v) {
   dtSrc.value.customField = v
   saveDtSrc()
-  if (view.value === 'exam') initExam()
+  if (view.value === 'exam') resetExamDraft()
   else { makePaper(); reset() }
 }
 function setView(v) {
   view.value = v
   if (v === 'exam') {
-    if (!exam.value) initExam()
+    examReady.value = false
+    exam.value = null
   } else if (!q.value) {
     reset()
   }
+}
+function resetExamDraft() {
+  exam.value = null
+  examReady.value = false
+  examFinished.value = false
+  examRun.value = false
+  examAiText.value = ''
+  examEvalText.value = ''
+}
+function setExamGroup(n) {
+  examGroupSize.value = n
+  if (view.value === 'exam') resetExamDraft()
 }
 const srcLabel = computed(() => { const f = dtSrc.value.customField ? (dtSrc.value.field + '·' + dtSrc.value.customField) : dtSrc.value.field; return dtSrc.value.src + ' · ' + f })
 const lockShow = ref(true)
@@ -399,8 +414,9 @@ function initExam() {
     formula: { ok: 0, bad: 0 },
     calc: { ok: 0, bad: 0 }
   }
-  const c = activeCfg(false)
+  const c = pickGenCfg()
   if (c && c.key && !examAiBusy.value) setTimeout(() => aiOrganizeExam(), 100)
+  examReady.value = true
 }
 function startExamRun() {
   if (!examCurrent.value || examRun.value) return
@@ -408,7 +424,7 @@ function startExamRun() {
   examStart.value = Date.now()
   examQStart.value = Date.now()
   showToast('⏱ 真题组已开始，请按四层顺序作答', 'info')
-  const c = activeCfg(false)
+  const c = pickGenCfg()
   if (c && c.key) setTimeout(() => aiOrganizeExam(), 120)
 }
 function examAnswer(k) {
@@ -458,7 +474,7 @@ function examNext() {
 }
 async function aiOrganizeExam() {
   if (examAiBusy.value) return
-  const c = activeCfg(false)
+  const c = pickGenCfg()
   if (!c || !c.key) {
     examAiText.value = '尚未配置文字大模型 Key：可先用当前“数据可验算材料”训练，或在「设置 → 模型」配置 Key 后让 AI 重写更自然的公报式正文。'
     return
@@ -492,7 +508,7 @@ function localEvalText() {
 async function deepEvalExam() {
   examEvalBusy.value = true
   examEvalText.value = ''
-  const c = activeCfg(false)
+  const c = pickGenCfg()
   if (!c || !c.key) {
     examEvalText.value = localEvalText()
     examEvalBusy.value = false
@@ -658,7 +674,10 @@ function onKey(e) {
   if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && picked.value) nextQ()
 }
 onMounted(() => {
-  if (view.value === 'exam') initExam()
+  if (view.value === 'exam') {
+    examReady.value = false
+    exam.value = null
+  }
   else gen()
   window.addEventListener('keydown', onKey)
   timerId = setInterval(() => {
@@ -953,13 +972,24 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
         </select>
         <input :value="dtSrc.customField" placeholder="自定义领域" style="width:120px;font-size:11px" @change="setCustomField($event.target.value)" />
         <span class="dt-chip">题量：</span>
-        <button v-for="n in [5, 10, 15, 20]" :key="n" class="btn" :class="examGroupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" :disabled="examRun" @click="examGroupSize = n; initExam()">{{ n }}题/组</button>
-        <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
-        <button v-if="!examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
+        <button v-for="n in [5, 10, 15, 20]" :key="n" class="btn" :class="examGroupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" :disabled="examRun" @click="setExamGroup(n)">{{ n }}题/组</button>
+        <button v-if="!examReady && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="initExam()">🤖 AI 智能出题</button>
+        <button v-if="examReady" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
+        <button v-if="examReady && !examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
         <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ {{ examElapsed }}s</button>
       </div>
 
-      <div v-if="exam && !examFinished" class="dt-body">
+      <div v-if="!examReady && !examFinished" style="min-height:52vh;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;text-align:center;padding:18px">
+        <div style="font-size:20px">🤖 AI 智能出题</div>
+        <div style="max-width:620px;font-size:14px;line-height:1.9;color:var(--text2)">
+          进入完整真题卷前，请先完成三个选择：材料来源、训练领域、每组题量（5/10/15/20）。确认后点击「🤖 AI 智能出题」，本组题目会自动生成。
+        </div>
+        <div style="max-width:620px;border:1px dashed var(--glass-border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text3)">
+          💡 学习建议：先在「🗂 真题拆分训练」把判题型、找数据、选公式、速算分别练熟，再回到这里做完整真题卷，四层闭环更有效。
+        </div>
+        <button class="btn btn-pri" style="padding:8px 18px;font-size:13px" @click="initExam()">🤖 AI 智能出题</button>
+      </div>
+      <div v-else-if="exam && !examFinished" class="dt-body">
         <div class="dt-side">
           <div class="dt-card">
             <div class="dt-card-t">🧭 本组 {{ examTotal }} 问 · {{ examPapers.length }} 篇材料</div>
@@ -1023,7 +1053,7 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
         </div>
       </div>
 
-      <div v-if="exam && examFinished" style="overflow:auto;padding:4px 2px">
+      <div v-else-if="exam && examFinished" style="overflow:auto;padding:4px 2px">
         <div class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:14px;background:var(--glass-bg)">
           <div style="font-weight:800;font-size:16px">📊 本套真题 · 四层成绩单</div>
           <div style="font-size:13px;color:var(--text2);margin-top:8px;line-height:1.9">
