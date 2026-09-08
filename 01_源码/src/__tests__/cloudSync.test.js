@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { applyLocalMerge, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup } from '../utils/cloudSync'
+import { webdavFileUrl, webdavSyncUrl, describeWebdavHttp } from '../utils/webdav'
 
 const testMem = new Map()
 globalThis.localStorage = {
@@ -72,5 +73,19 @@ describe('cloudSync 多端安全合并', () => {
     expect(localItems.map((x) => x.id)).toEqual(['m1', 'm2'])
     expect(plan.sameAsRemote).toBe(false)
     expect(localStorage.getItem('xc_cfg')).toBeNull()
+  })
+
+  it('坚果云根地址/目录地址自动补齐成可写的 JSON 文件地址', () => {
+    expect(webdavFileUrl('https://dav.jianguoyun.com/dav/')).toBe('https://dav.jianguoyun.com/dav/xingce-ai.json')
+    expect(webdavFileUrl('https://dav.jianguoyun.com/dav')).toBe('https://dav.jianguoyun.com/dav/xingce-ai.json')
+    expect(webdavFileUrl('https://dav.jianguoyun.com/dav/我的行测/')).toBe('https://dav.jianguoyun.com/dav/我的行测/xingce-ai.json')
+    expect(webdavFileUrl('https://dav.jianguoyun.com/dav/行测AI备份.json')).toBe('https://dav.jianguoyun.com/dav/行测AI备份.json')
+    expect(webdavSyncUrl('https://dav.jianguoyun.com/dav/行测AI备份.json')).toBe('https://dav.jianguoyun.com/dav/行测AI备份.sync.json')
+  })
+
+  it('404 上传/下载会给出中文修复指引，401 提示应用密码', () => {
+    expect(describeWebdavHttp(404, 'PUT')).toContain('坚果云模板')
+    expect(describeWebdavHttp(401, 'GET')).toContain('应用密码')
+    expect(describeWebdavHttp(409, 'PUT')).toContain('冲突')
   })
 })

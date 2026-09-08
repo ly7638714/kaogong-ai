@@ -78,6 +78,7 @@ const D = () => ({
   },
   webdav: { url: '', user: '', pass: '' },
   github: { token: '', repo: '' }, // GitHub 私人仓库自动互通（推荐；Token/仓库名仅存本机 xc_cfg）
+  gitee: { token: '', repo: '' }, // Gitee 国内自动互通（网页/iPad/安卓免翻墙；Token 仅存本机）
   szFrom: '2025-10',
   szTo: '',
   // ===== 界面自定义（v3.8.80 新增）：主界面板块/细分功能入口显隐开关（仅隐藏，不删除功能）=====

@@ -1,9 +1,9 @@
 // cloudSync.js —— 多端“安全合并云同步”
 // 网页 / iPad / 安卓共用同一份 WebDAV 文件；同步时先把云端拉下来与本机做集合级合并，
 // 避免“后打开的一端整包覆盖另一端”。xc_cfg（含 API Key / WebDAV 密码）与纯本机 UI 键不同步。
-/* global btoa */
 import { store } from '../store'
 import { collectAll } from './dataBackup'
+import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav'
 
 export const SYNC_STATE_KEY = 'xc_sync_state'
 const LOCAL_ONLY_KEYS = new Set([
@@ -63,7 +63,7 @@ export function cloudSyncUrl() {
   const w = (store.cfg && store.cfg.webdav) || {}
   const base = String(w.url || '').trim()
   if (!base) throw new Error('请先填写 WebDAV 地址')
-  return base.toLowerCase().endsWith('.json') ? base.slice(0, -5) + '.sync.json' : base + '.sync.json'
+  return webdavSyncUrl(base)
 }
 
 export function readSyncState() {
@@ -72,7 +72,7 @@ export function readSyncState() {
     return {
       auto: !!s.auto,
       last: Number(s.last) || 0,
-      kind: s.kind === 'gh' ? 'gh' : 'wd',
+      kind: s.kind === 'gh' || s.kind === 'ge' ? s.kind : 'wd',
       base: s.base && typeof s.base === 'object' ? s.base : {}
     }
   } catch (e) {
@@ -83,7 +83,7 @@ export function readSyncState() {
 export function saveSyncState(p) {
   try {
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
-      kind: p.kind === 'gh' ? 'gh' : 'wd',
+      kind: p.kind === 'gh' || p.kind === 'ge' ? p.kind : 'wd',
       auto: !!p.auto,
       last: Number(p.last) || Date.now(),
       lastStat: String(p.lastStat || '').slice(0, 300),
@@ -262,37 +262,24 @@ export function applyLocalMerge(localAll, remoteRaw, baseline = {}) {
   return { local, remote, merged, changed, sameAsRemote }
 }
 
-function authHdrs(user, pass) {
-  const b64 = (s) => {
-    try { return btoa(unescape(encodeURIComponent(s))) } catch (e) { return '' }
-  }
-  const h = { 'Content-Type': 'application/json' }
-  if (user || pass) h.Authorization = 'Basic ' + b64(user + ':' + pass)
-  return h
-}
-
 export async function runCloudSync() {
   const w = (store.cfg && store.cfg.webdav) || {}
   if (!w.url || !w.url.trim()) throw new Error('请先填写 WebDAV 地址')
   if (!w.pass) throw new Error('请填写 WebDAV 密码/应用密码')
   const url = cloudSyncUrl()
-  const hdrs = authHdrs(w.user, w.pass)
+  const hdrs = wdAuthHeaders(w.user, w.pass)
   let remoteRaw = null
-  let http = 0
-  const getRes = await fetch(url, { method: 'GET', headers: hdrs })
-  http = getRes.status
-  if (getRes.ok) remoteRaw = await getRes.json()
-  else if (getRes.status !== 404) throw new Error('读取云端失败 HTTP ' + getRes.status)
+  const getRes = await webdavGet(url, hdrs)
+  if (getRes) remoteRaw = await getRes.json()
 
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote) {
     const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
-    const putRes = await fetch(url, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) })
-    if (!putRes.ok) throw new Error('上传云端失败 HTTP ' + putRes.status)
+    await webdavPutFile(url, hdrs, JSON.stringify(body))
     putTs = body.t
   }
   saveSyncState({ kind: state.kind, auto: state.auto, last: putTs, lastStat: '已同步 ' + new Date(putTs).toLocaleString(), base: scalarBaseline(plan.merged) })
-  return { ok: true, changed: plan.changed > 0, ts: putTs, http }
+  return { ok: true, changed: plan.changed > 0, ts: putTs }
 }

@@ -28,6 +28,7 @@ import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nat
 import { webdavUpload, webdavDownload } from './utils/webdav'
 import { runCloudSync, readSyncState, saveSyncState } from './utils/cloudSync'
 import { runGitHubSync } from './utils/githubSync'
+import { runGiteeSync } from './utils/giteeSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
@@ -1013,7 +1014,7 @@ const SET_GUIDE = [
   { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
-  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、保存到本地文件夹、WebDAV 自动互通、导入笔记、时政时间范围。', tips: '换设备想保留原数据：两端填同一 WebDAV 后开「自动互通」；也可导出/导入 JSON。' },
+  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、本地/Gitee/GitHub/WebDAV 互通、导入笔记、时政时间范围。', tips: '换设备想保留原数据：网页端用 Gitee 或 GitHub，原生/坚果云用户也可用 WebDAV 自动互通；也可导出/导入 JSON。' },
   { id: 'set-account', t: '🔐 账号', d: '本地登录门：注册/登录、修改密码、退出、删除账号、重置本地账号。', tips: '账号仅存本机（无服务器）；忘记密码可「重置本地账号」重新注册；不想每次登录可关闭登录门。' },
   { id: 'set-help', t: '🧭 帮助', d: '六步学习闭环、快捷键、常见问题、新手引导开关。', tips: '考前把快捷键和闭环过一遍；引导可一键全关或重开。' },
   { id: 'set-about', t: '📜 关于', d: '免责声明与开发者说明。', tips: '仅供个人学习使用，切勿商用；隐私与开发者信息见此处。' }
@@ -1689,10 +1690,13 @@ const wdTpl = (kind) => {
 
 const wdBusy = ref(false)
 const wdStat = ref('')
-const wdAuto = ref(readSyncState().auto && readSyncState().kind !== 'gh')
+const wdAuto = ref(readSyncState().auto && readSyncState().kind === 'wd')
 const ghBusy = ref(false)
 const ghStat = ref('')
 const ghAuto = ref(readSyncState().auto && readSyncState().kind === 'gh')
+const geBusy = ref(false)
+const geStat = ref('')
+const geAuto = ref(readSyncState().auto && readSyncState().kind === 'ge')
 let syncTimer = null
 let cloudApplyTimer = null
 function scheduleCloudApply() {
@@ -1723,13 +1727,15 @@ function ensureSyncTimer() {
     if (!st.auto) return
     if (st.kind === 'gh') {
       if (ghAuto.value) runGhSync(false).catch(() => {})
+    } else if (st.kind === 'ge') {
+      if (geAuto.value) runGeSync(false).catch(() => {})
     } else if (wdAuto.value) {
       runWdAuto(false).catch(() => {})
     }
   }, 45000)
 }
 async function runWdAuto(manual) {
-  if (wdBusy.value || ghBusy.value) return { ok: false }
+  if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   wdBusy.value = true
   wdStat.value = manual ? '智能同步中…' : '自动互通中…'
   try {
@@ -1754,6 +1760,7 @@ function wdToggleAuto() {
   const want = !wdAuto.value
   wdAuto.value = want
   ghAuto.value = false
+  geAuto.value = false
   const st = readSyncState()
   st.auto = want
   st.kind = 'wd'
@@ -1771,6 +1778,7 @@ function ghToggleAuto() {
   const want = !ghAuto.value
   ghAuto.value = want
   wdAuto.value = false
+  geAuto.value = false
   const st = readSyncState()
   st.auto = want
   st.kind = 'gh'
@@ -1806,6 +1814,48 @@ async function runGhSync(manual) {
     return { ok: false, error: (e && e.message) || e }
   } finally {
     ghBusy.value = false
+  }
+}
+function geToggleAuto() {
+  const want = !geAuto.value
+  geAuto.value = want
+  wdAuto.value = false
+  ghAuto.value = false
+  const st = readSyncState()
+  st.auto = want
+  st.kind = 'ge'
+  saveSyncState(st)
+  if (want) {
+    ensureSyncTimer()
+    geStat.value = '🟢 Gitee 自动互通已开启，正在连接私人仓库…'
+    runGeSync(false).catch(() => {})
+  } else {
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
+    geStat.value = '已关闭 Gitee 自动互通；仍可手动同步'
+  }
+}
+async function runGeSync(manual) {
+  if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
+  geBusy.value = true
+  geStat.value = manual ? 'Gitee 智能同步中…' : 'Gitee 自动互通中…'
+  try {
+    const r = await runGiteeSync()
+    const where = r.repo ? '（' + r.repo + '）' : ''
+    geStat.value = (r.created ? '✅ 已自动创建私人仓库并上传 ' : '✅ ') + (r.changed ? '已合并并更新当前界面' : '两端一致') + where + ' ' + new Date(r.ts).toLocaleString()
+    if (r.created) showToast('🔐 已创建 Gitee 私人同步仓库，学习数据不会公开', 'success')
+    if (r.changed) {
+      showToast('☁️ 云端新数据已安全合并，界面已自动更新', 'success')
+      scheduleCloudApply()
+    } else if (manual) {
+      showToast('☁️ Gitee 已同步，两端一致', 'success')
+    }
+    return r
+  } catch (e) {
+    geStat.value = '❌ ' + ((e && e.message) || e)
+    if (manual) showToast('☁️ Gitee 同步失败：' + ((e && e.message) || e), 'error')
+    return { ok: false, error: (e && e.message) || e }
+  } finally {
+    geBusy.value = false
   }
 }
 async function wdUp() {
@@ -2969,10 +3019,10 @@ onUnmounted(() => {
           </div>
 </div>
 </div>
-<button class="set-group-hd" :class="{ on: setGroup === 'data' }" @click="toggleSetGroup('data')"><span class="sg-t">💾 数据与同步</span><span class="sg-desc">保存位置 / 数据管理 / WebDAV / 时政</span><span class="sg-arrow">{{ setGroup === 'data' ? '▾' : '▸' }}</span></button>
+<button class="set-group-hd" :class="{ on: setGroup === 'data' }" @click="toggleSetGroup('data')"><span class="sg-t">💾 数据与同步</span><span class="sg-desc">本地 / Gitee / GitHub / WebDAV / 时政</span><span class="sg-arrow">{{ setGroup === 'data' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'data'" class="set-group-bd">
         <div id="set-data" class="sec-t">💾 数据保存位置（本地文件夹）</div>
-        <div class="sec-desc">数据保存位置与迁移：本地文件夹 / 导出导入备份 / WebDAV 云同步 / 时政范围。</div>
+        <div class="sec-desc">数据保存位置与迁移：本地文件夹 / Gitee / GitHub / WebDAV / 导出导入备份 / 时政范围。</div>
         <div class="fld">
           <label>{{ isNativeHost() ? '📂 原生宿主(方案乙)：点击会调起系统「选择文件夹」(SAF)，选好后点「保存全部数据」即可写入该文件夹并开启自动备份。' : (isNative ? '⚠️ 5+App 环境：系统不允许网页直接选文件夹写盘（此按钮在 5+ 下不可用）。请使用下方「📱 原生备份 / 📤 分享备份」或 WebDAV。' : '电脑端（桌面 Chrome/Edge）：选择文件夹后，可一键/自动把全部数据保存进去；其它浏览器不支持。') }}</label>
           <div class="exp-choices">
@@ -3022,7 +3072,26 @@ onUnmounted(() => {
           <button class="btn btn-gh" @click="clearQuizLog()">🧹 清空出题历史</button>
           <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
-<div class="sec-t">💎 GitHub 自动互通（推荐，网页可直接使用）</div>
+<div class="sec-t">🇨🇳 Gitee 自动互通（国内推荐，网页/iPad/安卓免翻墙直连）</div>
+        <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>
+        <div class="fld">
+          <label>Gitee 私人令牌（Gitee 右上角头像 → 设置 → 安全设置 → 私人令牌 → 生成新令牌，勾选 projects 读写权限即可）</label>
+          <input v-model="store.cfg.gitee.token" type="password" autocomplete="new-password" placeholder="粘贴 Gitee 私人令牌" @change="saveCfg()" />
+        </div>
+        <div class="fld">
+          <label>同步仓库（留空 = 自动创建私人仓库 xingce-ai-cloud-sync）</label>
+          <input v-model="store.cfg.gitee.repo" autocomplete="off" placeholder="你的Gitee用户名/xingce-ai-cloud-sync（可留空）" @change="saveCfg()" />
+        </div>
+        <div class="exp-choices">
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="geToggleAuto()">{{ geAuto ? '⏸ 关闭 Gitee 自动互通' : '▶ 开启 Gitee 自动互通' }}</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGeSync(true)">🔄 立即同步 / 创建仓库</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
+          {{ geStat || '提示：Gitee 网页可直接同步，不需要 VPN；不同用户各自填自己的令牌，仓库会自动建在各自名下并保持私有。' }}
+        </div>
+
+
+        <div class="sec-t">💎 GitHub 自动互通（备用，网页可直接使用）</div>
         <div class="sec-desc" style="margin-top:4px">每位用户填自己的 GitHub Token，系统会把数据存到“该 Token 对应账户”下自动创建的私人仓库，互不共用；代码没有写死任何特定账户。Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
         <div class="fld">
           <label>GitHub Token（Settings → Developer settings → Personal access tokens，勾选 repo 权限）</label>
@@ -3033,16 +3102,16 @@ onUnmounted(() => {
           <input v-model="store.cfg.github.repo" autocomplete="off" placeholder="你的GitHub用户名/xingce-ai-cloud-sync（可留空）" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
-          <button class="btn btn-pri" :disabled="wdBusy || ghBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
-          <button class="btn btn-gh" :disabled="wdBusy || ghBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
           {{ ghStat || '提示：不同用户请各自填自己的 GitHub Token；首次同步会在你自己的账户下新建私人仓库，数据不会写入别人的仓库。Token 有有效期，到期后重新填写即可。' }}
         </div>
 
 
-        <div class="sec-t">☁️ WebDAV 备选同步（Nextcloud / 自建；坚果云网页会跨域失败）</div>
-        <div class="sec-desc" style="margin-top:4px">仅适合本身允许浏览器跨域的 WebDAV。坚果云 dav.jianguoyun.com 在网页端会报 Failed to fetch，如需免费互通请优先用上方 GitHub 方案。</div>
+        <div class="sec-t">☁️ WebDAV 备选同步（坚果云 / Nextcloud / 自建；自动建目录并修复 404）</div>
+        <div class="sec-desc" style="margin-top:4px">安卓/iPad 与部分原生环境可直接同步坚果云；纯浏览器若被坚果云拦截跨域会明确提示「Failed to fetch」，此时请改用上方 Gitee（国内）或 GitHub。填根地址会自动补齐文件名，缺失目录会自动创建后再上传。</div>
         <div class="exp-choices" style="margin:4px 0 8px">
           <button class="btn btn-gh" @click="wdTpl('jianguo')">🌰 坚果云模板</button>
           <button class="btn btn-gh" @click="wdTpl('nextcloud')">🏠 Nextcloud/自建模板</button>
@@ -3061,10 +3130,10 @@ onUnmounted(() => {
           <input v-model="store.cfg.webdav.pass" type="password" autocomplete="new-password" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
-          <button class="btn btn-pri" :disabled="wdBusy" @click="wdToggleAuto()">{{ wdAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
-          <button class="btn btn-gh" :disabled="wdBusy" @click="runWdAuto(true)">🔄 立即同步</button>
-          <button class="btn btn-pri" :disabled="wdBusy" @click="wdUp()">⬆️ 上传备份</button>
-          <button class="btn btn-gh" :disabled="wdBusy" @click="wdDown()">⬇️ 下载备份</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="wdToggleAuto()">{{ wdAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runWdAuto(true)">🔄 立即同步</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="wdUp()">⬆️ 上传备份</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="wdDown()">⬇️ 下载备份</button>
         </div>
         <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
           {{ wdStat || '提示：坚果云先在官网「安全选项」生成应用密码（不是登录密码）；地址会自动填好，一般无需手改。自定义地址以 .json 结尾（同一 URL 覆盖旧备份）。' }}
@@ -3371,7 +3440,7 @@ onUnmounted(() => {
             <ul>
               <li><b>发消息没反应？</b> 先在「API 设置」填 Key 并「保存并测试」，状态灯出现 ✅。</li>
               <li><b>发图/截图题看不到？</b> 必须配置「视觉模型」并选可识图模型（DeepSeek vision / 智谱 GLM-5V）。</li>
-              <li><b>想换设备接着用？</b> 在两端「数据与同步 → WebDAV」填同一账号并开启「自动互通」，学习数据会自动安全合并；也可「导出备份 JSON」→ 新设备导入。</li>
+              <li><b>想换设备接着用？</b> 在两端「数据与同步」选择 Gitee/GitHub/WebDAV 任一方案填同一账号并开启「自动互通」，学习数据会自动安全合并；也可「导出备份 JSON」→ 新设备导入。</li>
               <li><b>想导入自己的笔记？</b> 「数据管理→📥 导入笔记(.md)」，支持 Obsidian 格式（frontmatter 标签 + 标题分节）。</li>
               <li><b>想在 iPad/Anki 里复习？</b> 错题页导出 PDF（A4）给 GoodNotes，或「🃏 推到 Anki」（需 AnkiConnect）。</li>
             </ul>
@@ -3636,7 +3705,7 @@ onUnmounted(() => {
             <ul>
               <li>💬 对话页提问一道题试试（可先「🎲 模拟出题」）；</li>
               <li>📥 可导入你的真题/笔记：设置 → 数据管理 → 导入笔记(.md)；</li>
-              <li>☁️ 想多端同步：设置 → WebDAV 云同步。</li>
+              <li>☁️ 想多端同步：设置 → 数据与同步（Gitee / GitHub / WebDAV 三选一）。</li>
             </ul>
             <div class="ob-note">以后想再看本引导：设置 → 数据管理 → 🎓 重新引导。</div>
             <div class="pnl-btns">
