@@ -61,4 +61,13 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     expect(different).toBe(true)
     expect(b).toBeTruthy()
   })
+
+  it('材料数值不是刻意取整的漂亮数字', () => {
+    for (let i = 0; i < 20; i++) {
+      const exam = buildDataTrainExam(810000 + i * 313, domainOf('粮食'))
+      expect(exam.materialMd).not.toContain('50,000')
+      const nums = (exam.materialMd.match(/\b\d[\d,]*\b/g) || []).map((x) => Number(x.replace(/,/g, ''))).filter((x) => x > 100)
+      expect(nums.some((n) => n % 10 !== 0)).toBe(true)
+    }
+  })
 })

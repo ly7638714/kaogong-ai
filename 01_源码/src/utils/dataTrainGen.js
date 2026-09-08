@@ -42,18 +42,17 @@ function rndRate(seed, off, min = 0.5, max = 28) {
   const x = min + hashIdx(seed + off * 131, span) / 10
   return Math.round(x * 10) / 10
 }
+function rndIrregular(seed, off, min = 3000, max = 90000) {
+  return min + hashIdx(seed + off * 1013, max - min + 1)
+}
 
 function richStep(prev, rate) {
   const next = prev * (1 + rate / 100)
-  return Math.max(50, next >= 50000 ? Math.round(next / 100) * 100 : next >= 5000 ? Math.round(next / 10) * 10 : Math.round(next))
+  return Math.max(50, Math.round(next))
 }
 function actualRate(prev, now) {
   if (!prev) return 0
   return Math.round(((now - prev) / prev) * 1000) / 10
-}
-function roundMag(n) {
-  if (!isFinite(n)) return 50
-  return Math.max(1, n >= 50000 ? Math.round(n / 100) * 100 : n >= 5000 ? Math.round(n / 10) * 10 : Math.round(n))
 }
 // 同一篇“公报级”共享篇章：主指标按增速逐年复算，子指标取主指标的稳定占比区间，
 // 保证表中年份/数值/增速与题干取值可互相印证。
@@ -68,9 +67,9 @@ function buildRichDomainCtx(seed, dom) {
   // 增速池覆盖低速(≤5%)、百化分档(12.5/20)、高速(>20)与常态区间
   const mainRates = shuffle([4.8, 12.5, 20, 7.2, 8.3], seed)
   const mainVals = []
-  let cur = Math.max(3000, rndVal(seed, 91, 3000, 60000))
+  let cur = Math.max(3000, rndIrregular(seed, 91, 3000, 60000))
   for (let ri = 0; ri < years.length; ri++) {
-    if (ri === 0) mainVals.push(roundMag(cur))
+    if (ri === 0) mainVals.push(cur)
     else {
       cur = richStep(cur, mainRates[ri])
       mainVals.push(cur)
@@ -85,7 +84,7 @@ function buildRichDomainCtx(seed, dom) {
     for (let ri = 0; ri < years.length; ri++) {
       const drift = 0.92 + hashIdx(seed + ci * 41 + ri * 7 + 13, 25) / 100
       const share = Math.min(0.92, Math.max(0.08, share0 * drift))
-      row.push(roundMag(mainVals[ri] * share))
+      row.push(Math.max(1, Math.round(mainVals[ri] * share)))
     }
     vals.push(row)
     rates.push(row.map((v, ri) => (ri === 0 ? mainRatesActual[0] : actualRate(row[ri - 1], v))))
