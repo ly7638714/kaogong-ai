@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { pickPassage, buildYanQ, verifyYanQ, YAN_MODES, YAN_DOMAINS, THEORY_MD } from '../utils/yanTrainLib'
+import { pickPassage, buildYanQ, buildYanExam, verifyYanQ, YAN_MODES, YAN_DOMAINS, YAN_LEVELS, THEORY_MD } from '../utils/yanTrainLib'
 import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { store, addWrong } from '../store'
@@ -9,7 +9,20 @@ import { chatOnce, activeCfg } from '../api'
 const emit = defineEmits(['close', 'send-question'])
 const md = (t) => renderMd(t || '')
 const ready = ref(false)
+const examReady = ref(false)
+const examUnlocked = ref(false)
+const exam = ref(null)
+const examQIdx = ref(0)
+const examPick = ref('')
+const examRun = ref(false)
+const examFinished = ref(false)
+const examHist = ref([])
+const examStart = ref(0)
+const examQStart = ref(0)
+const examElapsed = ref(0)
+const examQTime = ref(0)
 const domain = ref('自动')
+const level = ref('entry')
 const paper = ref(null)
 const q = ref(null)
 const mode = ref('topic')
@@ -38,6 +51,26 @@ const totalScore = computed(() => {
   const bad = YAN_MODES.reduce((n, m) => n + ((modeStats.value[m.k] || {}).bad || 0), 0)
   return { ok, bad, total: ok + bad, pct: ok + bad ? Math.round((ok / (ok + bad)) * 100) : 0 }
 })
+const splitDone = computed(() =>
+  YAN_MODES.filter((m) => {
+    const s = modeStats.value[m.k] || { ok: 0, bad: 0 }
+    return s.ok + s.bad > 0
+  }).length
+)
+const examCurrent = computed(() => (exam.value && exam.value.qs[examQIdx.value]) || null)
+const examPaper = computed(() => (exam.value && exam.value.passage) || null)
+const examScore = computed(() => {
+  const ok = examHist.value.filter((h) => h.ok).length
+  return { ok, bad: examHist.value.length - ok, total: examHist.value.length, pct: examHist.value.length ? Math.round(ok / examHist.value.length * 100) : 0 }
+})
+function setReadySplit(v) {
+  ready.value = v
+  if (v) examReady.value = false
+}
+function setReadyExam(v) {
+  examReady.value = v
+  if (v) ready.value = false
+}
 function buildQ(seedOverride) {
   const p = paper.value
   if (!p) return
@@ -47,6 +80,7 @@ function buildQ(seedOverride) {
     showToast('文段出题未通过质检，已自动重试', 'info')
     return
   }
+  qq._qcPass = true
   q.value = qq
   picked.value = ''
   qTime.value = 0
@@ -54,17 +88,19 @@ function buildQ(seedOverride) {
 }
 function startTrain() {
   const seed = Date.now() % 100000
-  paper.value = pickPassage(seed, domain.value)
+  paper.value = pickPassage(seed, domain.value, level.value)
   mode.value = 'topic'
   sentenceIdx.value = 0
   modeStats.value = { topic: { ok: 0, bad: 0 }, sentence: { ok: 0, bad: 0 }, structure: { ok: 0, bad: 0 }, main: { ok: 0, bad: 0 } }
   elapsed.value = 0
-  ready.value = true
+  setReadySplit(true)
   buildQ(seed)
   showToast('📖 已生成一篇文段，请按四步拆解训练', 'success')
 }
 function backHome() {
-  ready.value = false
+  setReadySplit(false)
+  setReadyExam(false)
+  exam.value = null
   paper.value = null
   q.value = null
   picked.value = ''
@@ -82,7 +118,7 @@ function nextSentence() {
 }
 function newPassage() {
   const seed = Date.now() % 100000
-  paper.value = pickPassage(seed, domain.value)
+  paper.value = pickPassage(seed, domain.value, level.value)
   mode.value = 'topic'
   sentenceIdx.value = 0
   buildQ(seed)
@@ -103,6 +139,14 @@ function pick(k) {
   const st = modeStats.value[q.value.mode]
   if (ok) st.ok++
   else st.bad++
+  const doneLayers = YAN_MODES.filter((m) => {
+    const s = modeStats.value[m.k] || { ok: 0, bad: 0 }
+    return s.ok + s.bad > 0
+  }).length
+  if (doneLayers >= 4 && !examUnlocked.value) {
+    examUnlocked.value = true
+    showToast('🎉 已完成一轮四步拆解，完整 5 问真题卷已解锁', 'success')
+  }
   const roleTxt = q.value.mode === 'sentence' && ok ? (q.value.role || '') : ''
   if (roleTxt) showToast('✅ ' + roleTxt.split('：')[0], 'success')
   else showToast(ok ? '✅ 回答正确，看拆解路径巩固' : '❌ 答错了，看右侧结构拆解', ok ? 'success' : 'error')
@@ -113,6 +157,56 @@ function nextLayer() {
   else { newPassage(); return }
   if (idx === modeOrder.length - 1) newPassage()
 }
+function launchExam(force = false, fromSplit = false) {
+  if (!examUnlocked.value && !force) {
+    showToast('建议先完成一轮四步拆解再进入完整 5 问真题卷', 'info')
+    return
+  }
+  const p = fromSplit && paper.value ? paper.value : pickPassage(Date.now() % 100000, domain.value, level.value)
+  const e = buildYanExam(p, Date.now() % 100000)
+  if (!e || !e.qc || !e.qc.ok) { showToast('完整卷质检未通过，已停止生成', 'err'); return }
+  exam.value = e
+  paper.value = p
+  examQIdx.value = 0
+  examPick.value = ''
+  examRun.value = false
+  examFinished.value = false
+  examHist.value = []
+  examElapsed.value = 0
+  examQTime.value = 0
+  setReadySplit(false)
+  setReadyExam(true)
+  showToast('📝 完整 5 问已生成，逐题作答并查看结构解析', 'success')
+}
+function examStartRun() {
+  if (!examCurrent.value || examRun.value) return
+  examRun.value = true
+  examFinished.value = false
+  examStart.value = Date.now()
+  examQStart.value = Date.now()
+}
+function examAnswer(k) {
+  if (!examCurrent.value || examPick.value || !examRun.value) return
+  examPick.value = k
+  examQTime.value = Math.max(1, Math.round((Date.now() - examQStart.value) / 1000))
+  const ok = k === examCurrent.value.answer
+  examHist.value.push({ q: examQIdx.value + 1, ok, sec: examQTime.value })
+  showToast(ok ? '✅ 回答正确' : '❌ 答错，看解析复盘', ok ? 'success' : 'error')
+}
+function examNext() {
+  if (!examPick.value || !examCurrent.value) return
+  if (examQIdx.value < exam.value.qs.length - 1) {
+    examQIdx.value++
+    examPick.value = ''
+    examQStart.value = Date.now()
+    examQTime.value = 0
+    return
+  }
+  examRun.value = false
+  examFinished.value = true
+  examElapsed.value = examStart.value ? Math.round((Date.now() - examStart.value) / 1000) : 0
+}
+function redoExam() { launchExam(true, true) }
 async function aiCoach() {
   if (!q.value || aiBusy.value) return
   const c = activeCfg(false)
@@ -153,6 +247,19 @@ function saveWrong() {
   }, { silent: true })
   showToast(r.ok ? '✅ 已存入错题本' : '🚫 非完整/重复未入库', r.ok ? 'success' : 'info')
 }
+function saveExamWrong() {
+  const p = examPaper.value
+  const qq = examCurrent.value
+  if (!p || !qq || !examPick.value) return
+  const question = ['【片段阅读材料】' + p.title + '\n' + p.sentences.map((s, i) => '第' + (i + 1) + '句：' + s).join('\n'), '【题目】' + qq.q, qq.options.map((o) => o.k + '. ' + o.t).join('\n')].join('\n\n')
+  const r = addWrong({
+    subject: '言语理解', subx: '片段阅读', question,
+    answer: '正确答案 ' + qq.answer + (examPick.value !== qq.answer ? '（我选' + examPick.value + '）' : ''),
+    reasons: ['片段结构完整5问·' + qq.modeT + '答错'], explain: qq.explain || '',
+    time: new Date().toLocaleString(), at: Date.now(), wrongCount: 1, correctStreak: 0, mastery: 0, digested: false
+  }, { silent: true })
+  showToast(r.ok ? '✅ 已存入错题本' : '🚫 非完整/重复未入库', r.ok ? 'success' : 'info')
+}
 watch(q, (qq) => {
   if (!qq || !paper.value) return
   store.readCtx = {
@@ -162,9 +269,15 @@ watch(q, (qq) => {
   }
   store.curQ = { plate: '言语理解', kind: '片段结构拆解', stem: qq.q, options: qq.options, answer: qq.answer }
 })
+watch(splitDone, (n) => {
+  if (n >= 4 && !examUnlocked.value) examUnlocked.value = true
+})
 let timerId = null
 onMounted(() => {
-  timerId = setInterval(() => { if (runStarted.value) elapsed.value = Math.floor((Date.now() - (qStart.value || Date.now())) / 1000) }, 1000)
+  timerId = setInterval(() => {
+    if (examRun.value) examElapsed.value = Math.floor((Date.now() - (examStart.value || Date.now())) / 1000)
+    if (runStarted.value) elapsed.value = Math.floor((Date.now() - (qStart.value || Date.now())) / 1000)
+  }, 1000)
 })
 onUnmounted(() => { if (timerId) clearInterval(timerId) })
 </script>
@@ -172,27 +285,31 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
   <div class="ov show yt-ov" @click.self="emit('close')">
     <div class="pnl yt-pnl">
       <div class="yt-head">
-        <button class="pnl-top-b" @click="ready ? backHome() : emit('close')">← {{ ready ? '首页' : '返回' }}</button>
-        <span class="yt-title">📖 言语理解 · 片段阅读结构四步拆解</span>
+        <button class="pnl-top-b" @click="ready || examReady ? backHome() : emit('close')">← {{ ready || examReady ? '首页' : '返回' }}</button>
+        <span class="yt-title">📖 片段阅读 · {{ examReady ? '完整 5 问真题卷' : ready ? '四步拆分训练' : '结构四步拆解' }}</span>
         <div class="yt-acts">
-          <span class="yt-chip" title="本场正确率">🎯 {{ totalScore.pct }}%</span>
-          <span class="yt-chip" title="计时状态">{{ runStarted ? '⏱ ' + elapsed + 's' : '⏱ 待开始' }}</span>
+          <span class="yt-chip" title="本场正确率">🎯 {{ examReady ? examScore.pct + '%' : totalScore.pct + '%' }}</span>
+          <span class="yt-chip" title="计时状态">{{ examReady ? (examRun ? '⏱ ' + examElapsed + 's' : '⏱ 待开始') : (runStarted ? '⏱ ' + elapsed + 's' : '⏱ 待开始') }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
           <button class="pc-close" @click="emit('close')">✕</button>
         </div>
       </div>
-      <div v-if="!ready" class="yt-guide">
+      <div v-if="!ready && !examReady" class="yt-guide">
         <div class="yt-card yt-guide-card">
           <div style="font-weight:800;font-size:16px;color:var(--accent)">🧰 片段阅读 · 四步拆解训练</div>
           <div style="font-size:13px;color:var(--text2);line-height:1.9;margin-top:8px">
             和资料速算一样采用“能力拆层”：每次生成一篇完整文段，同一篇文段依次训练 <b>① 主题词/关键词 → ② 句子功能 → ③ 行文结构 → ④ 主旨意图</b>。
             不再靠逐字精读，先学会把文段骨架拆出来再做题。
           </div>
-          <div style="font-size:12px;color:var(--text3);margin-top:6px">文段覆盖社会治理、科技伦理、数字经济、文化保护、生态环保、教育健康、经济民生、城乡发展等真实高频领域。</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:6px">内置 30 篇完整教学文段与 28 个领域/交叉话题，覆盖治理、科技、经济、生态、教育、文化、民生、文学艺术等真实命题方向。</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="yt-chip">领域：</span>
           <button v-for="d in YAN_DOMAINS" :key="d" class="btn" :class="domain === d ? 'btn-pri' : 'btn-gh'" style="padding:2px 9px;font-size:12px" @click="domain = d">{{ d }}</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="yt-chip">难度 / 长度：</span>
+          <button v-for="l in YAN_LEVELS" :key="l.k" class="btn" :class="level === l.k ? 'btn-pri' : 'btn-gh'" style="padding:5px 10px;font-size:12px" :title="l.d" @click="level = l.k">{{ l.t }} · {{ l.sent }} / {{ l.chars }}</button>
         </div>
         <div class="yt-card" style="font-size:13px;line-height:1.9;color:var(--text2)">
           <div style="font-weight:700;color:var(--text)">训练前先背这张结构表</div>
@@ -200,8 +317,16 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
           <div style="color:var(--text3);margin-top:6px">答错会自动定位到错误能力层；每篇完成四步后建议点「📌 存错题」把不会的句子收进错题本。</div>
         </div>
         <button class="btn btn-pri yt-start" @click="startTrain()">🤖 开始四步拆解 · 随机一篇文段</button>
+        <div class="yt-card" style="border:1px dashed var(--glass-border)">
+          <div style="font-weight:800;color:var(--text)">📝 完整 5 问真题卷 {{ examUnlocked ? '（已解锁）' : '（🔒 建议先完成一轮拆分）' }}</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-top:5px">同一篇文段连做 5 问：主题词 → 句子功能 → 行文结构 → 主旨意图 → 标题选择，模拟真实片段阅读做题节奏。</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+            <button class="btn btn-pri" :class="{ pulse: examUnlocked }" @click="launchExam(false, false)">{{ examUnlocked ? '📝 开始完整 5 问' : '🗂 先完成一轮四步拆分' }}</button>
+            <button v-if="!examUnlocked" class="btn btn-gh" title="仍想先感受完整卷？可以跳过建议" @click="launchExam(true, false)">⚡ 跳过建议直接进入</button>
+          </div>
+        </div>
       </div>
-      <template v-else>
+      <template v-else-if="ready">
         <div class="yt-body">
           <div class="yt-side">
             <div class="yt-card">
@@ -215,10 +340,14 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
             <div v-if="paper" class="yt-card">
               <div class="yt-card-t">📄 当前文段</div>
               <div class="yt-domain">{{ paper.domain }} · {{ paper.title }}</div>
-              <div class="yt-theme">主题词：{{ paper.theme }}</div>
-              <div class="yt-kw">关键词：{{ (paper.keywords || []).join('、') }}</div>
-              <div class="yt-kw">结构：{{ paper.structureLabel.split('：')[0] }}</div>
-              <div class="yt-tip">{{ paper.signal ? '信号词：' + paper.signal : '' }}</div>
+              <div class="yt-kw">难度：{{ paper.difficultyT }} · {{ paper.sentCount }}句 · {{ paper.charCount }}字（目标 {{ paper.levelRange }}）</div>
+              <template v-if="!paper.hiddenMeta || picked">
+                <div class="yt-theme">主题词：{{ paper.theme }}</div>
+                <div class="yt-kw">关键词：{{ (paper.keywords || []).join('、') }}</div>
+                <div class="yt-kw">结构：{{ paper.structureLabel.split('：')[0] }}</div>
+                <div class="yt-tip">{{ paper.signal ? '信号词：' + paper.signal : '' }}</div>
+              </template>
+              <div v-else class="yt-tip" style="color:#fbbf24">🔒 高难度模式已隐藏主题词/关键词/信号词，请先自行归纳后再核对。</div>
             </div>
             <div class="yt-card">
               <div class="yt-card-t">📈 本场统计</div>
@@ -231,6 +360,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
             <div class="yt-modes">
               <button v-for="m in YAN_MODES" :key="m.k" class="btn" :class="mode === m.k ? 'btn-pri' : 'btn-gh'" :title="m.d" @click="switchMode(m.k)">{{ m.t }}</button>
               <button class="btn btn-gh" title="同篇文段下一句" :disabled="mode !== 'sentence'" @click="nextSentence()">↻ 下一句</button>
+              <button class="btn" :class="examUnlocked ? 'btn-pri' : 'btn-gh'" title="完成四层拆分后解锁完整5问" @click="launchExam(false, true)">{{ examUnlocked ? '📝 完整5问' : '🔒 完整5问' }}</button>
             </div>
             <div v-if="paper" class="yt-mat">
               <div class="yt-mat-title">{{ paper.title }}</div>
@@ -246,7 +376,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
             </div>
             <template v-if="q">
               <div class="yt-qcard">
-                <div class="yt-qmode">{{ curMode.t }}</div>
+                <div class="yt-qmode">{{ curMode.t }}<span v-if="q && q._qcPass" style="margin-left:8px;color:#34d399;font-size:11px">✅ 本地质检通过</span></div>
                 <div class="yt-q" v-html="md(q.q)"></div>
                 <div class="yt-opts">
                   <button v-for="o in q.options" :key="o.k" class="yt-opt" :class="{ picked: picked === o.k, right: picked && o.k === q.answer, wrong: picked && o.k === picked && o.k !== q.answer }" :disabled="!!picked || !runStarted" @click="pick(o.k)">
@@ -272,6 +402,81 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
                   <button v-if="picked !== q.answer" class="btn btn-gh" @click="saveWrong()">📌 存错题</button>
                 </div>
                 <div v-if="aiText" class="yt-ai" v-html="md(aiText)"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+      <template v-else-if="examReady">
+        <div v-if="examFinished" style="overflow:auto;padding:4px 2px">
+          <div class="yt-card" style="border:1px solid rgba(52,211,153,.35)">
+            <div style="font-weight:800;font-size:17px;color:#34d399">📝 完整 5 问成绩单</div>
+            <div style="font-size:14px;color:var(--text2);margin-top:8px;line-height:2">✅ 答对 <b>{{ examScore.ok }}</b> / {{ examScore.total }} · 正确率 <b>{{ examScore.pct }}%</b> · 用时 <b>{{ examElapsed }}s</b></div>
+            <div style="font-size:12px;color:var(--text3);margin-top:4px">逐题状态：<span v-for="(h,i) in examHist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.ok ? '✓' : '✗' }}（{{ h.sec }}s） </span></div>
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-pri" @click="redoExam()">🔄 同篇重做</button>
+              <button class="btn btn-gh" @click="launchExam(true, false)">🎲 换篇再来一套</button>
+              <button class="btn btn-gh" @click="startTrain()">🗂 回到拆分训练</button>
+              <button class="btn btn-gh" @click="backHome()">🏠 首页</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="yt-body">
+          <div class="yt-side">
+            <div class="yt-card">
+              <div class="yt-card-t">🧭 本套 5 问</div>
+              <div v-for="i in 5" :key="i" class="yt-py-row" :class="{ on: examQIdx === i - 1 }">
+                <div class="yt-py-l"><b>第 {{ i }} 题</b><span>{{ examHist.find((h) => h.q === i) ? (examHist.find((h) => h.q === i).ok ? '✓' : '✗') : '·' }}</span></div>
+              </div>
+              <div class="yt-tip">主题词 → 句子功能 → 行文结构 → 主旨意图 → 标题选择</div>
+            </div>
+            <div v-if="examPaper" class="yt-card">
+              <div class="yt-card-t">📄 当前文段</div>
+              <div class="yt-domain">{{ examPaper.domain }} · {{ examPaper.title }}</div>
+              <template v-if="!examPaper.hiddenMeta || examPick || examFinished">
+                <div class="yt-theme">主题词：{{ examPaper.theme }}</div>
+                <div class="yt-kw">关键词：{{ (examPaper.keywords || []).join('、') }}</div>
+              </template>
+              <div v-else class="yt-tip" style="color:#fbbf24">🔒 高难度模式：作答后再展示主题词核对。</div>
+              <div class="yt-kw">难度：{{ examPaper.difficultyT }} · {{ examPaper.sentCount }}句 · {{ examPaper.charCount }}字</div>
+            </div>
+            <div class="yt-card">
+              <div class="yt-card-t">📈 本场统计</div>
+              <div class="yt-st">正确率 <b>{{ examScore.pct }}%</b> · 已答 {{ examScore.total }}/5 · 用时 <b>{{ examRun ? examElapsed + 's' : '待开始' }}</b></div>
+              <div v-if="exam && exam.qc && exam.qc.ok" class="yt-tip" style="color:#34d399">✅ 材料/题目/解析本地质检通过</div>
+            </div>
+          </div>
+          <div class="yt-train">
+            <div v-if="examPaper" class="yt-mat">
+              <div class="yt-mat-title">{{ examPaper.title }}</div>
+              <div v-for="(s, i) in examPaper.sentences" :key="i" class="yt-sentence" :class="{ cur: examCurrent && examCurrent.kind === 'sentence' && examCurrent.sentenceIdx === i }">
+                <span class="yt-sn">{{ i + 1 }}</span><span class="yt-sent">{{ s }}</span>
+              </div>
+              <div class="yt-mat-note">材料为本地生成教学文段；逐题作答后可展开结构解析。</div>
+            </div>
+            <template v-if="examCurrent">
+              <div class="yt-qcard">
+                <div class="yt-qmode">第 {{ examQIdx + 1 }} / 5 题 · {{ examCurrent.modeT }}<span v-if="exam && exam.qc && exam.qc.ok" style="margin-left:8px;color:#34d399;font-size:11px">✅ 本地质检通过</span></div>
+                <div class="yt-q" v-html="md(examCurrent.q)"></div>
+                <div class="yt-opts">
+                  <button v-for="o in examCurrent.options" :key="o.k" class="yt-opt" :class="{ picked: examPick === o.k, right: examPick && o.k === examCurrent.answer, wrong: examPick && o.k === examPick && o.k !== examCurrent.answer }" :disabled="!!examPick || !examRun" @click="examAnswer(o.k)">
+                    <span class="yt-k">{{ o.k }}</span><span>{{ o.t }}</span>
+                  </button>
+                </div>
+                <div v-if="!examRun && !examPick" class="yt-tip">先阅读材料，点击「▶ 开始本套作答」后逐题限时作答。</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+                  <button v-if="!examRun" class="btn btn-pri" @click="examStartRun()">▶ 开始本套作答</button>
+                  <button v-else class="btn btn-gh">⏱ {{ examElapsed }}s</button>
+                  <button class="btn btn-gh" @click="backHome()">🏠 首页</button>
+                </div>
+              </div>
+              <div v-if="examPick && examCurrent" class="yt-explain">
+                <div class="yt-ex-t" :class="examPick === examCurrent.answer ? 'ok' : 'bad'">{{ examPick === examCurrent.answer ? '✅ 回答正确' : '❌ 答错了，正确答案是 ' + examCurrent.answer }}</div>
+                <div class="yt-ex-b" v-html="md(examCurrent.explain)"></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+                  <button class="btn btn-pri" @click="examNext()">{{ examQIdx < 4 ? '➡️ 下一题' : '📊 查看成绩单' }}</button>
+                  <button v-if="examPick !== examCurrent.answer" class="btn btn-gh" @click="saveExamWrong()">📌 存错题</button>
+                </div>
               </div>
             </template>
           </div>
