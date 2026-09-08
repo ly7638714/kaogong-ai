@@ -35,6 +35,7 @@ const runStarted = ref(false)
 const resultShow = ref(false)
 // ===== 真题式 5 问 × 四层（v3.8.244 核心特色） =====
 const exam = ref(null)
+const examGroupSize = ref(5)
 const examQIdx = ref(0)
 const examLayerIdx = ref(0)
 const examPick = ref('')
@@ -45,6 +46,8 @@ const examQStart = ref(0)
 const examElapsed = ref(0)
 const examAiBusy = ref(false)
 const examAiText = ref('')
+const examEvalBusy = ref(false)
+const examEvalText = ref('')
 const examLayerStats = ref({
   type: { ok: 0, bad: 0 },
   locate: { ok: 0, bad: 0 },
@@ -355,7 +358,11 @@ const layerProgress = computed(() =>
     return { ...m, pct: t ? Math.round((ms.ok / t) * 100) : 0, done: t, ok: ms.ok, bad: ms.bad }
   })
 )
-const examCurrent = computed(() => (exam.value && exam.value.qs[examQIdx.value]) || null)
+const examPapers = computed(() => (exam.value && exam.value.papers) || [])
+const examPaper = computed(() => examPapers.value[Math.min(examPapers.value.length - 1, Math.floor(examQIdx.value / 5))] || null)
+const examTotal = computed(() => (exam.value && exam.value.total) || 0)
+const examIndexes = computed(() => Array.from({ length: examTotal.value }, (_, i) => i))
+const examCurrent = computed(() => (examPaper.value && examPaper.value.qs[examQIdx.value % 5]) || null)
 const examLayerKey = computed(() => EXAM_LAYER_KEYS[Math.min(EXAM_LAYER_KEYS.length - 1, examLayerIdx.value)].k)
 const examLayerTitle = computed(() => EXAM_LAYER_KEYS[Math.min(EXAM_LAYER_KEYS.length - 1, examLayerIdx.value)].t)
 const examLayerItem = computed(() => (examCurrent.value && examCurrent.value.layers[examLayerKey.value]) || null)
@@ -368,7 +375,11 @@ const examLayerPct = computed(() =>
 )
 function initExam() {
   const dom = activeDomain() || domainOf('粮食')
-  exam.value = buildDataTrainExam(Date.now() % 100000, dom)
+  const base = Date.now() % 100000
+  const papers = []
+  const need = Math.ceil(Math.max(5, examGroupSize.value) / 5)
+  for (let i = 0; i < need; i++) papers.push(buildDataTrainExam(base + i * 9173, dom))
+  exam.value = { papers, total: Math.max(5, examGroupSize.value) }
   examQIdx.value = 0
   examLayerIdx.value = 0
   examPick.value = ''
@@ -379,6 +390,8 @@ function initExam() {
   examElapsed.value = 0
   examAiText.value = ''
   examAiBusy.value = false
+  examEvalText.value = ''
+  examEvalBusy.value = false
   examHist.value = []
   examLayerStats.value = {
     type: { ok: 0, bad: 0 },
@@ -416,7 +429,8 @@ function examNext() {
     examQStart.value = Date.now()
     return
   }
-  if (examQIdx.value < 4) {
+  if (examQIdx.value < examTotal.value - 1) {
+    if ((examQIdx.value + 1) % 5 === 0) examAiText.value = ''
     examQIdx.value++
     examLayerIdx.value = 0
     examPick.value = ''
@@ -426,9 +440,10 @@ function examNext() {
   examRun.value = false
   examFinished.value = true
   examElapsed.value = examStart.value ? Math.floor((Date.now() - examStart.value) / 1000) : 0
+  deepEvalExam()
   try {
     const all = JSON.parse(localStorage.getItem('xc_dt_exam_best') || '{}')
-    const domK = String((exam.value && (exam.value.domName || exam.value.area)) || '通用')
+    const domK = String((examPaper.value && (examPaper.value.domName || examPaper.value.area)) || '通用')
     const total = examHist.value.length
     const ok = examHist.value.filter((h) => h.ok).length
     const cur = all[domK]
@@ -444,11 +459,12 @@ async function aiOrganizeExam() {
     examAiText.value = '尚未配置文字大模型 Key：可先用当前“数据可验算材料”训练，或在「设置 → 模型」配置 Key 后让 AI 重写更自然的公报式正文。'
     return
   }
-  if (!exam.value) return
+  const paper = examPaper.value
+  if (!paper) return
   examAiBusy.value = true
   examAiText.value = ''
   try {
-    const brief = String(exam.value.materialMd || '').slice(0, 2600)
+    const brief = String(paper.materialMd || '').slice(0, 2600)
     const reply = await chatOnce(c, [
       { role: 'system', content: '你是统计公报写作助手。只能改写材料口径与语言风格，不能新增或改动任何数字、年份、单位；输出不超过4段，不用寒暄。' },
       { role: 'user', content: '请把下面这份训练材料改写成更像国家统计局公报正文的 Markdown 文本，保留全部数字、年份、单位与材料结构：\n\n' + brief }
@@ -458,6 +474,41 @@ async function aiOrganizeExam() {
     examAiText.value = 'AI 整理失败：' + ((e && e.message) || e) + '；当前本地材料仍可继续作答。'
   } finally {
     examAiBusy.value = false
+  }
+}
+function localEvalText() {
+  const rows = EXAM_LAYER_KEYS.map((m) => {
+    const s = examLayerStats.value[m.k]
+    const t = s.ok + s.bad
+    return m.t + ' ' + s.ok + '/' + t + '（' + (t ? Math.round((s.ok / t) * 100) : 0) + '%）'
+  }).join('\n')
+  const worst = examLayerPct.value.slice().sort((a, b) => a.pct - b.pct)[0]
+  return '【本场统计】\n' + rows + '\n\n【能力诊断】\n当前最薄弱层：' + (worst ? worst.t : '') + '。\n\n【训练建议】\n1. 先回「理论课堂」重看该层对应的方法卡与口诀。\n2. 下一套优先完成' + (worst ? worst.t : '速算') + '同考点题。\n3. 每层答错后先复述该层口诀，再做变式题巩固。'
+}
+async function deepEvalExam() {
+  examEvalBusy.value = true
+  examEvalText.value = ''
+  const c = activeCfg(false)
+  if (!c || !c.key) {
+    examEvalText.value = localEvalText()
+    examEvalBusy.value = false
+    return
+  }
+  try {
+    const rows = examHist.value.map((h) => '第' + h.q + '题·' + EXAM_LAYER_KEYS.find((x) => x.k === h.layer).t + (h.ok ? '✓' : '✗') + ' ' + h.sec + 's').join('\n')
+    const stats = EXAM_LAYER_KEYS.map((m) => {
+      const s = examLayerStats.value[m.k]
+      return m.t + '：' + s.ok + '/' + (s.ok + s.bad)
+    }).join('\n')
+    const reply = await chatOnce(c, [
+      { role: 'system', content: '你是行测资料分析教练。基于四层作答记录输出结构化深度评估：①总体判断；②四个能力层逐项诊断；③每题薄弱层；④下一阶段训练建议（按优先级）。要求具体、不超过600字。' },
+      { role: 'user', content: '本场真题四层成绩：\n' + stats + '\n\n逐层明细：\n' + rows + '\n\n请输出 Markdown 评估报告。' }
+    ], 1600)
+    examEvalText.value = String(reply || '').trim() || localEvalText()
+  } catch (e) {
+    examEvalText.value = 'AI 深度评估失败：' + ((e && e.message) || e) + '\n\n' + localEvalText()
+  } finally {
+    examEvalBusy.value = false
   }
 }
 
@@ -896,6 +947,8 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
           <optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup>
         </select>
         <input :value="dtSrc.customField" placeholder="自定义领域" style="width:120px;font-size:11px" @change="setCustomField($event.target.value)" />
+        <span class="dt-chip">题量：</span>
+        <button v-for="n in [5, 10, 15, 20]" :key="n" class="btn" :class="examGroupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" :disabled="examRun" @click="examGroupSize = n; initExam()">{{ n }}题/组</button>
         <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
         <button v-if="!examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
         <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ {{ examElapsed }}s</button>
@@ -904,13 +957,14 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
       <div v-if="exam && !examFinished" class="dt-body">
         <div class="dt-side">
           <div class="dt-card">
-            <div class="dt-card-t">🧭 本套 5 问</div>
-            <div v-for="(q2, qi) in exam.qs" :key="q2.kind + qi" class="dt-py-row" :class="{ on: qi === examQIdx }">
+            <div class="dt-card-t">🧭 本组 {{ examTotal }} 问 · {{ examPapers.length }} 篇材料</div>
+            <div v-for="qi in examIndexes" :key="qi" class="dt-py-row" :class="{ on: qi === examQIdx }">
               <div class="dt-py-l">
-                <b>第 {{ qi + 1 }} 题 · {{ q2.typeLabel }}</b>
+                <b>第 {{ qi + 1 }} 题</b>
                 <span v-if="examHist.some((h) => h.q === qi + 1 && h.layer === 'calc')" class="dt-chip-sub" :style="{ color: examHist.find((h) => h.q === qi + 1 && h.layer === 'calc').ok ? '#34d399' : '#fb7185' }">
                   {{ examHist.find((h) => h.q === qi + 1 && h.layer === 'calc').ok ? '✓' : '✗' }}
                 </span>
+                <span v-else-if="qi === examQIdx && examRun" class="dt-chip-sub">●</span>
               </div>
             </div>
           </div>
@@ -930,9 +984,9 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
             <span class="dt-mat-note" style="color:var(--text3)">AI 只改写表达，不改变本地表格数值，保证 5 问仍可自动判题。</span>
           </div>
           <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
-            <div v-if="exam.materialMd" class="dt-mat" v-html="md(exam.materialMd)"></div>
-            <div v-if="exam.materialSvg" class="dt-mat dt-mat-svg" v-html="exam.materialSvg"></div>
-            <div class="dt-mat-note">📊 训练领域设定：{{ srcLabel }} · 同一篇材料供 5 问连续作答，切换题目不会更换数据。</div>
+            <div v-if="examPaper && examPaper.materialMd" class="dt-mat" v-html="md(examPaper.materialMd)"></div>
+            <div v-if="examPaper && examPaper.materialSvg" class="dt-mat dt-mat-svg" v-html="examPaper.materialSvg"></div>
+            <div class="dt-mat-note">📊 训练领域设定：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇材料，同一篇供 5 问连续作答。</div>
           </div>
           <div v-if="examAiText" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
             <div class="dt-mat-note">🤖 AI 整理正文（仅阅读；表格与题目仍以本地可判数据为准）</div>
@@ -940,7 +994,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
           </div>
 
           <div v-if="examCurrent && examLayerItem" class="dt-card">
-            <div class="dt-qmode">第 {{ examQIdx + 1 }} / 5 题 · {{ examLayerTitle }} · 四层第 {{ examLayerIdx + 1 }} / 4</div>
+            <div class="dt-qmode">第 {{ examQIdx + 1 }} / {{ examTotal }} 题 · {{ examLayerTitle }} · 四层第 {{ examLayerIdx + 1 }} / 4</div>
             <div class="dt-q" style="margin:8px 0 10px" v-html="md(examCurrent.stem)"></div>
             <div class="dt-q" style="font-weight:700;margin:10px 0 8px" v-html="md(examLayerItem.q)"></div>
 
@@ -958,7 +1012,7 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
               <div style="font-weight:800;margin-bottom:6px">{{ examPick === examLayerItem.answer ? '✅ 这一层答对了' : '❌ 这一层答错（正确答案 ' + examLayerItem.answer + '）' }}</div>
               <div v-html="md(examLayerItem.explain)"></div>
               <div class="dt-mat-note" style="margin-top:6px">{{ examLayerItem.tip }}</div>
-              <button class="btn btn-pri" style="margin-top:8px" @click="examNext()">{{ examLayerIdx < 3 ? '下一层 →' : (examQIdx < 4 ? '下一题 →' : '📊 查看本场成绩') }}</button>
+              <button class="btn btn-pri" style="margin-top:8px" @click="examNext()">{{ examLayerIdx < 3 ? '下一层 →' : (examQIdx < examTotal - 1 ? '下一题 →' : '📊 查看本场成绩') }}</button>
             </div>
           </div>
         </div>
@@ -975,6 +1029,14 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
               <span>{{ lp.t }}：<b>{{ lp.ok }}/{{ lp.done }}</b>（{{ lp.pct }}%）</span>
               <div style="height:8px;border-radius:4px;background:var(--surface);overflow:hidden"><div :style="{ width: lp.pct + '%', height: '100%', background: lp.pct >= 80 ? '#34d399' : lp.pct >= 50 ? '#fbbf24' : '#fb7185' }"></div></div>
             </div>
+          </div>
+          <div style="margin-top:14px;border-top:1px solid var(--glass-border);padding-top:10px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <b style="font-size:14px">🤖 AI 深度评估</b>
+              <button v-if="!examEvalBusy" class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="deepEvalExam()">↻ 重新评估</button>
+            </div>
+            <div v-if="examEvalBusy" style="color:var(--text3);font-size:12px;margin-top:6px">⏳ AI 正在分析本场四层作答记录…</div>
+            <div v-if="examEvalText" class="dt-ai" style="margin-top:8px" v-html="md(examEvalText)"></div>
           </div>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-pri" @click="initExam()">🔄 换一套继续练</button>
