@@ -51,6 +51,161 @@ function shareNow(paper, ci = 1, ri = 4) {
 function rateBetween(a, b) {
   return ((b - a) / a) * 100
 }
+function pickV(seed, arr) { return arr[hashIdx(seed, arr.length)] }
+function svgWrap(body, w = 640, h = 340) {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '">' + body + '</svg>'
+}
+function chartBarSvg(labels, vals) {
+  const W = 640, H = 320, pl = 64, pr = 24, pt = 34, pb = 46
+  const max = Math.max.apply(null, vals) * 1.15
+  const n = vals.length
+  const cw = (W - pl - pr) / n
+  const bw = Math.min(58, cw * 0.52)
+  let s = '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>'
+  for (let i = 0; i <= 4; i++) {
+    const y = H - pb - (i / 4) * (H - pt - pb)
+    const v = Math.round((max * i) / 4)
+    s += '<line x1="' + pl + '" y1="' + y + '" x2="' + (W - pr) + '" y2="' + y + '" stroke="#e2e8f0"/><text x="' + (pl - 8) + '" y="' + (y + 4) + '" font-size="11" text-anchor="end" fill="#64748b">' + v + '</text>'
+  }
+  for (let i = 0; i < n; i++) {
+    const x = pl + cw * i + cw / 2
+    const h = Math.max(6, (vals[i] / max) * (H - pt - pb))
+    const y = H - pb - h
+    s += '<rect x="' + (x - bw / 2) + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + (i === n - 1 ? '#dc2626' : '#2563eb') + '"/>'
+    s += '<text x="' + x + '" y="' + (y - 6) + '" font-size="11" text-anchor="middle" font-weight="700" fill="#333">' + fmtNum(vals[i]) + '</text>'
+    s += '<text x="' + x + '" y="' + (H - pb + 18) + '" font-size="12" text-anchor="middle" fill="#333">' + labels[i] + '</text>'
+  }
+  return svgWrap(s)
+}
+function chartLineSvg(labels, vals) {
+  const W = 640, H = 320, pl = 58, pr = 44, pt = 32, pb = 46
+  const max = Math.max.apply(null, vals) * 1.1
+  const n = vals.length
+  const cw = (W - pl - pr) / (n - 1 || 1)
+  let pts = ''
+  let circles = ''
+  for (let i = 0; i < n; i++) {
+    const x = pl + cw * i
+    const y = H - pb - (vals[i] / max) * (H - pt - pb)
+    pts += (i ? ' ' : '') + x + ',' + y
+    circles += '<circle cx="' + x + '" cy="' + y + '" r="5" fill="#fff" stroke="#2563eb" stroke-width="2.5"/>'
+    circles += '<text x="' + x + '" y="' + (y - 9) + '" font-size="11" text-anchor="middle" fill="#333">' + fmtNum(vals[i]) + '</text>'
+    circles += '<text x="' + x + '" y="' + (H - pb + 18) + '" font-size="12" text-anchor="middle" fill="#333">' + labels[i] + '</text>'
+  }
+  let s = '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>'
+  s += '<text x="20" y="18" font-size="13" fill="#333">规模趋势（单位：按材料）</text>'
+  for (let i = 0; i <= 4; i++) {
+    const y = H - pb - (i / 4) * (H - pt - pb)
+    s += '<line x1="' + pl + '" y1="' + y + '" x2="' + (W - pr) + '" y2="' + y + '" stroke="#e2e8f0"/><text x="' + (pl - 8) + '" y="' + (y + 4) + '" font-size="11" text-anchor="end" fill="#64748b">' + Math.round((max * i) / 4) + '</text>'
+  }
+  s += '<polyline points="' + pts + '" fill="none" stroke="#2563eb" stroke-width="3"/>' + circles
+  return svgWrap(s)
+}
+function chartComboSvg(labels, vals, rates) {
+  const W = 640, H = 340, pl = 64, pr = 54, pt = 34, pb = 48
+  const max = Math.max.apply(null, vals) * 1.15
+  const rMin = Math.min.apply(null, rates), rMax = Math.max.apply(null, rates)
+  const rSpan = Math.max(6, rMax - rMin)
+  const n = vals.length
+  const cw = (W - pl - pr) / n
+  const bw = Math.min(54, cw * 0.48)
+  let s = '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>'
+  for (let i = 0; i <= 4; i++) {
+    const y = H - pb - (i / 4) * (H - pt - pb)
+    s += '<line x1="' + pl + '" y1="' + y + '" x2="' + (W - pr) + '" y2="' + y + '" stroke="#e2e8f0"/>'
+    s += '<text x="' + (pl - 8) + '" y="' + (y + 4) + '" font-size="10" text-anchor="end" fill="#64748b">' + Math.round((max * i) / 4) + '</text>'
+    const rv = Math.round((rMin + (rSpan * i) / 4) * 10) / 10
+    s += '<text x="' + (W - pr + 10) + '" y="' + (y + 4) + '" font-size="10" fill="#dc2626">' + rv + '%</text>'
+  }
+  const line = []
+  for (let i = 0; i < n; i++) {
+    const x = pl + cw * i + cw / 2
+    const h = Math.max(6, (vals[i] / max) * (H - pt - pb))
+    const y = H - pb - h
+    s += '<rect x="' + (x - bw / 2) + '" y="' + y + '" width="' + bw + '" height="' + h + '" fill="' + (i === n - 1 ? '#dc2626' : '#2563eb') + '" rx="3"/>'
+    const ry = H - pb - ((rates[i] - rMin) / rSpan) * (H - pt - pb)
+    line.push(x + ',' + ry)
+    s += '<circle cx="' + x + '" cy="' + ry + '" r="5" fill="#fff" stroke="#dc2626" stroke-width="2.5"/>'
+    s += '<text x="' + x + '" y="' + (ry - 8) + '" font-size="10" text-anchor="middle" fill="#dc2626">' + rates[i] + '%</text>'
+    s += '<text x="' + x + '" y="' + (H - pb + 18) + '" font-size="11" text-anchor="middle" fill="#333">' + labels[i] + '</text>'
+  }
+  s += '<polyline points="' + line.join(' ') + '" fill="none" stroke="#dc2626" stroke-width="2.5"/>'
+  return svgWrap(s)
+}
+function renderRichMaterial(seed, paper) {
+  const last = paper.years.length - 1
+  const area = paper.area || '某省'
+  const main = paper.inds[0]
+  const sub = paper.inds[1]
+  const sub2 = paper.inds[2]
+  const sub3 = paper.inds[3]
+  const U = paper.unit
+  const V0 = fmtNum(paper.vals[0][0])
+  const V3 = fmtNum(paper.vals[0][3])
+  const V4 = fmtNum(paper.vals[0][4])
+  const R4 = paper.rates[0][last]
+  const R3 = paper.rates[0][last - 1]
+  const S1 = fmtNum(paper.vals[1][last])
+  const S2 = fmtNum(paper.vals[2][last])
+  const S3 = fmtNum(paper.vals[3][last])
+  const SR1 = paper.rates[1][last]
+  const SR2 = paper.rates[2][last]
+  const SR3 = paper.rates[3][last]
+  const grow5 = Math.round(((paper.vals[0][last] - paper.vals[0][0]) / paper.vals[0][0]) * 1000) / 10
+  const titleTpl = pickV(seed, [
+    '【材料】' + area + main + '及相关指标运行情况（' + paper.years[0] + '—' + paper.years[last] + '年）',
+    '【材料】' + area + main + '与主要分项指标统计',
+    '【材料】' + area + main + '运行统计资料（' + paper.years[0] + '—' + paper.years[last] + '年）',
+    '【材料】' + area + '主要经济社会指标摘要'
+  ])
+  const introTpls = [
+    '一、总体情况。2024年，' + area + main + '实现' + V4 + U + '，同比增长' + R4 + '%；分项中，' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '。',
+    '一、运行综述。统计资料显示，2024年' + area + main + '为' + V4 + U + '，比上年增长' + R4 + '%，其中' + sub + '完成' + S1 + U + '、' + sub2 + '完成' + S2 + U + '、' + sub3 + '完成' + S3 + U + '。',
+    '一、指标概况。2024年' + main + '全年实现' + V4 + U + '，同比增速为' + R4 + '%；同期' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '。',
+    '一、总量与结构。' + main + '是反映' + area + '相关运行情况的重要指标，2024年为' + V4 + U + '，同比增长' + R4 + '%；其中' + sub + '为' + S1 + U + '、' + sub2 + '为' + S2 + U + '、' + sub3 + '为' + S3 + U + '。'
+  ]
+  const structTpls = [
+    '二、结构变化。分指标看，' + sub + '增速' + SR1 + '%，' + sub2 + '增速' + SR2 + '%，' + sub3 + '增速' + SR3 + '%；' + main + '绝对量较上年净增' + fmtNum(Math.round(paper.vals[0][last] - paper.vals[0][last - 1])) + U + '，与总量增长方向保持一致。',
+    '二、分项表现。' + sub + '同比增长' + SR1 + '%，' + sub2 + '同比增长' + SR2 + '%，' + sub3 + '同比增长' + SR3 + '%；主指标' + main + '在2023年' + V3 + U + '的基础上继续走高，2024年达到' + V4 + U + '。',
+    '二、内部构成。各分项增速存在差异：' + sub + '为' + SR1 + '%，' + sub2 + '为' + SR2 + '%，' + sub3 + '为' + SR3 + '%；从绝对量看，主指标较上年增加' + fmtNum(Math.round(paper.vals[0][last] - paper.vals[0][last - 1])) + U + '。',
+    '二、增速比较。2024年' + main + '同比增速为' + R4 + '%，2023年为' + R3 + '%；' + sub + '、' + sub2 + '、' + sub3 + '增速分别为' + SR1 + '%、' + SR2 + '%、' + SR3 + '%。'
+  ]
+  const trendTpls = [
+    '三、趋势特征。' + paper.years[0] + '年以来，' + main + '整体呈上行趋势，2024年较' + paper.years[0] + '年累计增长' + grow5 + '%；上述数据口径以材料表与趋势图为准。',
+    '三、周期观察。从' + paper.years[0] + '—' + paper.years[last] + '年看，' + main + '五年累计增幅约' + grow5 + '%，材料文字、表格与趋势图相互印证。',
+    '三、趋势与口径。' + main + '在统计期内保持增长，2024年较' + paper.years[0] + '年增长约' + grow5 + '%，表中增速按可比口径计算。',
+    '三、纵向比较。与' + paper.years[0] + '年' + V0 + U + '相比，2024年' + main + '增长约' + grow5 + '%，五年整体处于扩张区间。'
+  ]
+  const textMd = pickV(seed + 1, introTpls) + '\n\n' + pickV(seed + 2, structTpls) + '\n\n' + pickV(seed + 3, trendTpls)
+  const headA = '| 年份 | ' + paper.inds.join(' | ') + ' |'
+  const sepA = '| --- | ' + paper.inds.map(() => '---').join(' | ') + ' |'
+  const rowsA = paper.years.map((y, ri) => '| ' + y + ' | ' + paper.inds.map((ind, ci) => fmtNum(paper.vals[ci][ri])).join(' | ') + ' |').join('\n')
+  const unitRow = '| 单位 | ' + paper.inds.map(() => U).join(' | ') + ' |'
+  const tableA = headA + '\n' + sepA + '\n' + rowsA + '\n' + unitRow
+  const headB = '| 指标 | ' + paper.years.join(' | ') + ' |'
+  const sepB = '| --- | ' + paper.years.map(() => '---').join(' | ') + ' |'
+  const rowsB = paper.inds.map((ind, ci) => '| ' + ind + '（' + U + '） | ' + paper.years.map((y, ri) => fmtNum(paper.vals[ci][ri])).join(' | ') + ' |').join('\n')
+  const tableB = headB + '\n' + sepB + '\n' + rowsB
+  const headC = '| 指标 | 单位 | 2023年 | 2024年 | 2024同比增速 |'
+  const sepC = '| --- | --- | --- | --- | --- |'
+  const rowsC = paper.inds.map((ind, ci) => '| ' + ind + ' | ' + U + ' | ' + fmtNum(paper.vals[ci][last - 1]) + ' | ' + fmtNum(paper.vals[ci][last]) + ' | ' + paper.rates[ci][last] + '% |').join('\n')
+  const tableC = headC + '\n' + sepC + '\n' + rowsC
+  const tableNote = '注：①表中数值均为全年累计口径；②增速按可比口径复算；③本材料为训练模拟数据，非官方实际公布值。'
+  const tablePick = hashIdx(seed + 5, 3)
+  const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n' + tableNote
+  const chartPick = hashIdx(seed + 9, 3)
+  const labels = paper.years.map((y) => y + '年')
+  const svg = chartPick === 0 ? chartBarSvg(labels, paper.vals[0]) : chartPick === 1 ? chartLineSvg(labels, paper.vals[0]) : chartComboSvg(labels, paper.vals[0], paper.rates[0])
+  const chartTitle = chartPick === 0 ? '三、年度规模图（柱形）' : chartPick === 1 ? '三、年度规模图（折线）' : '三、年度规模与增速图（柱线组合）'
+  const tableTitle = tablePick === 0 ? '二、主要指标表' : tablePick === 1 ? '二、分项统计表（指标横向展开）' : '二、主要指标比较表'
+  return {
+    materialMd: titleTpl + '\n\n' + textMd + '\n\n' + tableTitle + '\n\n' + tableMd + '\n\n' + chartTitle + '（' + main + '）',
+    materialSvg: svg,
+    matStyle: 'v' + pickV(seed + 7, [1, 2, 3, 4]),
+    tableKind: tablePick,
+    chartKind: chartPick
+  }
+}
 const TYPE_META = {
   rate: { name: '增长率', formula: '增长率 = (现期量 − 基期量) ÷ 基期量', locateTip: '先找现期与基期两年' },
   delta: { name: '增长量', formula: '增长量 = 现期量 − 基期量', locateTip: '现期与基期做差' },
@@ -65,7 +220,13 @@ function makeRateQ(seed, paper, main, sub, U) {
   const correct = r1(rateBetween(A, B))
   const dists = [r1(rateBetween(B, A)), r1(rateBetween(B, A + Math.round((B - A) * 0.5))), r1(rateBetween(A, Math.round(B * 1.03)))]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
-  const stem = '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '同比增速约为百分之几？'
+  const stems = [
+    '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '同比增速约为百分之几？',
+    '材料显示，2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '。据此判断，2024年' + main + '的同比增速最接近：',
+    '若2023年' + paper.area + main + '为' + fmtNum(A) + U + '、2024年为' + fmtNum(B) + U + '，则2024年' + main + '比上年增长约（　）。',
+    '已知2023年' + paper.area + main + fmtNum(A) + U + '，2024年' + main + fmtNum(B) + U + '，问2024年' + main + '同比增速约为（　）。'
+  ]
+  const stem = pickV(seed + 11, stems)
   const typeOpts = buildLayerOpts([TYPE_META.rate.name], ['增长量', '基期量', '间隔增长率'], seed + 1)
   const locateOpts = buildLayerOpts(['2023年数值与2024年数值'], ['2024年数值与2024年增速', '2020年与2024年数值', '2024年增速与2023年增速'], seed + 2)
   const formulaOpts = buildLayerOpts(['$r = \\frac{B-A}{A}$'], ['$r = \\frac{B-A}{B}$', '$r = \\frac{A}{B}$', '$\\Delta = B-A$'], seed + 3)
@@ -89,7 +250,13 @@ function makeDeltaQ(seed, paper, main, sub, U) {
   const correct = Math.round(B - A)
   const dists = [Math.round(B - A * 0.9), Math.round(B * 0.9 - A), Math.round(A * ((B - A) / A) * 0.9), Math.round(B - A + 500)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => fmtNum(x) + U)
-  const stem = '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '较上年增加约多少' + U + '？'
+  const stems = [
+    '2023年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2024年该' + main + '较上年增加约多少' + U + '？',
+    '2024年' + paper.area + main + '为' + fmtNum(B) + U + '，较2023年' + fmtNum(A) + U + '增加约多少' + U + '？',
+    '与2023年相比，2024年' + paper.area + main + '（' + fmtNum(A) + U + '→' + fmtNum(B) + U + '）的绝对增长量约为：',
+    '若2024年' + main + '为' + fmtNum(B) + U + '，上年为' + fmtNum(A) + U + '，则当年' + main + '较上年增加（　）' + U + '。'
+  ]
+  const stem = pickV(seed + 13, stems)
   const typeOpts = buildLayerOpts([TYPE_META.delta.name], ['增长率', '现期量', '间隔增长率'], seed + 1)
   const locateOpts = buildLayerOpts(['2023年与2024年该指标数值'], ['2024年数值与2024年增速', '2020年与2024年数值', '2024年数值与2023年增速'], seed + 2)
   const formulaOpts = buildLayerOpts(['$\\Delta = B-A$'], ['$r = \\frac{B-A}{A}$', '$\\Delta = B \\times r$', '$B = A \\times (1+r)$'], seed + 3)
@@ -117,7 +284,13 @@ function makeShareQ(seed, paper, main, sub, U) {
     r1(((part * 0.88) / whole) * 100)
   ]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
-  const stem = '2024年' + paper.area + main + '为' + fmtNum(whole) + U + '，其中' + sub + '为' + fmtNum(part) + U + '，则' + sub + '占' + main + '的比重约为多少？'
+  const stems = [
+    '2024年' + paper.area + main + '为' + fmtNum(whole) + U + '，其中' + sub + '为' + fmtNum(part) + U + '，则' + sub + '占' + main + '的比重约为多少？',
+    '2024年' + main + '为' + fmtNum(whole) + U + '，其中' + sub + fmtNum(part) + U + '，' + sub + '约占' + main + '的：',
+    '根据材料，2024年' + paper.area + main + '（' + fmtNum(whole) + U + '）中' + sub + '为' + fmtNum(part) + U + '，' + sub + '占' + main + '的比重最接近：',
+    '2024年' + sub + '为' + fmtNum(part) + U + '，同年' + main + '为' + fmtNum(whole) + U + '，则' + sub + '占' + main + '比重约为：'
+  ]
+  const stem = pickV(seed + 17, stems)
   const typeOpts = buildLayerOpts([TYPE_META.share.name], ['平均数', '倍数', '基期比重'], seed + 1)
   const locateOpts = buildLayerOpts(['2024年' + sub + '与2024年' + main], ['2023年' + sub + '与2023年' + main, '2024年' + main + '与2024年增速', '2023年' + main + '与2024年' + sub], seed + 2)
   const formulaOpts = buildLayerOpts(['$p = \\frac{A}{B}$'], ['$p = \\frac{A}{B} \\times \\frac{1+b}{1+a}$', '$m = \\frac{\\text{总量}}{\\text{个数}}$', '$x = A-B$'], seed + 3)
@@ -142,7 +315,13 @@ function makeAnnualQ(seed, paper, main, sub, U) {
   const totalGrow = r1(rateBetween(A, B))
   const dists = [r1(totalGrow / 4), r1(totalGrow), r1((Math.pow(B / A, 1 / 3) - 1) * 100)]
   const opts = buildLayerOpts([correct], dists, seed, (x) => x + '%')
-  const stem = '2020年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2020—2024年该' + main + '年均增速约为百分之几？'
+  const stems = [
+    '2020年' + paper.area + main + '为' + fmtNum(A) + U + '，2024年为' + fmtNum(B) + U + '，则2020—2024年该' + main + '年均增速约为百分之几？',
+    '材料显示，' + paper.area + main + '由2020年' + fmtNum(A) + U + '增长至2024年' + fmtNum(B) + U + '，五年年均增速约为：',
+    '若2020年' + main + '为' + fmtNum(A) + U + '、2024年为' + fmtNum(B) + U + '，则统计期内' + main + '年均增长（　）。',
+    '2020年' + main + fmtNum(A) + U + '，2024年' + main + fmtNum(B) + U + '，计算2020—2024年' + main + '年均增速约（　）。'
+  ]
+  const stem = pickV(seed + 19, stems)
   const typeOpts = buildLayerOpts([TYPE_META.annual.name], ['间隔增长率', '增长率', '增长量'], seed + 1)
   const locateOpts = buildLayerOpts(['2020年与2024年该指标数值'], ['2020—2024年各年增速', '2023年与2024年数值', '2024年数值与增速'], seed + 2)
   const formulaOpts = buildLayerOpts(['$\\bar{r} = (\\frac{B}{A})^{\\frac{1}{4}}-1$'], ['$r = \\frac{B-A}{A}$', '$R = r_1+r_2+r_1 r_2$', '$r = \\frac{B-A}{4}$'], seed + 3)
@@ -200,6 +379,7 @@ function makeCompQ(seed, paper, main, sub, U) {
 export function buildDataTrainExam(seed = Date.now() % 100000, dom = null) {
   if (seed === undefined) seed = Date.now() % 100000
   const paper = createSharedPaper(seed, dom)
+  const material = renderRichMaterial(seed + 55, paper)
   const main = paper.inds[0]
   const sub = paper.inds[1]
   const U = paper.unit
@@ -226,8 +406,11 @@ export function buildDataTrainExam(seed = Date.now() % 100000, dom = null) {
     domName: (dom && dom.n) || main,
     inds: paper.inds.slice(),
     unit: U,
-    materialMd: paper.materialMd,
-    materialSvg: paper.materialSvg,
+    materialMd: material.materialMd,
+    materialSvg: material.materialSvg,
+    matStyle: material.matStyle,
+    tableKind: material.tableKind,
+    chartKind: material.chartKind,
     qs
   }
 }

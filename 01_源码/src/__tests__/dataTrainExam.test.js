@@ -8,9 +8,10 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     expect(exam).toBeTruthy()
     expect(exam.qs.length).toBe(5)
     expect(new Set(exam.qs.map((q) => q.kind)).size).toBe(5)
-    expect(exam.materialMd).toContain('文字资料')
-    expect(exam.materialMd).toContain('主要指标表')
-    expect(exam.materialMd).toContain('统计图')
+    expect(exam.materialMd).toContain('【材料】')
+    expect(exam.materialMd).toMatch(/一、/)
+    expect(exam.materialMd).toMatch(/二、/)
+    expect(exam.materialMd).toMatch(/三、/)
     expect(exam.materialSvg).toContain('<svg')
     for (const q of exam.qs) {
       expect(String(q.stem).length).toBeGreaterThan(15)
@@ -31,6 +32,7 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     const b = buildDataTrainExam(777, dom)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
     expect(a.materialMd.length).toBeGreaterThan(500)
+    expect(new Set([a.materialMd, b.materialMd]).size).toBe(1)
     expect(a.qs.every((q) => q.kind)).toBe(true)
     expect(a.qs.map((q) => q.typeLabel)).toEqual(['增长率', '增长量', '现期比重', '年均增长率', '综合分析'])
     expect(EXAM_LAYER_KEYS.map((x) => x.k)).toEqual(['type', 'locate', 'formula', 'calc'])
@@ -45,5 +47,18 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     expect(q1.layers.locate.q).toContain('找数据')
     expect(q1.layers.formula.q).toContain('选公式')
     expect(q1.layers.calc.q).toContain(q1.stem)
+  })
+
+  it('不同种子会切换材料结构与题型表达，不只是换数字', () => {
+    const dom = domainOf('汽车')
+    const a = buildDataTrainExam(770001, dom)
+    let different = false
+    let b = null
+    for (let i = 1; i <= 80 && !different; i++) {
+      b = buildDataTrainExam(770001 + i * 997, dom)
+      different = b.matStyle !== a.matStyle || b.tableKind !== a.tableKind || b.chartKind !== a.chartKind || b.qs[0].stem !== a.qs[0].stem
+    }
+    expect(different).toBe(true)
+    expect(b).toBeTruthy()
   })
 })
