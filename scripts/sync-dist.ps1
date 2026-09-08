@@ -14,6 +14,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $src  = Join-Path $root '01_源码'
 $dist = Join-Path $src 'dist'
 $pub  = Join-Path $root '02_发布物'
+$docs = Join-Path $root 'docs'
 $zipPath = Join-Path $pub '行测名师AI小助理-正式版发布包.zip'
 
 if (-not (Test-Path $dist)) { Write-Error "未找到 dist：$dist，请先确认 01_源码 已安装依赖。"; exit 1 }
@@ -53,6 +54,16 @@ foreach ($d in $deployDirs) {
   Copy-Item (Join-Path $dist 'assets\*') $dstAssets -Recurse -Force
 
   Write-Host "    ^ $d 已同步" -ForegroundColor Green
+}
+
+# 同步 docs/：作为 Gitee Pages（部署分支 main、部署目录 /docs）的站点内容
+if (Test-Path $dist) {
+  Write-Host "==> 同步到 Gitee Pages 目录 docs/ ..." -ForegroundColor Cyan
+  if (-not (Test-Path $docs)) { New-Item -ItemType Directory -Force -Path $docs | Out-Null }
+  Get-ChildItem -LiteralPath $docs -Force | Remove-Item -Recurse -Force
+  Copy-Item (Join-Path $dist '*') -Destination $docs -Recurse -Force
+  New-Item -ItemType File -Force -Path (Join-Path $docs '.nojekyll') | Out-Null
+  Write-Host "    ^ $docs 已同步" -ForegroundColor Green
 }
 
 # 重建发布包 zip（不含 APK/文档，只含部署资源）
