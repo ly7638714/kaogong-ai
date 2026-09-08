@@ -152,8 +152,14 @@ async function readRemote(repo, branch) {
     if (e.is404) return null
     throw e
   }
+  if (Array.isArray(meta)) {
+    // Gitee 对“文件不存在”的 contents 请求有时会返回 200 + []，而不是 404。
+    if (!meta.length) return null
+    throw new Error('Gitee 云端同步文件元信息格式异常，请稍后再试')
+  }
   if (!meta || !meta.sha) {
-    throw new Error('Gitee 云端同步文件元信息读取失败，请稍后再试')
+    const why = meta && meta.message ? String(meta.message) : ''
+    throw new Error('Gitee 云端同步文件元信息读取失败' + (why ? '：' + why : '，请稍后再试'))
   }
   let rawText = ''
   if (meta.content) {

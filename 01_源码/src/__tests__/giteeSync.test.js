@@ -122,6 +122,27 @@ describe('giteeSync Gitee API v5 表单协议', () => {
     expect(made.init.body.get('private')).toBe('true')
   })
 
+  it('Gitee 对不存在文件返回 200+[] 时按新建文件处理', async () => {
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init })
+      const u = String(url)
+      if (u.includes('/api/v5/user?')) return resp(200, { login: 'owner' })
+      if (u.includes('/contents/xingce-sync.json?')) {
+        return init.method === 'POST' ? resp(201, {}) : resp(200, [])
+      }
+      if (u.includes('/api/v5/repos/owner/xingce-ai-cloud-sync?')) {
+        return resp(200, { name: 'xingce-ai-cloud-sync', private: true, default_branch: 'master' })
+      }
+      return resp(200, {})
+    }
+    const r = await runGiteeSync()
+    expect(r.ok).toBe(true)
+    const post = calls.find((c) => c.init.method === 'POST' && c.url.includes('/contents/xingce-sync.json'))
+    expect(post).toBeTruthy()
+    expect(post.init.body).toBeInstanceOf(FormData)
+    expect(post.init.body.get('branch')).toBe('master')
+  })
+
   it('contents 不带 content 时自动走 Gitee raw 下载全文', async () => {
     globalThis.fetch = async (url, init = {}) => {
       calls.push({ url: String(url), init })
