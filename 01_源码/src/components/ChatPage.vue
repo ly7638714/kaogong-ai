@@ -71,6 +71,7 @@ import { addPoints as petAddPoints } from '../utils/pet'
 
 // SolidTrain 依赖 three.js（~556KB），按需异步加载，避免拖慢启动
 const SolidTrain = defineAsyncComponent(() => import('./SolidTrain.vue'))
+const YanTrain = defineAsyncComponent(() => import('./YanTrain.vue'))
 import DataTrain from './DataTrain.vue'
 import AskWizard from './AskWizard.vue'
 import ChatTools from './ChatTools.vue' // v3.8.195 工具抽屉区子组件
@@ -1372,14 +1373,27 @@ function closeDataTrain() {
   store.uiCtx.panel = null
   navBack()
 }
+function openYanTrain() {
+  collapseTools()
+  yanShow.value = true
+  store.uiCtx.panel = 'yan'
+  navOpen({ id: 'yan', label: '片段结构四步拆解' })
+}
+function closeYanTrain() {
+  yanShow.value = false
+  store.uiCtx.panel = null
+  navBack()
+}
 function onNavBack(e) {
   const ids = (e && e.detail) || []
   if (ids.includes('exam')) { examShow.value = false; store.examOpen = false; store.uiCtx.panel = null }
   if (ids.includes('solid')) { solidShow.value = false; store.uiCtx.panel = null }
   if (ids.includes('data')) { dtShow.value = false; store.uiCtx.panel = null }
+  if (ids.includes('yan')) { yanShow.value = false; store.uiCtx.panel = null }
 }
 const solidShow = ref(false) // 立体图推训练
 const dtShow = ref(false) // 资料分析四层能力训练
+const yanShow = ref(false) // 言语理解片段结构四步拆解
 const bkPick = ref('逻辑判断与推理') // v3.8.210 默认大板块全称
 const bkOrigin = ref({ q: '', imgs: [], msgIdx: -1 })
 const BK_OPTIONS = ['逻辑判断与推理', '言语理解与表达', '资料分析', '数量关系', '常识判断', '政治理论'] // v3.8.210 板块=六大组全称（杜绝 组/细分 混选歧义）
@@ -2086,6 +2100,7 @@ defineEmits(['export-review'])
 
 // v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
 const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, sendGuard, askWarn, _askT, reAnalyze, confirmPlate, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, applyChip, enhanceAskBtn, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, gotoFix, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 
 </script>
 <template>
@@ -2277,4 +2292,5 @@ const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch,
   
   <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
   <DataTrain v-if="dtShow" @close="closeDataTrain" @send-question="onSolidQuestion" />
+  <YanTrain v-if="yanShow" @close="closeYanTrain" @send-question="onSolidQuestion" />
 </template>

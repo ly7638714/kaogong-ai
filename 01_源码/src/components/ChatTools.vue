@@ -42,6 +42,7 @@ const {
   saveCfg,
   openSolid,
   openDataTrain,
+  openYanTrain,
   trainWeak,
   guideShow
 } = toRefs(props.ctx)
@@ -88,6 +89,7 @@ const {
             <button class="btn btn-gh tb-btn" title="📄 本地真题PDF卷库：选择存有历年真题 PDF 的文件夹(国考/各省)，App 内置阅读器直接翻阅；也可用其它 APP 打开/分享" @click="pdfLibShow = true">📄 真题PDF库</button>
             <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
             <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
+            <button class="btn btn-gh tb-btn" title="片段阅读结构四步拆解：主题词→句子功能→行文结构→主旨意图（郭熙×花生十三×张弓）" @click="openYanTrain()">📖 片段结构</button>
             <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
             <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
             <button
