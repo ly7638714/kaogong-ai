@@ -71,7 +71,51 @@ function richChart(labels, vals, rates) {
   return normalizeSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">' + s + '</svg>')
 }
 
-export function buildLocateTableChain(seed, count = 5, dom = null) {
+function buildChainFromCtx(seed, count, ctx) {
+  const years = ctx.years || []
+  const cols = (ctx.inds || []).slice(0, 4)
+  const rows = ctx.vals || []
+  const rates = ctx.rates || []
+  const area = ctx.area || '该领域'
+  const unit = ctx.unit || '亿元'
+  const n = Math.min(Math.max(3, Number(count) || 5), years.length || 5)
+  const qs = []
+  for (let i = 0; i < n; i++) {
+    const ci = (i + 1) % cols.length
+    const ti = 1 + ((i * 2 + 1) % Math.max(1, years.length - 1))
+    const col = cols[ci] || cols[0]
+    const yr = years[ti]
+    if (i === 3) {
+      const rs = rates[0] || []
+      let mi = 0
+      rs.forEach((r, idx) => { if (r > rs[mi]) mi = idx })
+      const opts = buildOpts(years[mi] + '年', years.filter((y, idx) => idx !== mi).map((y) => y + '年'), seed + i)
+      qs.push({ q: '【读图】统计图中哪一年「' + (cols[0] || '主要指标') + '」的同比增速最快？', options: opts.options, answer: opts.answer, explain: '看图看红色折线：最高点对应 ' + years[mi] + ' 年（' + rs[mi] + '%）。', tip: '组合图先认双轴：柱看数值，折线看增速。' })
+    } else if (i === 4) {
+      const prevYr = years[ti - 1]
+      const pairs = [yr + '年与' + prevYr + '年', yr + '年与' + years[Math.max(0, ti - 2)] + '年', prevYr + '年与' + years[Math.max(0, ti - 2)] + '年', (years[Math.min(years.length - 1, ti + 1)] || '') + '年与' + yr + '年']
+      const opts = buildOpts(pairs[0], pairs.slice(1), seed + i)
+      qs.push({ q: '求' + yr + '年「' + col + '」的同比增速，需要材料中哪两年的数据？', options: opts.options, answer: opts.answer, explain: '求同比增速需 ' + yr + ' 年现期与 ' + prevYr + ' 年基期。', tip: '增速=(现期−基期)÷基期。' })
+    } else {
+      const correct = rows[ci] ? rows[ci][ti] : 0
+      const dists = []
+      for (let r2 = 0; r2 < years.length; r2++) {
+        for (let c2 = 0; c2 < cols.length; c2++) {
+          const v = rows[c2] && rows[c2][r2]
+          if ((c2 !== ci || r2 !== ti) && v !== undefined && !dists.includes(fmt(v))) dists.push(fmt(v))
+        }
+      }
+      const opts = buildOpts(fmt(correct), shuffle(dists, seed + i).slice(0, 3), seed + i)
+      qs.push({ q: '求' + yr + '年「' + col + '」的数值（单位 ' + unit + '），应读取表中哪一行哪一列？', options: opts.options, answer: opts.answer, explain: '【定位】行 = ' + yr + '年，列 = ' + col + ' → 交叉格 = ' + fmt(correct) + unit + '。', tip: '先锁「行年份 × 列指标」再读格。' })
+    }
+  }
+  return { materialMd: ctx.materialMd || '', materialSvg: ctx.materialSvg || '', qs, total: qs.length, area, _sharedCtx: true }
+}
+
+export function buildLocateTableChain(seed, count = 5, dom = null, sharedCtx = null) {
+  if (sharedCtx && sharedCtx.vals && sharedCtx.materialMd) {
+    return buildChainFromCtx(seed, count, sharedCtx)
+  }
   const GENERIC = [
     { g: '种植业', inds: ['粮食产量', '蔬菜产量'], units: { 粮食产量: '万吨', 蔬菜产量: '万吨' } },
     { g: '养殖业', inds: ['肉类产量', '水产品产量'], units: { 肉类产量: '万吨', 水产品产量: '万吨' } },
@@ -130,11 +174,11 @@ export function buildLocateTableChain(seed, count = 5, dom = null) {
   }
   return { materialMd, materialSvg: svg, qs, total: qs.length, area: areaName }
 }
-export function genLocateChain(seed, count = 5, dom = null) {
+export function genLocateChain(seed, count = 5, dom = null, sharedCtx = null) {
   if (seed === undefined) seed = Date.now() % 100000
   const min = Math.max(3, Number(count) || 5)
   for (let attempt = 0; attempt < 8; attempt++) {
-    const c = buildLocateTableChain(seed + attempt * 977, count, dom)
+    const c = buildLocateTableChain(seed + attempt * 977, count, dom, sharedCtx)
     if (c && c.qs && c.qs.length >= min) return c
   }
   return null

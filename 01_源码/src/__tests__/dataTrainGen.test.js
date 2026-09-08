@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { genDataQ, DATA_MODES, CALC_METHOD_LIB } from '../utils/dataTrainGen'
+import { genDataQ, DATA_MODES, CALC_METHOD_LIB, createSharedPaper } from '../utils/dataTrainGen'
 import { domainOf } from '../data/dataDomains'
 
 describe('genDataQ 资料分析四层训练生成器', () => {
@@ -96,6 +96,29 @@ describe('genDataQ 资料分析四层训练生成器', () => {
       }
     }
     expect(seen.has('mixed')).toBe(true)
+  })
+
+  it('共享篇章下四种能力共用同一篇公报级文字+表格+统计图材料', () => {
+    const dom = domainOf('汽车')
+    const paper = createSharedPaper(77000, dom)
+    const seenMat = new Set()
+    for (const mode of ['type', 'locate', 'formula', 'calc']) {
+      for (let i = 0; i < 40; i++) {
+        const q = genDataQ(mode, 77000 + i * 37, 2, undefined, dom, paper)
+        expect(q).toBeTruthy()
+        expect(q.materialMd).toBe(paper.materialMd)
+        expect(q.materialSvg).toBe(paper.materialSvg)
+        expect(q.materialMd).toContain(dom.n)
+        expect(q.materialMd).toContain('文字资料')
+        expect(q.materialMd).toContain('主要指标表')
+        expect(q.materialMd).toContain('统计图')
+        expect(q.materialMd.length).toBeGreaterThan(500)
+        const visible = String(q.q) + q.options.map((o) => o.t).join('') + String(q.explain)
+        expect(paper.inds.some((x) => visible.includes(x))).toBe(true)
+        seenMat.add(q.materialMd)
+      }
+    }
+    expect(seenMat.size).toBe(1)
   })
 
   it('公式应激覆盖多种公式族，选项含 LaTeX 且互不相同', () => {

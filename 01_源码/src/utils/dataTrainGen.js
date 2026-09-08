@@ -12,7 +12,11 @@ function hashIdx(n, len) {
   x = (x ^ (x >>> 16)) >>> 0
   return x % len
 }
-const pick = (arr, seed, off = 0) => arr[hashIdx(seed + off * 1013, arr.length)]
+let currentIndPool = null
+const pick = (arr, seed, off = 0) => {
+  const pool = arr === INDS && currentIndPool && currentIndPool.length ? currentIndPool : arr
+  return pool[hashIdx(seed + off * 1013, pool.length)]
+}
 function shuffle(a, seed) {
   const b = a.slice()
   for (let i = b.length - 1; i > 0; i--) {
@@ -37,6 +41,85 @@ function rndRate(seed, off, min = 0.5, max = 28) {
   const span = Math.round((max - min) * 10) + 1
   const x = min + hashIdx(seed + off * 131, span) / 10
   return Math.round(x * 10) / 10
+}
+
+function richStep(prev, rate) {
+  const next = prev * (1 + rate / 100)
+  return Math.max(50, next >= 50000 ? Math.round(next / 100) * 100 : next >= 5000 ? Math.round(next / 10) * 10 : Math.round(next))
+}
+function actualRate(prev, now) {
+  if (!prev) return 0
+  return Math.round(((now - prev) / prev) * 1000) / 10
+}
+function roundMag(n) {
+  if (!isFinite(n)) return 50
+  return Math.max(1, n >= 50000 ? Math.round(n / 100) * 100 : n >= 5000 ? Math.round(n / 10) * 10 : Math.round(n))
+}
+// 同一篇“公报级”共享篇章：主指标按增速逐年复算，子指标取主指标的稳定占比区间，
+// 保证表中年份/数值/增速与题干取值可互相印证。
+function buildRichDomainCtx(seed, dom) {
+  // 领域词已包含在 inds[0]，这里用中性地区名，避免出现“汽车汽车产量/粮食粮食产量”。
+  const area = '某省'
+  const inds = ((dom && dom.inds) || ['粮食产量', '社会消费品零售总额', '固定资产投资', '一般公共预算收入']).slice(0, 4)
+  while (inds.length < 4) inds.push(inds[0] + '·其他')
+  const unit = String((dom && dom.unit) || '亿元')
+  const years = [2020, 2021, 2022, 2023, 2024]
+  const last = years.length - 1
+  // 增速池覆盖低速(≤5%)、百化分档(12.5/20)、高速(>20)与常态区间
+  const mainRates = shuffle([4.8, 12.5, 20, 7.2, 8.3], seed)
+  const mainVals = []
+  let cur = Math.max(3000, rndVal(seed, 91, 3000, 60000))
+  for (let ri = 0; ri < years.length; ri++) {
+    if (ri === 0) mainVals.push(roundMag(cur))
+    else {
+      cur = richStep(cur, mainRates[ri])
+      mainVals.push(cur)
+    }
+  }
+  const mainRatesActual = mainVals.map((v, ri) => (ri === 0 ? mainRates[0] : actualRate(mainVals[ri - 1], v)))
+  const vals = [mainVals]
+  const rates = [mainRatesActual]
+  for (let ci = 1; ci < inds.length; ci++) {
+    const share0 = 0.14 + hashIdx(seed + ci * 29 + 7, 55) / 100
+    const row = []
+    for (let ri = 0; ri < years.length; ri++) {
+      const drift = 0.92 + hashIdx(seed + ci * 41 + ri * 7 + 13, 25) / 100
+      const share = Math.min(0.92, Math.max(0.08, share0 * drift))
+      row.push(roundMag(mainVals[ri] * share))
+    }
+    vals.push(row)
+    rates.push(row.map((v, ri) => (ri === 0 ? mainRatesActual[0] : actualRate(row[ri - 1], v))))
+  }
+  const m = vals[0][last], mR = rates[0][last]
+  const s1 = vals[1][last], s2 = vals[2][last], s3 = vals[3][last]
+  const share1 = Math.round((s1 / m) * 1000) / 10
+  const share2 = Math.round((s2 / m) * 1000) / 10
+  const p1 = '2024年，' + area + '统筹稳增长与高质量发展，' + inds[0] + '实现' + fmt(m) + unit + '，同比增长' + mR + '%。其中，' + inds[1] + '达到' + fmt(s1) + unit + '，占' + inds[0] + '比重约' + share1 + '%，较上年继续提升；' + inds[2] + '为' + fmt(s2) + unit + '，占比约' + share2 + '%，' + inds[3] + '完成' + fmt(s3) + unit + '。'
+  const prevM = vals[0][last - 1]
+  const p2 = '分结构看，' + area + '对' + inds[0] + '的主要监测指标包括' + inds[1] + '、' + inds[2] + '与' + inds[3] + '，其中' + inds[1] + '增速为' + rates[1][last] + '%，' + inds[2] + '增速为' + rates[2][last] + '%，' + inds[3] + '增速为' + rates[3][last] + '%；全年' + inds[0] + '绝对量较上年净增' + fmt(Math.round(m - prevM)) + unit + '，增长贡献主要来自下半年。'
+  const grow5 = Math.round(((m - vals[0][0]) / vals[0][0]) * 1000) / 10
+  const p3 = '从五年趋势看，2020—2024年' + area + inds[0] + '累计保持上升态势，2024年较2020年增长约' + grow5 + '%；分季度看，一季度约占全年的23.5%，二季度约25.4%，三季度约25.1%，四季度因集中结算与政策发力占比较高。文中数据均出自' + area + '相关年度统计公报或部门月报，单位按常用统计口径列示，表中增速按同口径复算。'
+  const textMd = p1 + '\n\n' + p2 + '\n\n' + p3
+  const head1 = '| 年份 | ' + inds[0] + '（' + unit + '） | ' + inds[1] + ' | ' + inds[2] + ' | ' + inds[3] + ' |'
+  const head2 = '| --- | --- | --- | --- | --- |'
+  const rows = years.map((y, ri) => '| ' + y + ' | ' + inds.map((ind, ci) => fmt(vals[ci][ri])).join(' | ') + ' |').join('\n')
+  const note = '注：①表中各指标均为全年累计口径；②增速按可比价/可比口径复算；③单位已按各指标标注；④本材料为训练模拟数据，非官方实际公布值。'
+  const tableMd = head1 + '\n' + head2 + '\n' + rows + '\n' + note
+  const svg = chartSvg(years.map((y) => y + '年'), vals[0], rates[0])
+  return {
+    area,
+    inds,
+    unit,
+    years,
+    vals,
+    rates,
+    materialMd: '【材料】' + area + inds[0] + '及相关指标运行情况（2020—2024年）\n\n**一、文字资料**\n\n' + textMd + '\n\n**二、主要指标表**\n\n' + tableMd + '\n\n**三、统计图**（柱形为' + inds[0] + '规模，折线为同比增速）',
+    materialSvg: svg
+  }
+}
+export function createSharedPaper(seed, dom) {
+  const ctx = buildRichDomainCtx(seed, dom)
+  return Object.assign({ paperSeed: seed }, ctx)
 }
 
 // ================= 通用素材池 =================
@@ -972,20 +1055,348 @@ function buildCalc(seed, level, stage) {
   // 阶段三·实战混合：不给提示
   return { ...base, stage: 'practice' }
 }
+
+// ================= v3.8.243：四层共用同一篇（sharedPaper 模式） =================
+function richCell(ctx, ci, ri) {
+  return { ind: ctx.inds[ci] || ctx.inds[0], v: ctx.vals[ci] ? ctx.vals[ci][ri] : ctx.vals[0][ri], r: ctx.rates[ci] ? ctx.rates[ci][ri] : ctx.rates[0][ri] }
+}
+function findRateCell(ctx, pred) {
+  for (let ci = 0; ci < ctx.inds.length; ci++) {
+    for (let ri = 1; ri < ctx.years.length; ri++) {
+      const r = (ctx.rates[ci] || [])[ri]
+      if (r !== undefined && pred(r)) return { ci, ri, r }
+    }
+  }
+  return null
+}
+function nearestFraction(r) {
+  let best = FRAC_CHOICES[0]
+  for (const f of FRAC_CHOICES) if (Math.abs(f.r - r) < Math.abs(best.r - r)) best = f
+  return best
+}
+function buildSharedComp(seed, ctx) {
+  const main = richCell(ctx, 0, 4)
+  const sub = richCell(ctx, 1, 4)
+  const mr = main.r
+  const sr = sub.r
+  let compare = '高于'
+  if (mr === sr) compare = '持平'
+  else if (mr < sr) compare = '低于'
+  const trueOpt = compare === '持平'
+    ? '2024年「' + main.ind + '」与「' + sub.ind + '」的同比增速持平'
+    : '2024年「' + main.ind + '」的同比增速（' + mr + '%）' + compare + '「' + sub.ind + '」（' + sr + '%）'
+  const falseOpts = compare === '持平'
+    ? ['2024年「' + main.ind + '」的同比增速高于「' + sub.ind + '」', '2024年「' + main.ind + '」的同比增速低于「' + sub.ind + '」', '2024年「' + main.ind + '」数值较上年同期下降']
+    : [
+        '2024年「' + main.ind + '」的同比增速' + (compare === '高于' ? '低于' : '高于') + '「' + sub.ind + '」',
+        '2024年「' + main.ind + '」数值较上年同期下降',
+        '2021年以来「' + main.ind + '」与「' + sub.ind + '」均逐年下降'
+      ]
+  const opts = buildOpts([trueOpt], falseOpts, seed)
+  const compareLine = compare === '持平'
+    ? '两指标 2024 年同比增速均为 ' + mr + '%，大小关系为「持平」'
+    : main.ind + '同比增速 ' + mr + '%，' + sub.ind + '同比增速 ' + sr + '%，大小关系为「' + compare + '」'
+  const explain = '【综合判断】回看材料最后一列：' + compareLine + '，对应正确选项可推出。\n\n逐项排除：反方向比较与材料矛盾；材料中' + main.ind + '各年绝对量均高于上年，不存在“下降”；四个分项增速均为正，不存在“逐年下降”。\n\n口诀：综合分析先看绝对数字与增速方向，再比较大小，最后回表验证。'
+  return {
+    mode: 'type',
+    materialType: 'rich',
+    materialMd: ctx.materialMd,
+    materialSvg: ctx.materialSvg,
+    q: '【问】根据上述材料，能够推出的是（　）',
+    options: opts.options,
+    answer: opts.answer,
+    explain,
+    tip: '口诀：综合分析先排“下降/方向反”等绝对错项，再比较指标大小，答案必须能在表中直接验证。',
+    extra: { name: '综合分析', formula: '逐项验证：先看趋势方向 → 比较增速 → 回表核对' }
+  }
+}
+function sharedTypeStem(k, ctx) {
+  const a = ctx.area
+  const main = ctx.inds[0]
+  const sub = ctx.inds[1]
+  const sub2 = ctx.inds[2]
+  const sub3 = ctx.inds[3]
+  const u = ctx.unit
+  const V0 = fmt(ctx.vals[0][0])
+  const V3 = fmt(ctx.vals[0][3])
+  const V = fmt(ctx.vals[0][4])
+  const R3 = ctx.rates[0][3]
+  const R = ctx.rates[0][4]
+  const PV = fmt(ctx.vals[1][4])
+  const PR = ctx.rates[1][4]
+  const QR = ctx.rates[2][4]
+  switch (k) {
+    case 'base': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？'
+    case 'now': return '2023年' + a + main + '为' + V3 + u + '，按表中2024年同比增速' + R + '%测算，则2024年该' + main + '约为多少' + u + '？'
+    case 'inc': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2024年该' + main + '比上年增加多少' + u + '？'
+    case 'rate': return '2023年' + a + main + '为' + V3 + u + '，2024年为' + V + u + '，则2024年该' + main + '同比增长约百分之几？'
+    case 'inter': return '2023年' + a + main + '同比增长' + R3 + '%，2024年同比增长' + R + '%，则2024年该' + main + '比2022年约增长百分之几？'
+    case 'annual': return '2020年' + a + main + '为' + V0 + u + '，2024年为' + V + u + '，则2020—2024年该' + main + '年均增速约为百分之几？'
+    case 'share': return '2024年' + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + sub + '占' + main + '的比重约为多少？'
+    case 'bshare': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%；其中' + sub + '为' + PV + u + '，同比增长' + PR + '%。则2023年' + sub + '占' + main + '的比重约为多少？'
+    case 'shareDiff': return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%；其中' + sub + '为' + PV + u + '，同比增长' + PR + '%。则2024年' + sub + '占' + main + '的比重比上年约上升/下降多少个百分点？'
+    case 'avg': return '2024年' + a + main + '为' + V + u + '，全年四个季度保持平稳增长，则平均每个季度该' + main + '约为多少' + u + '？'
+    case 'avgRate': return '2024年' + a + sub + '同比增长' + PR + '%，同时' + main + '同比增长' + R + '%，则平均每单位' + main + '对应的' + sub + '同比增长约百分之几？'
+    case 'mult': return '2024年' + a + main + '为' + V + u + '，其中' + sub + '为' + PV + u + '，则' + main + '约是' + sub + '的多少倍？'
+    case 'mix': return '2024年' + a + sub + '同比增速为' + PR + '%，' + sub2 + '同比增速为' + QR + '%，若两者构成' + sub3 + '的分项规模，则合计增速约为百分之几？'
+    case 'comp': return ''
+    default: return '2024年' + a + main + '为' + V + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？'
+  }
+}
+function buildSharedType(seed, ctx) {
+  const keys = Object.keys(TYPE_BANK)
+  const k = keys[hashIdx(seed, keys.length)]
+  if (k === 'comp') return buildSharedComp(seed, ctx)
+  const t = TYPE_BANK[k]
+  const stem = sharedTypeStem(k, ctx)
+  const opts = buildOpts([t.name], TYPE_DIST[k], seed)
+  const explain = '【题型判定】提问关键词「' + t.ask.join(' / ') + '」→ 该题考 **' + t.name + '**。\n\n公式：' + t.formula + '\n\n口诀：' + t.tip
+  return {
+    mode: 'type',
+    materialType: 'rich',
+    materialMd: ctx.materialMd,
+    materialSvg: ctx.materialSvg,
+    q: stem,
+    options: opts.options,
+    answer: opts.answer,
+    explain,
+    tip: t.tip,
+    extra: { name: t.name, formula: t.formula }
+  }
+}
+function sharedFormulaCase(tId, ctx) {
+  const a = ctx.area
+  const main = ctx.inds[0]
+  const sub = ctx.inds[1]
+  const sub2 = ctx.inds[2]
+  const u = ctx.unit
+  const A0 = ctx.vals[0][0]
+  const A3 = ctx.vals[0][3]
+  const B = ctx.vals[0][4]
+  const R3 = ctx.rates[0][3]
+  const R = ctx.rates[0][4]
+  const pv = ctx.vals[1][4]
+  const pr = ctx.rates[1][4]
+  const qv = ctx.vals[2][4]
+  const qr = ctx.rates[2][4]
+  switch (tId) {
+    case 'base': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
+    case 'now': return { q: '2023年' + a + main + '为' + fmt(A3) + u + '，按表中2024年同比增速' + R + '%测算，则2024年该' + main + '约为多少' + u + '？', d: { A: A3, r: R, unit: u } }
+    case 'inc': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2024年该' + main + '比上年增加多少' + u + '？', d: { B, r: R, unit: u } }
+    case 'rate': return { q: '2023年' + a + main + '为' + fmt(A3) + u + '，2024年为' + fmt(B) + u + '，则2024年该' + main + '同比增长约百分之几？', d: { A: A3, B } }
+    case 'inter': return { q: '2023年' + a + main + '同比增长' + R3 + '%，2024年同比增长' + R + '%，则2024年该' + main + '比2022年约增长百分之几？', d: { r1: R3, r2: R } }
+    case 'annual': return { q: '2020年' + a + main + '为' + fmt(A0) + u + '，2024年为' + fmt(B) + u + '，则2020—2024年该' + main + '年均增速约为百分之几？', d: { A: A0, B, n: 4 } }
+    case 'share': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + sub + '占' + main + '的比重约为多少？', d: { A: pv, B } }
+    case 'bshare': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，同比增长' + pr + '%。则2023年' + sub + '占' + main + '的比重约为多少？', d: { A: pv, B, a: pr, b: R } }
+    case 'shareDiff': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%；其中' + sub + '为' + fmt(pv) + u + '，同比增长' + pr + '%。则2024年' + sub + '占' + main + '的比重比上年约上升/下降多少个百分点？', d: { A: pv, B, a: pr, b: R } }
+    case 'avg': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，全年四个季度保持平稳增长，则平均每个季度该' + main + '约为多少' + u + '？', d: { total: B, n: 4 } }
+    case 'avgRate': return { q: '2024年' + a + sub + '同比增长' + pr + '%，同时' + main + '同比增长' + R + '%，则平均每单位' + main + '对应的' + sub + '同比增长约百分之几？', d: { a: pr, b: R } }
+    case 'mult': return { q: '2024年' + a + main + '为' + fmt(B) + u + '，其中' + sub + '为' + fmt(pv) + u + '，则' + main + '约是' + sub + '的多少倍？', d: { A: B, B: pv } }
+    case 'mix': return { q: '2024年' + a + sub + '同比增速为' + pr + '%，' + sub2 + '同比增速为' + qr + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计增速最接近：', d: { r1: pr, r2: qr, v1: pv, v2: qv } }
+    default: return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '为多少' + u + '？', d: { B, r: R, unit: u } }
+  }
+}
+function buildSharedFormula(seed, ctx) {
+  const t = FORMULA_BANK[hashIdx(seed, FORMULA_BANK.length)]
+  const c = sharedFormulaCase(t.id, ctx)
+  const dists = shuffle(t.dist, seed + 1).slice(0, 3)
+  const opts = buildOpts([t.opt], dists, seed)
+  const explain = '【公式识别】提问关键词「' + t.ask.join(' / ') + '」→ 应选 **' + t.name + '**：' + t.formula + '\n\n【完整解题路径】\n' + t.path(c.d) + '\n\n口诀：' + t.tip
+  return {
+    mode: 'formula',
+    materialType: 'rich',
+    materialMd: ctx.materialMd,
+    materialSvg: ctx.materialSvg,
+    q: c.q,
+    options: opts.options,
+    answer: opts.answer,
+    explain,
+    tip: t.tip,
+    extra: { name: t.name, formula: t.formula }
+  }
+}
+function sharedCalcCase(id, ctx) {
+  const a = ctx.area
+  const main = ctx.inds[0]
+  const u = ctx.unit
+  const last = ctx.years.length - 1
+  const B = ctx.vals[0][last]
+  const R = ctx.rates[0][last]
+  const base = { q: '', d: {} }
+  if (id === 'convert') {
+    const c = findRateCell(ctx, (r) => r >= 1 && r <= 5) || { ci: 0, ri: last, r: ctx.rates[0][last] }
+    const yr = ctx.years[c.ri]
+    const v = ctx.vals[c.ci][c.ri]
+    const ind = ctx.inds[c.ci]
+    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + c.r + '%，则' + (yr - 1) + '年该' + ind + '约为多少' + u + '？', d: { B: v, r: c.r, unit: u } }
+  }
+  if (id === 'frac') {
+    const c = findRateCell(ctx, (r) => Math.abs(nearestFraction(r).r - r) <= 0.45)
+    const cell = c || { ci: 0, ri: last, r: R }
+    const v = ctx.vals[cell.ci][cell.ri]
+    const ind = ctx.inds[cell.ci]
+    const fr = nearestFraction(cell.r)
+    const yr = ctx.years[cell.ri]
+    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + cell.r + '%（接近1/' + fr.n + '），则' + yr + '年该' + ind + '比上年增加约多少' + u + '？', d: { B: v, r: cell.r, n: fr.n, unit: u } }
+  }
+  if (id === 'coef') {
+    const coefRates = [5, 10, 15, 20, 25, 33.3]
+    const c = findRateCell(ctx, (r) => coefRates.some((x) => Math.abs(x - r) <= 0.45)) || { ci: 0, ri: last, r: R }
+    const v = ctx.vals[c.ci][c.ri]
+    const ind = ctx.inds[c.ci]
+    const yr = ctx.years[c.ri]
+    const f = coefRates.reduce((best, x) => (Math.abs(x - c.r) < Math.abs(best - c.r) ? x : best), 10)
+    const coeff = { 5: 0.0476, 10: 0.0909, 15: 0.1304, 20: 0.1667, 25: 0.2, 33.3: 0.25 }[f] || 0.0909
+    return { q: yr + '年' + a + ind + '为' + fmt(v) + u + '，同比增长' + c.r + '%（按约' + f + '%转化系数记忆），则' + yr + '年该' + ind + '比上年增加约多少' + u + '？', d: { B: v, r: c.r, f: coeff, unit: u } }
+  }
+  if (id === 'cut') return { q: '2024年' + a + main + '为' + fmt(B) + u + '，同比增长' + R + '%，则2023年该' + main + '约为多少' + u + '？', d: { A: B, r: R, unit: u } }
+  if (id === 'bai') {
+    const c = findRateCell(ctx, (r) => Math.abs(nearestFraction(r).r - r) <= 0.45) || { ci: 0, ri: last, r: R }
+    const fr = nearestFraction(c.r)
+    const yr = ctx.years[c.ri]
+    const rev = hashIdx(c.ri * 101 + c.ci * 7, 2) === 1
+    if (rev) return { q: '材料中' + yr + '年增速对应的约数 1/' + fr.n + ' 最接近哪个百分数？', d: { r: fr.r, n: fr.n, rev: true } }
+    return { q: '材料中' + yr + '年' + main + '同比增速约' + c.r + '%，最接近下列哪个分数？', d: { r: fr.r, n: fr.n, rev: false } }
+  }
+  if (id === 'split') return { q: '计算：材料中2024年' + main + '规模 ' + fmt(B) + u + ' × ' + R + '% ≈ ？（按乘法拆分口算）', d: { A: B, r: R, unit: u } }
+  if (id === 'doub') return { q: '材料中2024年' + main + '同比增速为' + R + '%，若按此增速持续增长，约需多少年翻一番？', d: { r: R } }
+  if (id === 'mix') {
+    const s1 = ctx.inds[1]
+    const s2 = ctx.inds[2]
+    return { q: '2024年' + a + s1 + '同比增速为' + ctx.rates[1][last] + '%，' + s2 + '同比增速为' + ctx.rates[2][last] + '%，若两者构成' + ctx.inds[3] + '的分项规模，则合计同比增速最接近：', d: { r1: ctx.rates[1][last], r2: ctx.rates[2][last], v1: ctx.vals[1][last], v2: ctx.vals[2][last] } }
+  }
+  if (id === 'cmp') {
+    const last2 = last
+    const f1a = ctx.vals[1][last2]
+    const f1b = ctx.vals[0][last2]
+    const f2a = ctx.vals[2][last2]
+    const f2b = ctx.vals[3][last2]
+    const first = f1a / f1b
+    const second = f2a / f2b
+    const ans = first > second ? '前者 > 后者' : first < second ? '前者 < 后者' : '两者相等'
+    return { q: '比较材料中2024年「' + ctx.inds[1] + '占' + ctx.inds[0] + '比重」（' + fmt(f1a) + '/' + fmt(f1b) + '）与「' + ctx.inds[2] + '÷' + ctx.inds[3] + '」（' + fmt(f2a) + '/' + fmt(f2b) + '）的大小（不用计算器）', d: { a: f1a, b: f1b, c: f2a, d: f2b, ans } }
+  }
+  return base
+}
+function buildSharedCalc(seed, level, stage, ctx) {
+  const lv = Math.min(3, Math.max(1, level || 2))
+  const pool = CALC_POOLS[lv]
+  const id = pool[hashIdx(seed, pool.length)]
+  const t = CALC_TYPES[id]
+  const c = sharedCalcCase(id, ctx)
+  const d = Object.assign({}, c.d, { q: c.q })
+  const raw = t.opts(d)
+  const opts = buildOpts([raw[0]], raw.slice(1), seed)
+  const lib = CALC_METHOD_LIB[t.name] || { trigger: '', concept: '', steps: [] }
+  const baseExplain = '【速算过程】\n方法：**' + t.name + '**（适用：' + lib.trigger + '）\n' + t.explain(d) + '\n\n操作步骤：\n' + lib.steps.map((x, i) => (i + 1) + '. ' + x).join('\n') + '\n\n口诀：' + t.tip
+  const base = {
+    mode: 'calc',
+    method: t.name,
+    materialType: 'rich',
+    materialMd: ctx.materialMd,
+    materialSvg: ctx.materialSvg,
+    q: d.q,
+    options: opts.options,
+    answer: opts.answer,
+    explain: baseExplain,
+    tip: t.tip,
+    extra: { name: t.name, formula: t.formula }
+  }
+  if (stage === 'identify') {
+    const names = Object.keys(CALC_TYPES).map((k2) => CALC_TYPES[k2].name).filter((n) => n !== t.name)
+    const dists = shuffle(names, seed + 21).slice(0, 3)
+    const mopts = buildOpts([t.name], dists, seed)
+    const mexplain = '【方法识别】题干特征：**' + lib.trigger + '**\n\n该题应选 **' + t.name + '**。\n\n原理：' + lib.concept + '\n\n操作步骤：\n' + lib.steps.map((x, i) => (i + 1) + '. ' + x).join('\n') + '\n\n口诀：' + t.tip
+    return { ...base, q: d.q + '\n\n【问】估算这道题，最适合用哪种速算方法？', options: mopts.options, answer: mopts.answer, explain: mexplain, stage: 'identify' }
+  }
+  if (stage === 'apply') return { ...base, q: d.q + '\n\n【提示】请用「' + t.name + '」估算。', stage: 'apply' }
+  return { ...base, stage: 'practice' }
+}
+function buildSharedLocate(seed, ctx) {
+  const kind = hashIdx(seed, 4)
+  const last = ctx.years.length - 1
+  const units = ctx.unit
+  if (kind === 0 || kind === 1) {
+    const ci = hashIdx(seed + 1, ctx.inds.length)
+    const ri = 1 + hashIdx(seed + 2, ctx.years.length - 1)
+    const col = ctx.inds[ci]
+    const yr = ctx.years[ri]
+    const correct = ctx.vals[ci][ri]
+    const cands = []
+    for (let r2 = 0; r2 < ctx.years.length; r2++) {
+      for (let c2 = 0; c2 < ctx.inds.length; c2++) {
+        if (c2 !== ci || r2 !== ri) cands.push(ctx.vals[c2][r2])
+      }
+    }
+    if (kind === 0) {
+      const opts = buildOpts([fmt(correct)], shuffle(cands, seed + 5).slice(0, 3).map((v) => fmt(v)), seed)
+      const explain = '【定位】行 = **' + yr + '年**、列 = **' + col + '** → 交叉单元格 = **' + fmt(correct) + units + '**。\n\n口诀：先锁「行年份 × 列指标」，再读交叉格。'
+      return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '年「' + col + '」的数值，应读取材料表中哪一行哪一列的交叉格？', options: opts.options, answer: opts.answer, explain, tip: '口诀：行年份 × 列指标，读交叉格。', extra: { name: '数据定位', area: ctx.area } }
+    }
+    const prevYr = ctx.years[ri - 1]
+    const pairs = [
+      yr + '年与' + prevYr + '年',
+      yr + '年与' + ctx.years[Math.max(0, ri - 2)] + '年',
+      prevYr + '年与' + ctx.years[Math.max(0, ri - 2)] + '年',
+      (ctx.years[Math.min(last, ri + 1)]) + '年与' + yr + '年'
+    ]
+    const opts = buildOpts([pairs[0]], pairs.slice(1), seed)
+    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '求' + yr + '年「' + col + '」的同比增速，需要材料中哪两年的数据？', options: opts.options, answer: opts.answer, explain: '【定位】求' + yr + '年同比增速需要 **' + yr + '年（现期）与 ' + prevYr + '年（基期）** 两个数据。', tip: '口诀：增速 = (现期−基期)÷基期。', extra: { name: '数据定位', area: ctx.area } }
+  }
+  if (kind === 2) {
+    const rates = ctx.rates[0]
+    let mi = 0
+    rates.forEach((r, i) => { if (r > rates[mi]) mi = i })
+    const opts = buildOpts([ctx.years[mi] + '年'], ctx.years.filter((y, i) => i !== mi).map((y) => y + '年'), seed)
+    return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '统计图中「' + ctx.inds[0] + '」哪一年的同比增速最快？', options: opts.options, answer: opts.answer, explain: '【读图】增速看红色折线：最高点为 **' + ctx.years[mi] + '年**（' + rates[mi] + '%）。', tip: '口诀：数值看柱、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
+  }
+  const ri = 1 + hashIdx(seed + 9, ctx.years.length - 1)
+  const yr = ctx.years[ri]
+  const correct = ctx.vals[0][ri]
+  const opts = buildOpts([fmt(correct)], ctx.vals[0].filter((v, i) => i !== ri).map((v) => fmt(v)), seed)
+  return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '图中' + yr + '年「' + ctx.inds[0] + '」的数值约为多少' + ctx.unit + '？', options: opts.options, answer: opts.answer, explain: '【读图】' + yr + '年数值看第' + (ri + 1) + '根柱 → **' + fmt(correct) + ctx.unit + '**。', tip: '口诀：数值看柱高、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
+}
+function genSharedQ(mode, seed, level, stage, ctx) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const s = seed + attempt * 977
+    const q = mode === 'type' ? buildSharedType(s, ctx)
+      : mode === 'locate' ? buildSharedLocate(s, ctx)
+        : mode === 'formula' ? buildSharedFormula(s, ctx)
+          : buildSharedCalc(s, level, stage, ctx)
+    if (q && verifyUnique(q)) return q
+  }
+  return null
+}
+
 // ================= 入口 =================
-export function genDataQ(mode, seed, level = 2, stage, domain) {
+export function genDataQ(mode, seed, level = 2, stage, domain, sharedPaper) {
   if (seed === undefined) seed = Date.now() % 100000
+  if (sharedPaper && sharedPaper.vals && sharedPaper.materialMd) {
+    return genSharedQ(mode, seed, level, stage, sharedPaper)
+  }
   const domCfg = domain && typeof domain === 'object' ? domain : null
   // 同一种子下四种能力训练使用不同材料种子，避免“判题型/找数据/公式/速算”看到的材料完全相同。
   const modeSeedShift = mode === 'type' ? 101 : mode === 'locate' ? 223 : mode === 'formula' ? 331 : 457
+  const prevPool = currentIndPool
+  currentIndPool = domCfg && Array.isArray(domCfg.inds) && domCfg.inds.length ? domCfg.inds.slice() : null
   for (let attempt = 0; attempt < 8; attempt++) {
     const s = seed + modeSeedShift + attempt * 137
     const q = mode === 'type' ? buildType(s, domCfg)
       : mode === 'locate' ? (domCfg ? buildLocateForDomain(s, domCfg) : buildLocate(s))
       : mode === 'formula' ? buildFormula(s)
       : buildCalc(s, level, stage)
-    if (q && verifyUnique(q)) return q
+    if (q && verifyUnique(q)) {
+      if (domCfg && !q.materialMd && mode !== 'locate') {
+        const rich = buildRichDomainCtx(s, domCfg)
+        q.materialMd = rich.materialMd
+        q.materialSvg = rich.materialSvg
+        q.materialType = 'rich'
+      }
+      currentIndPool = prevPool
+      return q
+    }
   }
+  currentIndPool = prevPool
   return null
 }
 
@@ -996,7 +1407,7 @@ function buildLocateForDomain(seed, dom) {
   const inds = Array.isArray(dom && dom.inds) && dom.inds.length ? dom.inds.slice() : ['粮食产量', '肉类产量', '水产品产量']
   const unit = (dom && dom.unit) || '万吨'
   const area = (dom && dom.n) || '该领域'
-  const kind = 3 + hashIdx(seed + 29, 4)
+  const kind = hashIdx(seed + 29, 7)
   if (kind <= 1) return buildLocateTextDomain(seed, inds, unit, area)
   if (kind <= 2) return buildLocateTableDomain(seed, inds, unit, area)
   return buildLocateMixedDomain(seed, inds, unit, area, kind)

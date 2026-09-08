@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { genDataQ, CALC_METHOD_LIB } from '../utils/dataTrainGen'
+import { genDataQ, CALC_METHOD_LIB, createSharedPaper } from '../utils/dataTrainGen'
+import { buildDataTrainExam, EXAM_LAYER_KEYS } from '../utils/dataTrainExam'
 import { genLocateChain } from '../utils/dataTrainChain' // v3.8.203 同材料连问
 import { DOMAINS, domainOf } from '../data/dataDomains' // v3.8.213 领域字典 60+
 import { KNOWLEDGE_CARDS, KB_LAYERS, searchCards, cardForQuiz } from '../utils/dataTrainLib'
@@ -12,6 +13,7 @@ import { chatOnce, activeCfg } from '../api'
 
 const emit = defineEmits(['close', 'send-question'])
 const md = (t) => renderMd(t || '')
+const view = ref('exam') // exam=真题式5问四层 | classic=经典四模式/理论课堂
 
 // ===== 状态 =====
 const mode = ref('type') // type | locate | formula | calc
@@ -31,6 +33,23 @@ const score = ref(0)
 const elapsed = ref(0)
 const runStarted = ref(false)
 const resultShow = ref(false)
+// ===== 真题式 5 问 × 四层（v3.8.244 核心特色） =====
+const exam = ref(null)
+const examQIdx = ref(0)
+const examLayerIdx = ref(0)
+const examPick = ref('')
+const examRun = ref(false)
+const examFinished = ref(false)
+const examStart = ref(0)
+const examQStart = ref(0)
+const examElapsed = ref(0)
+const examLayerStats = ref({
+  type: { ok: 0, bad: 0 },
+  locate: { ok: 0, bad: 0 },
+  formula: { ok: 0, bad: 0 },
+  calc: { ok: 0, bad: 0 }
+})
+const examHist = ref([])
 const DT_BEST_KEY = 'xc_dt_best_v1'
 function readDtBest() { try { return JSON.parse(localStorage.getItem(DT_BEST_KEY) || '{}') } catch (e) { return {} } }
 function saveRunBest() {
@@ -49,16 +68,64 @@ const qStart = ref(0)
 const qTime = ref(0)
 const groupSize = ref(0)
 const groupDone = ref(false)
+const paperSeed = ref(Date.now() % 100000)
+const paper = ref(null)
+function makePaper() {
+  const dom = activeDomain()
+  if (!dom) return
+  paperSeed.value = Date.now() % 100000
+  paper.value = createSharedPaper(paperSeed.value, dom)
+}
+function refreshPaper() {
+  makePaper()
+  reset()
+}
 const DTS_SRC_KEY = 'xc_dt_src'
 const SRC_OPTIONS = ['国家统计局', '北京市统计局', '上海市统计局', '天津市统计局', '重庆市统计局', '广东省统计局', '浙江省统计局', '江苏省统计局', '山东省统计局', '福建省统计局', '湖北省统计局', '湖南省统计局', '河南省统计局', '安徽省统计局', '四川省统计局', '贵州省统计局', '云南省统计局', '陕西省统计局', '辽宁省统计局', '吉林省统计局', '黑龙江省统计局', '河北省统计局', '山西省统计局', '江西省统计局', '广西壮族自治区统计局', '新疆维吾尔自治区统计局', '内蒙古自治区统计局', '西藏自治区统计局', '青海省统计局', '甘肃省统计局', '宁夏回族自治区统计局', '海南省统计局']
 const FIELD_HOT = DOMAINS.filter((d) => d.cat === '热').map((d) => d.n)
 const FIELD_COLD = DOMAINS.filter((d) => d.cat === '冷').map((d) => d.n)
 const dtSrc = ref({ src: '国家统计局', field: '粮食', customField: '' })
 try { const _s = JSON.parse(localStorage.getItem(DTS_SRC_KEY) || 'null'); if (_s) dtSrc.value = Object.assign({}, dtSrc.value, _s) } catch (e) {}
+const DTS_MODE_KEY = 'xc_dt_material_mode'
+const srcMode = ref(localStorage.getItem(DTS_MODE_KEY) === 'real' ? 'real' : 'sim')
 function saveDtSrc() { try { localStorage.setItem(DTS_SRC_KEY, JSON.stringify(dtSrc.value)) } catch (e) {} }
-function setSrc(v) { dtSrc.value.src = v; saveDtSrc(); reset() }
-function setField(v) { dtSrc.value.field = v; dtSrc.value.customField = ''; saveDtSrc(); reset() }
-function setCustomField(v) { dtSrc.value.customField = v; saveDtSrc(); reset() }
+function setSrcMode(m) {
+  srcMode.value = m
+  try { localStorage.setItem(DTS_MODE_KEY, m) } catch (e) {}
+  if (m === 'real') {
+    showToast('📡 真实模式已开启：联网搜索+AI 整理真实口径资料卡；题目仍用本地模拟数据以保证可判题', 'info')
+    setTimeout(() => checkSourceOnline(), 120)
+  } else {
+    showToast('🧪 已切回本地模拟材料，可即时出题判题', 'info')
+  }
+}
+function setSrc(v) {
+  dtSrc.value.src = v
+  saveDtSrc()
+  if (view.value === 'exam') initExam()
+  else { makePaper(); reset() }
+}
+function setField(v) {
+  dtSrc.value.field = v
+  dtSrc.value.customField = ''
+  saveDtSrc()
+  if (view.value === 'exam') initExam()
+  else { makePaper(); reset() }
+}
+function setCustomField(v) {
+  dtSrc.value.customField = v
+  saveDtSrc()
+  if (view.value === 'exam') initExam()
+  else { makePaper(); reset() }
+}
+function setView(v) {
+  view.value = v
+  if (v === 'exam') {
+    if (!exam.value) initExam()
+  } else if (!q.value) {
+    reset()
+  }
+}
 const srcLabel = computed(() => { const f = dtSrc.value.customField ? (dtSrc.value.field + '·' + dtSrc.value.customField) : dtSrc.value.field; return dtSrc.value.src + ' · ' + f })
 const lockShow = ref(true)
 function activeDomain() {
@@ -114,9 +181,11 @@ async function checkSourceOnline() {
   } else {
     try {
       const refText = srcCheckItems.value.map((s) => s.text).join('\n').slice(0, 1600)
+      const d = new Date()
+      const nowTxt = d.getFullYear() + '年' + (d.getMonth() + 1) + '月'
       const reply = await chatOnce(c, [
         { role: 'system', content: '你是严谨的统计资料核对助手。联网参考为空或不足以证明时，必须明确说“无实时官方数据”，绝不编造统计数字。' },
-        { role: 'user', content: '请帮用户核对：' + srcLabel.value + ' 的统计材料口径。\n\n联网摘要：\n' + (refText || '（无）') + '\n\n请输出：①能确认的事实（注明是否官方实时数据）；②如果摘要不足，应去哪个官方入口查；③建议训练时使用哪些“指标名/单位/口径”最贴近真实公报（不改材料数值）。' }
+        { role: 'user', content: '当前时间：' + nowTxt + '。请帮用户核对：' + srcLabel.value + ' 的统计材料口径，优先查找最新年度/季度/月度官方公报。\n\n联网摘要：\n' + (refText || '（无）') + '\n\n请输出：①能确认的事实（注明数据年份/月份、是否官方实时数据）；②如果摘要不足，应去哪个官方入口查；③建议训练时使用哪些“指标名/单位/口径”最贴近真实公报（不改材料数值）。' }
       ], 900)
       srcCheckAi.value = String(reply || '').trim() || 'AI 未返回内容，请重试。'
     } catch (e) {
@@ -130,7 +199,8 @@ const hist = ref([])
 const chain = ref(null)
 const chainIdx = ref(0)
 function startChain() {
-  const c = genLocateChain(Date.now() % 100000, 5, activeDomain())
+  if (!paper.value) makePaper()
+  const c = genLocateChain(Date.now() % 100000, 5, activeDomain(), paper.value)
   if (!c) { showToast('同材料生成失败，请重试', 'err'); return }
   chain.value = c
   chainIdx.value = 0
@@ -283,13 +353,94 @@ const layerProgress = computed(() =>
     return { ...m, pct: t ? Math.round((ms.ok / t) * 100) : 0, done: t, ok: ms.ok, bad: ms.bad }
   })
 )
+const examCurrent = computed(() => (exam.value && exam.value.qs[examQIdx.value]) || null)
+const examLayerKey = computed(() => EXAM_LAYER_KEYS[Math.min(EXAM_LAYER_KEYS.length - 1, examLayerIdx.value)].k)
+const examLayerTitle = computed(() => EXAM_LAYER_KEYS[Math.min(EXAM_LAYER_KEYS.length - 1, examLayerIdx.value)].t)
+const examLayerItem = computed(() => (examCurrent.value && examCurrent.value.layers[examLayerKey.value]) || null)
+const examLayerPct = computed(() =>
+  EXAM_LAYER_KEYS.map((m) => {
+    const s = examLayerStats.value[m.k]
+    const t = s.ok + s.bad
+    return { ...m, ok: s.ok, bad: s.bad, done: t, pct: t ? Math.round((s.ok / t) * 100) : 0 }
+  })
+)
+function initExam() {
+  const dom = activeDomain() || domainOf('粮食')
+  exam.value = buildDataTrainExam(Date.now() % 100000, dom)
+  examQIdx.value = 0
+  examLayerIdx.value = 0
+  examPick.value = ''
+  examRun.value = false
+  examFinished.value = false
+  examStart.value = 0
+  examQStart.value = 0
+  examElapsed.value = 0
+  examHist.value = []
+  examLayerStats.value = {
+    type: { ok: 0, bad: 0 },
+    locate: { ok: 0, bad: 0 },
+    formula: { ok: 0, bad: 0 },
+    calc: { ok: 0, bad: 0 }
+  }
+}
+function startExamRun() {
+  if (!examCurrent.value || examRun.value) return
+  examRun.value = true
+  examStart.value = Date.now()
+  examQStart.value = Date.now()
+  showToast('⏱ 真题组已开始，请按四层顺序作答', 'info')
+}
+function examAnswer(k) {
+  if (!examRun.value) { showToast('请先点击「▶ 开始本组作答」', 'info'); return }
+  if (examPick.value || !examLayerItem.value) return
+  examPick.value = k
+  const ok = k === examLayerItem.value.answer
+  const sec = examQStart.value ? Math.max(0, Math.round((Date.now() - examQStart.value) / 1000)) : 0
+  const st = examLayerStats.value[examLayerKey.value]
+  if (ok) st.ok++
+  else st.bad++
+  examHist.value.push({ q: examQIdx.value + 1, layer: examLayerKey.value, ok, sec })
+  if (examLayerKey.value === 'calc') {
+    // 第五题最后一层作答后，四层成绩已入账，答题流程由 examNext 统一推进
+  }
+}
+function examNext() {
+  if (!examPick.value) return
+  if (examLayerIdx.value < EXAM_LAYER_KEYS.length - 1) {
+    examLayerIdx.value++
+    examPick.value = ''
+    examQStart.value = Date.now()
+    return
+  }
+  if (examQIdx.value < 4) {
+    examQIdx.value++
+    examLayerIdx.value = 0
+    examPick.value = ''
+    examQStart.value = Date.now()
+    return
+  }
+  examRun.value = false
+  examFinished.value = true
+  examElapsed.value = examStart.value ? Math.floor((Date.now() - examStart.value) / 1000) : 0
+  try {
+    const all = JSON.parse(localStorage.getItem('xc_dt_exam_best') || '{}')
+    const domK = String((exam.value && (exam.value.domName || exam.value.area)) || '通用')
+    const total = examHist.value.length
+    const ok = examHist.value.filter((h) => h.ok).length
+    const cur = all[domK]
+    const pct = total ? Math.round((ok / total) * 100) : 0
+    if (!cur || total >= (cur.total || 0)) all[domK] = { total, ok, pct, ts: Date.now() }
+    localStorage.setItem('xc_dt_exam_best', JSON.stringify(all))
+  } catch (e) {}
+}
 
 function gen() {
   if (mode.value === 'theory') return
+  if (!paper.value) makePaper()
   picked.value = ''
   aiText.value = ''
   const seed = Date.now() % 100000 + idx.value * 137
-  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined, activeDomain())
+  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined, activeDomain(), paper.value)
   if (!q.value) {
     showToast('生成失败，请重试', 'err')
     return
@@ -414,15 +565,24 @@ function onKey(e) {
   const t = e.target
   if (t && t.closest && t.closest('input,textarea,[contenteditable]')) return
   if (e.key === 'Escape') emit('close')
+  if (view.value === 'exam') {
+    const mk = { a: 'A', b: 'B', c: 'C', d: 'D' }[String(e.key).toLowerCase()]
+    if (mk && examRun.value && !examPick.value && examLayerItem.value) examAnswer(mk)
+    else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && examPick.value) examNext()
+    return
+  }
   const m = { a: 'A', b: 'B', c: 'C', d: 'D' }[String(e.key).toLowerCase()]
   if (m && !picked.value && q.value) pick(m)
   if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && picked.value) nextQ()
 }
 onMounted(() => {
-  gen()
+  if (view.value === 'exam') initExam()
+  else gen()
   window.addEventListener('keydown', onKey)
   timerId = setInterval(() => {
-    if (runStarted.value && stats.value.start) elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
+    if (view.value === 'exam') {
+      if (examRun.value && examStart.value) examElapsed.value = Math.floor((Date.now() - examStart.value) / 1000)
+    } else if (runStarted.value && stats.value.start) elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
   }, 1000)
 })
 onUnmounted(() => {
@@ -446,7 +606,7 @@ const HELP_MD = `**LY《资料分析一本通》四层能力 —— 做题前先
 onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
 </script>
 <template>
-  <div class="ov show dt-ov" @click.self="emit('close')">
+  <div v-if="view === 'classic'" class="ov show dt-ov" @click.self="emit('close')">
     <div class="pnl dt-pnl">
       <div class="dt-head">
         <button class="pnl-top-b" style="margin-right: 4px" title="返回上一层（也可按 Esc / 浏览器返回）" @click="emit('close')">← 返回</button>
@@ -455,6 +615,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
           <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span><span v-if="bestChip" class="dt-chip" :title="'该模式·难度历史最佳'" style="color:#fbbf24">🏅 {{ bestChip.ok }}题 {{ bestChip.pct }}%</span>
           <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本轮用时/计时状态">{{ runStarted ? '⏱ 本场 ' + elapsed + 's' : '⏱ 待开始' }}</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
+          <button class="btn btn-pri" title="同一篇材料5问 × 判题/定位/公式/速算" @click="setView('exam')">📝 真题5问</button>
           <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
           <button class="pc-close" @click="emit('close')">✕</button>
         </div>
@@ -585,9 +746,13 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
   <span class="dt-chip">领域：</span>
   <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
   <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:110px;font-size:11px" @change="setCustomField($event.target.value)" />
+  <button class="btn" :class="srcMode === 'sim' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setSrcMode('sim')">🧪 模拟材料</button>
+  <button class="btn" :class="srcMode === 'real' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setSrcMode('real')">📡 真实材料(联网)</button>
+  <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新模拟材料" @click="refreshPaper()">🎲 换一篇</button>
   <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="padding:1px 8px;font-size:11px;text-decoration:none" title="打开官方/必应搜索，核对真实统计公报与单位">🌐 查官网</a>
   <button class="btn btn-gh" :disabled="srcCheckBusy" style="padding:1px 8px;font-size:11px" @click="checkSourceOnline()">{{ srcCheckBusy ? '⏳ 联网中…' : '📡 联网核实' }}</button>
   </div>
+  <div v-if="srcMode === 'real'" class="dt-mat-note" style="color:#fbbf24;border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:6px 10px;margin:2px 0 8px">📡 真实材料模式：请查看「联网核实」弹窗中的官方口径/真实资料卡；当前选择题仍为同领域模拟数据，因为联网返回的官方数字尚未开放稳定接口，不能用来自动判题。</div>
   
       <div v-if="groupDone && groupSize > 0" class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:10px 12px;margin:4px 0;background:var(--bg2,transparent)">
         <div style="font-weight:700">🏁 本组完成</div>
@@ -681,6 +846,108 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
           </div>
         </div>
       </div>
+  </div>
+  <div v-else class="ov show dt-ov" @click.self="emit('close')">
+    <div class="pnl dt-pnl">
+      <div class="dt-head">
+        <button class="pnl-top-b" style="margin-right:4px" title="返回上一层（Esc）" @click="emit('close')">← 返回</button>
+        <span class="dt-title">📊 资料分析 · 真题式四层训练</span>
+        <div class="dt-acts">
+          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="保留：单层随机速练/理论课堂" @click="setView('classic')">🎛 经典速练</button>
+          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="emit('close')">✕</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:8px;padding:5px 8px;margin-bottom:8px">
+        <span class="dt-chip">来源：</span>
+        <select :value="dtSrc.src" style="font-size:11px;max-width:170px" @change="setSrc($event.target.value)">
+          <option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option>
+        </select>
+        <span class="dt-chip">领域：</span>
+        <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)">
+          <optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup>
+          <optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup>
+        </select>
+        <input :value="dtSrc.customField" placeholder="自定义领域" style="width:120px;font-size:11px" @change="setCustomField($event.target.value)" />
+        <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
+        <button v-if="!examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
+        <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ {{ examElapsed }}s</button>
+      </div>
+
+      <div v-if="exam && !examFinished" class="dt-body">
+        <div class="dt-side">
+          <div class="dt-card">
+            <div class="dt-card-t">🧭 本套 5 问</div>
+            <div v-for="(q2, qi) in exam.qs" :key="q2.kind + qi" class="dt-py-row" :class="{ on: qi === examQIdx }">
+              <div class="dt-py-l">
+                <b>第 {{ qi + 1 }} 题 · {{ q2.typeLabel }}</b>
+                <span v-if="examHist.some((h) => h.q === qi + 1 && h.layer === 'calc')" class="dt-chip-sub" :style="{ color: examHist.find((h) => h.q === qi + 1 && h.layer === 'calc').ok ? '#34d399' : '#fb7185' }">
+                  {{ examHist.find((h) => h.q === qi + 1 && h.layer === 'calc').ok ? '✓' : '✗' }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="dt-card">
+            <div class="dt-card-t">📈 四层能力画像（本场）</div>
+            <div v-for="lp in examLayerPct" :key="lp.k" class="dt-py-l" style="margin:6px 0">
+              <span>{{ lp.t }} <b>{{ lp.pct }}%</b>（{{ lp.ok }}/{{ lp.done }}）</span>
+              <div style="height:6px;border-radius:3px;background:var(--surface);overflow:hidden;margin-top:4px"><div :style="{ width: lp.pct + '%', height: '100%', background: lp.pct >= 80 ? '#34d399' : lp.pct >= 50 ? '#fbbf24' : '#fb7185' }"></div></div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:6px">未开始时不计分；每层答完立即判正误并归因到能力层。</div>
+          </div>
+        </div>
+
+        <div class="dt-train">
+          <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
+            <div v-if="exam.materialMd" class="dt-mat" v-html="md(exam.materialMd)"></div>
+            <div v-if="exam.materialSvg" class="dt-mat dt-mat-svg" v-html="exam.materialSvg"></div>
+            <div class="dt-mat-note">📊 训练领域设定：{{ srcLabel }} · 同一篇材料供 5 问连续作答，切换题目不会更换数据。</div>
+          </div>
+
+          <div v-if="examCurrent && examLayerItem" class="dt-card">
+            <div class="dt-qmode">第 {{ examQIdx + 1 }} / 5 题 · {{ examLayerTitle }} · 四层第 {{ examLayerIdx + 1 }} / 4</div>
+            <div class="dt-q" style="margin:8px 0 10px" v-html="md(examCurrent.stem)"></div>
+            <div class="dt-q" style="font-weight:700;margin:10px 0 8px" v-html="md(examLayerItem.q)"></div>
+
+            <div class="dt-opts" :class="{ wide: examLayerKey === 'formula' }">
+              <button
+v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
+                :class="{ picked: examPick === o.k, right: examPick && o.k === examLayerItem.answer, wrong: examPick && o.k === examPick && o.k !== examLayerItem.answer }"
+                :disabled="!!examPick || !examRun" @click="examAnswer(o.k)">
+                {{ o.k }}. <span v-html="md(o.t)"></span>
+              </button>
+            </div>
+
+            <div v-if="!examRun" class="dt-mat-note" style="color:var(--text3);margin-top:8px">先阅读材料与题干，点击上方「▶ 开始本组作答」后进入四层限时训练。</div>
+            <div v-if="examPick && examLayerItem" class="dt-explain" style="margin-top:10px">
+              <div style="font-weight:800;margin-bottom:6px">{{ examPick === examLayerItem.answer ? '✅ 这一层答对了' : '❌ 这一层答错（正确答案 ' + examLayerItem.answer + '）' }}</div>
+              <div v-html="md(examLayerItem.explain)"></div>
+              <div class="dt-mat-note" style="margin-top:6px">{{ examLayerItem.tip }}</div>
+              <button class="btn btn-pri" style="margin-top:8px" @click="examNext()">{{ examLayerIdx < 3 ? '下一层 →' : (examQIdx < 4 ? '下一题 →' : '📊 查看本场成绩') }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="exam && examFinished" style="overflow:auto;padding:4px 2px">
+        <div class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:14px;background:var(--glass-bg)">
+          <div style="font-weight:800;font-size:16px">📊 本套真题 · 四层成绩单</div>
+          <div style="font-size:13px;color:var(--text2);margin-top:8px;line-height:1.9">
+            ✅ 正确 {{ examHist.filter((h) => h.ok).length }} / {{ examHist.length }} · 本场计时 <b>{{ examElapsed }}s</b> · 平均每题 <b>{{ examHist.length ? Math.round(examElapsed / (examHist.length / 4)) : 0 }}s/层</b>
+          </div>
+          <div style="margin-top:10px;display:grid;gap:8px">
+            <div v-for="lp in examLayerPct" :key="lp.k" class="dt-py-l">
+              <span>{{ lp.t }}：<b>{{ lp.ok }}/{{ lp.done }}</b>（{{ lp.pct }}%）</span>
+              <div style="height:8px;border-radius:4px;background:var(--surface);overflow:hidden"><div :style="{ width: lp.pct + '%', height: '100%', background: lp.pct >= 80 ? '#34d399' : lp.pct >= 50 ? '#fbbf24' : '#fb7185' }"></div></div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-pri" @click="initExam()">🔄 换一套继续练</button>
+            <button class="btn btn-gh" @click="setView('classic')">🎛 进入单层速练</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
