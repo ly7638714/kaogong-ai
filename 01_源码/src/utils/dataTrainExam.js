@@ -101,6 +101,25 @@ function chartLineSvg(labels, vals) {
   s += '<polyline points="' + pts + '" fill="none" stroke="#2563eb" stroke-width="3"/>' + circles
   return svgWrap(s)
 }
+function chartPieSvg(labels, vals) {
+  const W = 640, H = 360, cx = 220, cy = 180, r = 112
+  const colors = ['#2563eb', '#dc2626', '#f59e0b', '#10b981']
+  const sum = vals.reduce((a, b) => a + b, 0) || 1
+  let s = '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>'
+  let a = -Math.PI / 2
+  for (let i = 0; i < vals.length; i++) {
+    const ang = (vals[i] / sum) * Math.PI * 2
+    const x1 = cx + r * Math.cos(a), y1 = cy + r * Math.sin(a)
+    const x2 = cx + r * Math.cos(a + ang), y2 = cy + r * Math.sin(a + ang)
+    const large = ang > Math.PI ? 1 : 0
+    s += '<path d="M ' + cx + ' ' + cy + ' L ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' Z" fill="' + colors[i % colors.length] + '" stroke="#fff" stroke-width="2"/>'
+    const mid = a + ang / 2
+    const lx = cx + (r + 22) * Math.cos(mid), ly = cy + (r + 22) * Math.sin(mid)
+    s += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" font-size="11" text-anchor="middle" fill="#333">' + labels[i] + ' ' + Math.round((vals[i] / sum) * 100) + '%</text>'
+    a += ang
+  }
+  return svgWrap(s)
+}
 function chartComboSvg(labels, vals, rates) {
   const W = 640, H = 340, pl = 64, pr = 54, pt = 34, pb = 48
   const max = Math.max.apply(null, vals) * 1.15
@@ -198,10 +217,10 @@ function renderRichMaterial(seed, paper) {
     '其中2023年、2024年' + main + '同比增速分别为' + R3 + '%、' + R4 + '%。'
   ])
   const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n' + tableNote + '\n\n' + rateNote
-  const chartPick = hashIdx(seed + 9, 3)
+  const chartPick = hashIdx(seed + 9, 4)
   const labels = paper.years.map((y) => y + '年')
-  const svg = chartPick === 0 ? chartBarSvg(labels, paper.vals[0]) : chartPick === 1 ? chartLineSvg(labels, paper.vals[0]) : chartComboSvg(labels, paper.vals[0], paper.rates[0])
-  const chartTitle = chartPick === 0 ? '三、年度规模图（柱形）' : chartPick === 1 ? '三、年度规模图（折线）' : '三、年度规模与增速图（柱线组合）'
+  const svg = chartPick === 0 ? chartBarSvg(labels, paper.vals[0]) : chartPick === 1 ? chartLineSvg(labels, paper.vals[0]) : chartPick === 2 ? chartComboSvg(labels, paper.vals[0], paper.rates[0]) : chartPieSvg(paper.inds, paper.vals.map((row) => row[last]))
+  const chartTitle = chartPick === 0 ? '三、年度规模图（柱形）' : chartPick === 1 ? '三、年度规模图（折线）' : chartPick === 2 ? '三、年度规模与增速图（柱线组合）' : '三、2024年分项结构图（饼形）'
   const tableTitle = tablePick === 0 ? '二、主要指标表' : tablePick === 1 ? '二、分项统计表（指标横向展开）' : '二、主要指标比较表'
   return {
     materialMd: titleTpl + '\n\n' + textMd + '\n\n' + tableTitle + '\n\n' + tableMd + '\n\n' + chartTitle + '（' + main + '）',

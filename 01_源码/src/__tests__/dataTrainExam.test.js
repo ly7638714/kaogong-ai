@@ -72,6 +72,16 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
     }
   })
 
+  it('自动随机图型必须包含饼形，且四种图型都有机会出现', () => {
+    const kinds = new Set()
+    for (let i = 0; i < 60; i++) {
+      const exam = buildDataTrainExam(940000 + i * 211, domainOf('粮食'))
+      kinds.add(exam.chartKind)
+    }
+    expect(kinds.has(3)).toBe(true)
+    expect(kinds.size).toBeGreaterThanOrEqual(3)
+  })
+
   it('前四题考查顺序随套题变化，综合分析仍放第5题', () => {
     const orders = new Set()
     for (let i = 0; i < 20; i++) {

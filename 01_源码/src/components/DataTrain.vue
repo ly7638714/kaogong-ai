@@ -14,7 +14,7 @@ import { pickGenCfg } from '../utils/fastMode'
 
 const emit = defineEmits(['close', 'send-question'])
 const md = (t) => renderMd(t || '')
-const view = ref('exam') // exam=真题式5问四层 | classic=经典四模式/理论课堂
+const view = ref('classic') // classic=真题拆分训练（默认入口） | exam=完整真题卷
 
 // ===== 状态 =====
 const mode = ref('type') // type | locate | formula | calc
@@ -46,6 +46,11 @@ const examFinished = ref(false)
 const examStart = ref(0)
 const examQStart = ref(0)
 const examElapsed = ref(0)
+const examEndAt = ref(0)
+const examTotalRemain = ref(0)
+const examLayerRemain = ref(15)
+const examWarn3 = ref(false)
+const LAYER_BUDGET_SEC = 15
 const examAiBusy = ref(false)
 const examAiText = ref('')
 const examEvalBusy = ref(false)
@@ -418,6 +423,10 @@ function initExam() {
   examStart.value = 0
   examQStart.value = 0
   examElapsed.value = 0
+  examEndAt.value = 0
+  examTotalRemain.value = 0
+  examLayerRemain.value = LAYER_BUDGET_SEC
+  examWarn3.value = false
   examAiText.value = ''
   examAiBusy.value = false
   examEvalText.value = ''
@@ -438,6 +447,10 @@ function startExamRun() {
   examRun.value = true
   examStart.value = Date.now()
   examQStart.value = Date.now()
+  examEndAt.value = Date.now() + examTotal.value * 72 * 1000
+  examTotalRemain.value = Math.ceil((examEndAt.value - Date.now()) / 1000)
+  examLayerRemain.value = LAYER_BUDGET_SEC
+  examWarn3.value = false
   showToast('⏱ 真题组已开始，请按四层顺序作答', 'info')
   const c = pickGenCfg()
   if (c && c.key) setTimeout(() => aiOrganizeExam(), 120)
@@ -456,12 +469,18 @@ function examAnswer(k) {
     // 第五题最后一层作答后，四层成绩已入账，答题流程由 examNext 统一推进
   }
 }
+function examLayerTimeout() {
+  if (!examRun.value || examPick.value || !examLayerItem.value) return
+  const wrong = examLayerItem.value.options.find((o) => o.k !== examLayerItem.value.answer)
+  if (wrong) examAnswer(wrong.k)
+}
 function examNext() {
   if (!examPick.value) return
   if (examLayerIdx.value < EXAM_LAYER_KEYS.length - 1) {
     examLayerIdx.value++
     examPick.value = ''
     examQStart.value = Date.now()
+    examLayerRemain.value = LAYER_BUDGET_SEC
     return
   }
   if (examQIdx.value < examTotal.value - 1) {
@@ -470,6 +489,7 @@ function examNext() {
     examLayerIdx.value = 0
     examPick.value = ''
     examQStart.value = Date.now()
+    examLayerRemain.value = LAYER_BUDGET_SEC
     return
   }
   examRun.value = false
@@ -697,7 +717,26 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   timerId = setInterval(() => {
     if (view.value === 'exam') {
-      if (examRun.value && examStart.value) examElapsed.value = Math.floor((Date.now() - examStart.value) / 1000)
+      if (examRun.value && examStart.value) {
+        const now = Date.now()
+        examElapsed.value = Math.floor((now - examStart.value) / 1000)
+        if (examEndAt.value) {
+          const totalRem = Math.max(0, Math.ceil((examEndAt.value - now) / 1000))
+          examTotalRemain.value = totalRem
+          if (totalRem <= 180 && !examWarn3.value) {
+            examWarn3.value = true
+            showToast('⏰ 本场考试还剩 3 分钟，请抓紧作答', 'info')
+          }
+          if (totalRem <= 0 && !examFinished.value) {
+            examRun.value = false
+            examFinished.value = true
+            deepEvalExam()
+          }
+        }
+        const qSec = examQStart.value ? Math.floor((now - examQStart.value) / 1000) : 0
+        examLayerRemain.value = Math.max(0, LAYER_BUDGET_SEC - qSec)
+        if (examLayerRemain.value === 0 && !examPick.value && examLayerItem.value) examLayerTimeout()
+      }
     } else if (runStarted.value && stats.value.start) elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
   }, 1000)
 })
@@ -991,7 +1030,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
         <button v-if="!examReady && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="initExam()">🤖 AI 智能出题</button>
         <button v-if="examReady" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
         <button v-if="examReady && !examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
-        <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ {{ examElapsed }}s</button>
+        <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ 本层 {{ examLayerRemain }}s · 考试 {{ examElapsed }}s / 剩 {{ examTotalRemain }}s</button>
       </div>
 
       <div v-if="!examReady && !examFinished" style="min-height:52vh;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;text-align:center;padding:18px">
@@ -1034,13 +1073,10 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
             <span class="dt-mat-note" style="color:var(--text3)">AI 只改写表达，不改变本地表格数值，保证 5 问仍可自动判题。</span>
           </div>
           <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
-            <div v-if="examPaper && examPaper.materialMd" class="dt-mat" v-html="md(examPaper.materialMd)"></div>
+            <div v-if="examAiText" class="dt-mat" v-html="md(examAiText)"></div>
+            <div v-else-if="examPaper && examPaper.materialMd" class="dt-mat" v-html="md(examPaper.materialMd)"></div>
             <div v-if="examPaper && examPaper.materialSvg" class="dt-mat dt-mat-svg" v-html="examPaper.materialSvg"></div>
             <div class="dt-mat-note">📊 组卷来源：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇（{{ examPaper && examPaper.domName }}），同一篇供 5 问连续作答；10/15/20 题会自动混编多领域材料。</div>
-          </div>
-          <div v-if="examAiText" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
-            <div class="dt-mat-note">🤖 AI 整理正文（仅阅读；表格与题目仍以本地可判数据为准）</div>
-            <div class="dt-mat" v-html="md(examAiText)"></div>
           </div>
 
           <div v-if="examCurrent && examLayerItem" class="dt-card">
