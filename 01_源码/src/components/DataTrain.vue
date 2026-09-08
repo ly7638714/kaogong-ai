@@ -59,13 +59,76 @@ function setField(v) { dtSrc.value.field = v; dtSrc.value.customField = ''; save
 function setCustomField(v) { dtSrc.value.customField = v; saveDtSrc(); reset() }
 const srcLabel = computed(() => { const f = dtSrc.value.customField ? (dtSrc.value.field + '·' + dtSrc.value.customField) : dtSrc.value.field; return dtSrc.value.src + ' · ' + f })
 const lockShow = ref(true)
-const realRef = computed(() => REAL_REF[srcLabel.value] || (dtSrc.value.customField ? '' : '真实口径参考请以所选来源官网年度公报为准（本材料为离线样本，非实时获取）。'))
+function activeDomain() {
+  const custom = String(dtSrc.value.customField || '').trim()
+  if (!custom) return domainOf(dtSrc.value.field)
+  let unit = '亿元'
+  if (/人|户|职工|就业/.test(custom)) unit = '万人'
+  else if (/件|快递/.test(custom)) unit = '亿件'
+  else if (/产量|销量|车|手机|家电|设备|台/.test(custom)) unit = '万辆'
+  else if (/面积|公顷|亩/.test(custom)) unit = '万公顷'
+  return { n: custom, cat: '冷', unit, inds: [custom + '·总体规模', custom + '·主要业务量', custom + '·重点领域投入', custom + '·相关指标'] }
+}
+const srcSearchTerm = computed(() => String(dtSrc.value.src || '') + ' ' + (dtSrc.value.customField || dtSrc.value.field) + ' 统计公报')
+const srcSearchHref = computed(() => 'https://cn.bing.com/search?q=' + encodeURIComponent(srcSearchTerm.value))
+const realRef = computed(() => {
+  const hit = REAL_REF[srcLabel.value]
+  if (hit) return '官网口径参考：' + hit + '（题目材料数值仍为训练模拟，勿当作该年报真实数据）'
+  return dtSrc.value.customField ? '自定义领域无内置真实口径参考：请点「🌐 官网/必应查」核对真实指标与单位，材料数值仅用于训练。' : '当前为训练模拟材料：仅练习统计阅读/数据定位，不引用所选来源实际公布值；点「🌐 官网/必应查」可查官方年度数据。'
+})
+const srcCheckShow = ref(false)
+const srcCheckBusy = ref(false)
+const srcCheckItems = ref([])
+const srcCheckAi = ref('')
+async function checkSourceOnline() {
+  const term = srcSearchTerm.value
+  if (!term) return
+  srcCheckShow.value = true
+  srcCheckBusy.value = true
+  srcCheckItems.value = []
+  srcCheckAi.value = ''
+  const items = []
+  try {
+    const res = await fetch('https://zh.wikipedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent('"' + term + '"') + '&format=json&origin=*&srlimit=5')
+    const j = await res.json()
+    ;((j.query && j.query.search) || []).forEach((s) => items.push({ text: s.title + '：' + String(s.snippet || '').replace(/<[^>]+>/g, '').slice(0, 180), url: 'https://zh.wikipedia.org/wiki/' + encodeURIComponent(s.title) }))
+  } catch (e) {}
+  if (items.length < 3) {
+    try {
+      const res = await fetch('https://api.duckduckgo.com/?q=' + encodeURIComponent(term + ' 官方数据') + '&format=json&no_html=1')
+      const j = await res.json()
+      if (j && j.AbstractText) items.push({ text: j.AbstractText.slice(0, 240), url: j.AbstractURL || '' })
+      ;(j.RelatedTopics || []).forEach((t) => {
+        if (t && t.Text) items.push({ text: t.Text.slice(0, 240), url: t.FirstURL || '' })
+        else if (t && t.Topics) t.Topics.forEach((s) => s && s.Text && items.push({ text: s.Text.slice(0, 240), url: s.FirstURL || '' }))
+      })
+    } catch (e) {}
+  }
+  if (!items.length) items.push({ text: '公开检索暂未返回摘要，请用下方官网/必应链接进入官方发布页核对。', url: '' })
+  srcCheckItems.value = items.slice(0, 6)
+  const c = activeCfg(false)
+  if (!c || !c.key) {
+    srcCheckAi.value = '未配置文字大模型 Key：只能展示联网摘要，无法让 AI 整理口径。请先到「设置 → 模型」配置 Key。'
+  } else {
+    try {
+      const refText = srcCheckItems.value.map((s) => s.text).join('\n').slice(0, 1600)
+      const reply = await chatOnce(c, [
+        { role: 'system', content: '你是严谨的统计资料核对助手。联网参考为空或不足以证明时，必须明确说“无实时官方数据”，绝不编造统计数字。' },
+        { role: 'user', content: '请帮用户核对：' + srcLabel.value + ' 的统计材料口径。\n\n联网摘要：\n' + (refText || '（无）') + '\n\n请输出：①能确认的事实（注明是否官方实时数据）；②如果摘要不足，应去哪个官方入口查；③建议训练时使用哪些“指标名/单位/口径”最贴近真实公报（不改材料数值）。' }
+      ], 900)
+      srcCheckAi.value = String(reply || '').trim() || 'AI 未返回内容，请重试。'
+    } catch (e) {
+      srcCheckAi.value = 'AI 核对失败：' + ((e && e.message) || e) + '；上方联网摘要仍可直接参考。'
+    }
+  }
+  srcCheckBusy.value = false
+}
 // v3.8.202：题组结果统计 + 三锁定判题联动
 const hist = ref([])
 const chain = ref(null)
 const chainIdx = ref(0)
 function startChain() {
-  const c = genLocateChain(Date.now() % 100000, 3)
+  const c = genLocateChain(Date.now() % 100000, 3, activeDomain())
   if (!c) { showToast('同材料生成失败，请重试', 'err'); return }
   chain.value = c
   chainIdx.value = 0
@@ -205,7 +268,7 @@ function gen() {
   picked.value = ''
   aiText.value = ''
   const seed = Date.now() % 100000 + idx.value * 137
-  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined, dtSrc.value.customField ? null : domainOf(dtSrc.value.field))
+  q.value = genDataQ(mode.value, seed, level.value, mode.value === 'calc' ? stage.value : undefined, activeDomain())
   if (!q.value) {
     showToast('生成失败，请重试', 'err')
     return
@@ -487,6 +550,8 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
   <span class="dt-chip">领域：</span>
   <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
   <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:110px;font-size:11px" @change="setCustomField($event.target.value)" />
+  <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="padding:1px 8px;font-size:11px;text-decoration:none" title="打开官方/必应搜索，核对真实统计公报与单位">🌐 查官网</a>
+  <button class="btn btn-gh" :disabled="srcCheckBusy" style="padding:1px 8px;font-size:11px" @click="checkSourceOnline()">{{ srcCheckBusy ? '⏳ 联网中…' : '📡 联网核实' }}</button>
   </div>
   
       <div v-if="groupDone && groupSize > 0" class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:10px 12px;margin:4px 0;background:var(--bg2,transparent)">
@@ -505,7 +570,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
                 <span class="dt-qidx">第 {{ idx }} 题</span>
               </div>
             <div v-if="q.materialMd || q.materialSvg" class="dt-mat-scroll"><div v-if="q.materialMd" class="dt-mat" v-html="md(lockHighlights(q.materialMd, lockShow))"></div><div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div></div>
-            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">{{ q._srcLabel ? '📊 来源设定：' + q._srcLabel + ' · ' : '' }}🧪 当前为训练模拟数据；真实统计局源为预留接入项（联网/官方API接入见设置说明）</div>
+            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">{{ q._srcLabel ? '📊 训练领域设定：' + q._srcLabel + ' · ' : '' }}🧪 材料数值为本地模拟，仅练定位/速算；真实官方数值需以「🌐 查官网 / 📡 联网核实」结果为准。</div>
 <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note" style="color:var(--text3)">⇄ 手机上左右滑动可查看完整图/表材料</div>
       <div v-if="realRef" class="dt-mat-note" style="border-color:rgba(52,211,153,.45);color:var(--text2)">{{ realRef }}</div>
               <div class="dt-q" v-html="md(q.q)"></div>
@@ -536,6 +601,28 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
         </div>
       </div>
     </div>
+      <div v-if="srcCheckShow" class="ov show" style="z-index:460" @click.self="srcCheckShow = false">
+        <div class="pnl dt-pnl" style="max-height:86vh">
+          <div class="dt-head">
+            <span class="dt-title">📡 联网核实 · {{ srcLabel }}</span>
+            <button class="pc-close" @click="srcCheckShow = false">✕</button>
+          </div>
+          <div style="overflow:auto;min-height:0;padding:2px 2px 12px;font-size:13px;line-height:1.8;color:var(--text)">
+            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">先自动抓取维基/公开检索摘要；若配置了文字大模型，再让 AI 基于摘要核对「哪些是真实官方口径、哪些仍需去官网确认」。</div>
+            <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="margin:0 6px 6px 0;padding:3px 10px;font-size:12px;text-decoration:none">🌐 打开必应搜索「{{ srcSearchTerm }}」</a>
+            <div v-if="srcCheckBusy" class="sim-loading"><span class="spin"></span> 联网检索 + AI 核对中…</div>
+            <template v-else>
+              <div style="font-weight:700;margin:6px 0 4px">🔎 联网摘要</div>
+              <div v-for="(it,i) in srcCheckItems" :key="i" class="dt-mat-row" style="margin:4px 0;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px">
+                <div>{{ it.text || '（无摘要）' }}</div>
+                <a v-if="it.url" :href="it.url" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">来源 ↗</a>
+              </div>
+              <div style="font-weight:700;margin:10px 0 4px">🤖 AI 口径核对</div>
+              <div class="dt-ai" v-html="md(srcCheckAi || '（暂无 AI 结果）')"></div>
+            </template>
+          </div>
+        </div>
+      </div>
   </div>
 </template>
 

@@ -12,4 +12,14 @@ describe('genLocateChain', () => {
     expect(stems.size).toBe(c.qs.length)
     c.qs.forEach((q) => { expect(q.options.length).toBeGreaterThanOrEqual(4); expect(q.answer).toBeTruthy() })
   })
+
+  it('传入领域时材料指标/单位与所选领域一致', () => {
+    const dom = { n: '汽车', cat: '热', unit: '万辆', inds: ['汽车产量', '新能源汽车产量', '汽车销量', '汽车类零售额'] }
+    const c = genLocateChain(20260905, 3, dom)
+    expect(c).toBeTruthy()
+    expect(c.materialMd).toContain('汽车领域')
+    expect(c.materialMd).toContain('汽车产量')
+    expect(c.materialMd).toContain('万辆')
+    expect(c.materialMd).not.toContain('粮食产量')
+  })
 })

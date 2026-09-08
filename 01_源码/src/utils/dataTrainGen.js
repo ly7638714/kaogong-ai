@@ -963,7 +963,7 @@ function buildLocateTextDomain(seed, inds, unit, area) {
   const found = askNum ? (t.mv + unit) : (t.r + '%')
   const label = '2024年' + (askNum ? '「' + t.main + '」的数值' : '「' + t.main + '」的同比增速')
   const opts = buildOpts([found], [askNum ? fmtV(segs[(segs.indexOf(t) + 1) % 3].mv) + unit : (segs[(segs.indexOf(t) + 2) % 3].r + '%'), askNum ? fmtV(Math.round(t.mv * 1.06)) + unit : (segs[segs.indexOf(t)].sr + '%'), askNum ? fmtV(Math.round(t.mv * 0.94)) + unit : (segs[(segs.indexOf(t) + 1) % 3].sr + '%')], seed + 8)
-  const mat = `【材料】${area}领域 · 统计（${new Date().getFullYear()}年样本）\n\n${segs.map((x) => '**' + x.i + '、' + area + '·' + x.theme + '**。' + x.main + fmtV(x.mv) + unit + '，比上年增长' + x.r + '%。其中，' + x.sub + fmtV(x.subV) + unit + '，增长' + x.sr + '%。').join('\n\n')}\n\n注：指标口径与官方年度公报一致；本材料为训练样本。`
+  const mat = `【材料】${area}领域 · 统计（${new Date().getFullYear()}年训练样本）\n\n${segs.map((x) => '**' + x.i + '、' + area + '·' + x.theme + '**。' + x.main + fmtV(x.mv) + unit + '，比上年增长' + x.r + '%。其中，' + x.sub + fmtV(x.subV) + unit + '，增长' + x.sr + '%。').join('\n\n')}\n\n注：本材料数值为训练模拟数据，不是官方实际公布值；仅练习「时间/指标/单位三锁定」。`
   const answer = opts.answer
   const explain = '【定位三步】①看时间：2024年；②看指标：' + t.main + '；③定位句子：' + t.i + '、' + t.theme + ' → ' + label + ' = **' + found + '**。\n\n口诀：先找时间→指标→单位，再回材料定位。'
   return { mode: 'locate', materialType: 'text', materialMd: mat, q: '求' + label + '，应定位到材料中哪一句/哪个数据？', options: opts.options, answer, explain, tip: '口诀：结构阅读三步——先看时间、再看指标、后定单位。', extra: { name: '数据定位', area } }
@@ -981,7 +981,7 @@ function buildLocateTableDomain(seed, inds, unit, area) {
   const head2 = '| --- | ' + cols.map(() => '---').join(' | ') + ' |'
   const body = years.map((y, ri) => '| ' + y + ' | ' + rows[ri].join(' | ') + ' |').join('\n')
   const unitRow = '| 单位 | ' + cols.map(() => unit).join(' | ') + ' |'
-  const mat = `【材料】${area}领域 · 主要指标表\n\n${head1}\n${head2}\n${body}\n${unitRow}\n\n注：样本数据，口径参考官方公报。`
+  const mat = `【材料】${area}领域 · 主要指标表（训练模拟）\n\n${head1}\n${head2}\n${body}\n${unitRow}\n\n注：本表数值为训练模拟数据，不是官方实际公布值；单位与指标名称按该领域常用统计口径排版。`
   const correct = rows[ti][ci]
   const dists = [rows[ti][(ci + 1) % 4], rows[(ti + 1) % 4][ci], rows[(ti + 3) % 4][(ci + 2) % 4]].map((v) => fmt(v))
   const opts = buildOpts([fmt(correct)], dists, seed + 13)
