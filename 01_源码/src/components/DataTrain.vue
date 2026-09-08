@@ -24,11 +24,13 @@ const helpShow = ref(false)
 const methodOpen = ref(true)
 const aiBusy = ref(false)
 const aiText = ref('')
-const stats = ref({ ok: 0, bad: 0, total: 0, start: Date.now() })
+const stats = ref({ ok: 0, bad: 0, total: 0, start: 0 })
 const streak = ref(0)
 const bestStreak = ref(0)
 const score = ref(0)
 const elapsed = ref(0)
+const runStarted = ref(false)
+const resultShow = ref(false)
 const DT_BEST_KEY = 'xc_dt_best_v1'
 function readDtBest() { try { return JSON.parse(localStorage.getItem(DT_BEST_KEY) || '{}') } catch (e) { return {} } }
 function saveRunBest() {
@@ -128,7 +130,7 @@ const hist = ref([])
 const chain = ref(null)
 const chainIdx = ref(0)
 function startChain() {
-  const c = genLocateChain(Date.now() % 100000, 3, activeDomain())
+  const c = genLocateChain(Date.now() % 100000, 5, activeDomain())
   if (!c) { showToast('同材料生成失败，请重试', 'err'); return }
   chain.value = c
   chainIdx.value = 0
@@ -136,7 +138,7 @@ function startChain() {
 }
 function applyChainQ() {
   const it = chain.value.qs[chainIdx.value]
-  q.value = Object.assign({}, it, { materialMd: chain.value.materialMd, _chain: true })
+  q.value = Object.assign({}, it, { materialMd: chain.value.materialMd, materialSvg: chain.value.materialSvg, _chain: true })
   picked.value = ''
   qStart.value = Date.now()
   qTime.value = 0
@@ -151,11 +153,30 @@ const lockWords = ref({ time: [], ind: [], unit: [] })
 const grpStats = computed(() => {
   const total = stats.value.total
   const ok = stats.value.ok
-  const secs = Math.max(1, elapsed.value)
+  const secs = Math.max(0, elapsed.value)
   const avg = total ? Math.round(secs / total) : 0
   return { total, ok, bad: total - ok, rate: total ? Math.round((ok / total) * 100) : 0, secs, avg }
 })
 function setGroup(n) { groupSize.value = n; groupDone.value = false; reset() }
+function startRun() {
+  if (runStarted.value) return
+  runStarted.value = true
+  stats.value.start = Date.now()
+  elapsed.value = 0
+  qStart.value = Date.now()
+  qTime.value = 0
+  showToast('⏱ 已开始本组计时，作答后自动统计', 'info')
+}
+function settleRun() {
+  elapsed.value = stats.value.start ? Math.floor((Date.now() - stats.value.start) / 1000) : 0
+  runStarted.value = false
+  groupDone.value = true
+  resultShow.value = true
+  saveRunBest()
+}
+function closeResult() {
+  resultShow.value = false
+}
 watch(q, (nq) => { qStart.value = Date.now(); qTime.value = 0; if (nq) nq._srcLabel = srcLabel.value })
 let timerId = null
 
@@ -277,6 +298,10 @@ function gen() {
 }
 function pick(k) {
   if (!q.value || picked.value) return
+  if (!runStarted.value) {
+    showToast('请先点击「▶ 开始本组计时」再作答', 'info')
+    return
+  }
   picked.value = k
   qTime.value = Math.max(0, Math.round((Date.now() - qStart.value) / 1000))
   const ok = k === q.value.answer
@@ -294,7 +319,13 @@ function pick(k) {
   stats.value.total++
   hist.value.push({ ok, t: qTime.value })
   try { lockWords.value = findLockWords(q.value && (q.value.materialMd || q.value.materialSvg)) } catch (e) {}
-  if (groupSize.value > 0 && stats.value.total >= groupSize.value) { groupDone.value = true; showToast('🏁 本组完成！共 ' + stats.value.total + ' 题 · 对 ' + stats.value.ok + ' · 正确率 ' + Math.round((stats.value.ok / stats.value.total) * 100) + '%', 'success') }
+  if (groupSize.value > 0 && stats.value.total >= groupSize.value) {
+    groupDone.value = true
+    elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
+    runStarted.value = false
+    saveRunBest()
+    setTimeout(() => { resultShow.value = true }, 350)
+  }
 }
 function switchMode(m) {
   mode.value = m
@@ -312,9 +343,11 @@ function setStage(st) {
 function reset() {
   saveRunBest() // v3.8.198 结算上一轮 → 记录该模式·难度历史最佳
   groupDone.value = false
+  runStarted.value = false
+  resultShow.value = false
   hist.value = []
   chain.value = null
-  stats.value = { ok: 0, bad: 0, total: 0, start: Date.now() }
+  stats.value = { ok: 0, bad: 0, total: 0, start: 0 }
   elapsed.value = 0
   streak.value = 0
   idx.value = 0
@@ -389,7 +422,7 @@ onMounted(() => {
   gen()
   window.addEventListener('keydown', onKey)
   timerId = setInterval(() => {
-    elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
+    if (runStarted.value && stats.value.start) elapsed.value = Math.floor((Date.now() - stats.value.start) / 1000)
   }, 1000)
 })
 onUnmounted(() => {
@@ -420,7 +453,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
         <span class="dt-title">📊 资料分析 · 四层能力训练</span>
         <div class="dt-acts">
           <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span><span v-if="bestChip" class="dt-chip" :title="'该模式·难度历史最佳'" style="color:#fbbf24">🏅 {{ bestChip.ok }}题 {{ bestChip.pct }}%</span>
-          <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本题用时">⏱ 本题 {{ qTime }}s</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
+          <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本轮用时/计时状态">{{ runStarted ? '⏱ 本场 ' + elapsed + 's' : '⏱ 待开始' }}</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
           <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
           <button class="pc-close" @click="emit('close')">✕</button>
@@ -462,7 +495,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
             <div class="dt-st-row">✅ 答对 <b>{{ stats.ok }}</b></div>
             <div class="dt-st-row">❌ 答错 <b>{{ stats.bad }}</b></div>
             <div class="dt-st-row">🎯 正确率 <b>{{ rate }}%</b></div>
-            <div class="dt-st-row">⏱ 用时 <b>{{ elapsed }}s</b></div>
+            <div class="dt-st-row">⏱ 用时 <b>{{ runStarted ? elapsed + 's' : '待开始' }}</b></div>
             <div v-if="stats.bad" class="dt-st-tip">💪 错题即学：看右侧解析里的口诀与方法卡，点「下一题」巩固</div>
             <div v-else-if="stats.total" class="dt-st-tip">🎉 全对！试试切到 🔥 实战难度或下一层能力</div>
           </div>
@@ -540,11 +573,13 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
 
   <div class="dt-set" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:11px">
   <span v-if="mode === 'locate' || mode === 'formula'" class="dt-chip" style="cursor:pointer" :title="'三锁定高亮'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 三锁定高亮开' : '🔍 三锁定高亮关' }}</span>
-        <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一张表格材料连续出 3 问" @click="startChain()">🔁 同材料连问(表格)</button>
+        <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一篇文字+表格+统计图材料连续出 5 问" @click="startChain()">🔁 同材料连问(5问·混合)</button>
         <span v-if="chain" class="dt-chip" style="color:#34d399">📋 同材料 {{ chainIdx + 1 }}/{{ chain.qs.length }}</span>
         <button v-if="chain && picked && chainIdx < chain.qs.length - 1" class="btn btn-pri" style="padding:1px 8px;font-size:11px" @click="chainNext()">➡️ 下一问(同材料)</button>
         <span class="dt-chip">组量：</span>
   <button v-for="n in [0, 1, 5, 10, 15, 20]" :key="n" class="btn" :class="groupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setGroup(n)">{{ n === 0 ? '🎲 随机' : n + '题' }}</button>
+  <button v-if="!runStarted" class="btn btn-pri" style="padding:1px 10px;font-size:11px" @click="startRun()">▶ 开始本组计时</button>
+  <button v-else class="btn btn-gh" style="padding:1px 10px;font-size:11px" @click="settleRun()">🏁 结算本轮成绩</button>
   <span class="dt-chip">来源：</span>
   <select :value="dtSrc.src" style="font-size:11px" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
   <span class="dt-chip">领域：</span>
@@ -577,9 +612,10 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
             </div>
 
             <div class="dt-opts" :class="{ wide: mode === 'formula' }">
-              <button v-for="o in q.options" :key="o.k" class="dt-opt" :class="{ picked: picked === o.k, right: picked && o.k === q.answer, wrong: picked && o.k === picked && o.k !== q.answer }" :disabled="!!picked" @click="pick(o.k)">
+              <button v-for="o in q.options" :key="o.k" class="dt-opt" :class="{ picked: picked === o.k, right: picked && o.k === q.answer, wrong: picked && o.k === picked && o.k !== q.answer }" :disabled="!!picked || !runStarted" @click="pick(o.k)">
                 <span class="dt-k">{{ o.k }}</span><span class="dt-t" v-html="md(o.t)"></span>
               </button>
+              <div v-if="!runStarted && !picked" class="dt-mat-note" style="color:var(--text3);margin-top:4px">请先选择组量并点击「▶ 开始本组计时」，作答后再逐题计时。</div>
             </div>
 
             <div v-if="picked" class="dt-explain">
@@ -620,6 +656,28 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
               <div style="font-weight:700;margin:10px 0 4px">🤖 AI 口径核对</div>
               <div class="dt-ai" v-html="md(srcCheckAi || '（暂无 AI 结果）')"></div>
             </template>
+          </div>
+        </div>
+      </div>
+      <div v-if="resultShow" class="ov show" style="z-index:462" @click.self="closeResult()">
+        <div class="pnl dt-pnl" style="max-height:82vh">
+          <div class="dt-head">
+            <span class="dt-title">🏁 本组成绩结算</span>
+            <button class="pc-close" @click="closeResult()">✕</button>
+          </div>
+          <div style="overflow:auto;padding:2px 2px 12px">
+            <div class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:12px;background:var(--bg2,transparent)">
+              <div style="font-weight:800;font-size:15px">共 {{ grpStats.total }} 题</div>
+              <div style="font-size:13px;color:var(--text2);margin-top:6px;line-height:2">
+                ✅ 答对 <b style="color:#34d399">{{ grpStats.ok }}</b> · ❌ 答错 <b style="color:#fb7185">{{ grpStats.bad }}</b> · 正确率 <b>{{ grpStats.rate }}%</b><br/>
+                本场计时 <b>{{ grpStats.secs }}s</b> · 平均每题 <b>{{ grpStats.avg }}s</b>
+              </div>
+              <div v-if="hist.length" style="font-size:12px;color:var(--text3);margin-top:6px">每道题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
+              <button class="btn btn-gh" @click="closeResult()">👀 先看本题解析</button>
+            </div>
           </div>
         </div>
       </div>
