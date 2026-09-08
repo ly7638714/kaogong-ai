@@ -175,8 +175,8 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
         <button class="pnl-top-b" @click="ready ? backHome() : emit('close')">← {{ ready ? '首页' : '返回' }}</button>
         <span class="yt-title">📖 言语理解 · 片段阅读结构四步拆解</span>
         <div class="yt-acts">
-          <span class="dt-chip" title="本场正确率">🎯 {{ totalScore.pct }}%</span>
-          <span class="dt-chip" title="计时状态">{{ runStarted ? '⏱ ' + elapsed + 's' : '⏱ 待开始' }}</span>
+          <span class="yt-chip" title="本场正确率">🎯 {{ totalScore.pct }}%</span>
+          <span class="yt-chip" title="计时状态">{{ runStarted ? '⏱ ' + elapsed + 's' : '⏱ 待开始' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
           <button class="pc-close" @click="emit('close')">✕</button>
         </div>
@@ -191,7 +191,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
           <div style="font-size:12px;color:var(--text3);margin-top:6px">文段覆盖社会治理、科技伦理、数字经济、文化保护、生态环保、教育健康、经济民生、城乡发展等真实高频领域。</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="dt-chip">领域：</span>
+          <span class="yt-chip">领域：</span>
           <button v-for="d in YAN_DOMAINS" :key="d" class="btn" :class="domain === d ? 'btn-pri' : 'btn-gh'" style="padding:2px 9px;font-size:12px" @click="domain = d">{{ d }}</button>
         </div>
         <div class="yt-card" style="font-size:13px;line-height:1.9;color:var(--text2)">
@@ -250,7 +250,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
                 <div class="yt-q" v-html="md(q.q)"></div>
                 <div class="yt-opts">
                   <button v-for="o in q.options" :key="o.k" class="yt-opt" :class="{ picked: picked === o.k, right: picked && o.k === q.answer, wrong: picked && o.k === picked && o.k !== q.answer }" :disabled="!!picked || !runStarted" @click="pick(o.k)">
-                    <span class="dt-k">{{ o.k }}</span><span>{{ o.t }}</span>
+                    <span class="yt-k">{{ o.k }}</span><span>{{ o.t }}</span>
                   </button>
                 </div>
                 <div v-if="!runStarted && !picked" class="yt-tip">请先点击「▶ 开始作答计时」再作答；切换能力层或下一篇会重新计时。</div>
@@ -331,5 +331,78 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
   .yt-side { flex: none; max-height: 35vh; }
   .yt-title { font-size: 13.5px; }
   .yt-opts { grid-template-columns: 1fr; }
+}
+/* ===== v3.8.259：网页/iPad/手机 自适应字号与等距边距 ===== */
+.yt-ov { -webkit-tap-highlight-color: transparent; }
+.yt-ov .yt-pnl { box-sizing: border-box; width: min(1180px, 97vw); max-width: min(1180px, 97vw); padding: 12px 16px 16px; }
+.yt-ov, .yt-ov * { box-sizing: border-box; }
+.yt-ov .yt-head, .yt-ov .yt-acts, .yt-ov .yt-guide, .yt-ov .yt-body { width: 100%; min-width: 0; }
+.yt-ov .yt-title, .yt-ov .yt-card, .yt-ov .yt-q, .yt-ov .yt-ex-b, .yt-ov .yt-help, .yt-ov .yt-ai,
+.yt-ov .yt-mat, .yt-ov .yt-sentence, .yt-ov .yt-opt, .yt-ov .yt-tip, .yt-ov .yt-st, .yt-ov .yt-domain,
+.yt-ov .yt-theme, .yt-ov .yt-kw, .yt-ov .yt-ann-row, .yt-ov .yt-guide-card, .yt-ov .yt-start {
+  overflow-wrap: break-word; word-break: break-word; min-width: 0;
+}
+.yt-ov .yt-chip {
+  display: inline-flex; align-items: center; gap: 3px; background: var(--glass-bg);
+  border: 1px solid var(--glass-border); border-radius: 20px; padding: 3px 10px;
+  font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.5;
+  white-space: nowrap; min-width: 0;
+}
+.yt-ov .yt-k {
+  flex: 0 0 22px; height: 22px; border-radius: 11px; background: var(--surface);
+  color: var(--accent); font-size: 12px; font-weight: 800; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.yt-ov .yt-acts { min-height: 0; }
+.yt-ov .yt-modes .btn { min-height: 36px; line-height: 1.4; white-space: normal; }
+.yt-ov .yt-opt { max-width: 100%; }
+.yt-ov .yt-side .yt-card { max-width: 100%; }
+.yt-ov .yt-train { max-width: 100%; padding-right: 0; }
+.yt-ov .yt-mat-title, .yt-ov .yt-qmode { overflow-wrap: anywhere; }
+
+@media (max-width: 1024px) {
+  .yt-ov .yt-pnl { padding: 10px 12px 14px; }
+  .yt-ov .yt-side { flex: 0 0 230px; }
+}
+@media (max-width: 760px) {
+  .yt-ov .yt-pnl { padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .yt-ov .yt-head { margin-bottom: 8px; row-gap: 8px; }
+  .yt-ov .yt-acts { flex: 1 1 100%; }
+  .yt-ov .yt-title { font-size: 15px; line-height: 1.35; flex: 1 1 60%; }
+  .yt-ov .yt-side { flex: none; max-height: none; gap: 8px; }
+  .yt-ov .yt-side .yt-card { width: 100%; padding: 10px; }
+  .yt-ov .yt-card-t { font-size: 12.5px; }
+  .yt-ov .yt-card, .yt-ov .yt-guide-card, .yt-ov .yt-qcard,
+  .yt-ov .yt-explain, .yt-ov .yt-mat, .yt-ov .yt-help, .yt-ov .yt-ai { border-radius: 10px; }
+  .yt-ov .yt-guide { padding: 0 0 10px; }
+  .yt-ov .yt-domain, .yt-ov .yt-theme, .yt-ov .yt-kw, .yt-ov .yt-tip,
+  .yt-ov .yt-st, .yt-ov .yt-mat-note, .yt-ov .yt-ann-row { font-size: 12px; }
+  .yt-ov .yt-py-l { font-size: 13px; }
+  .yt-ov .yt-sentence { font-size: 15px; line-height: 1.85; padding: 7px 2px; gap: 9px; }
+  .yt-ov .yt-sn { flex: 0 0 24px; height: 24px; font-size: 12px; }
+  .yt-ov .yt-role-tag { padding-left: 33px; font-size: 12px; }
+  .yt-ov .yt-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .yt-ov .yt-modes .btn { padding: 7px 8px; min-height: 42px; }
+  .yt-ov .yt-q { font-size: 15px; line-height: 1.85; }
+  .yt-ov .yt-qmode { font-size: 13px; }
+  .yt-ov .yt-opt { font-size: 14px; padding: 11px 10px; min-height: 48px; }
+  .yt-ov .yt-ex-b, .yt-ov .yt-help, .yt-ov .yt-ai { font-size: 13.5px; line-height: 1.9; }
+  .yt-ov .yt-mat-title { font-size: 15px; }
+}
+@media (max-width: 480px) {
+  .yt-ov .yt-pnl { padding-left: 10px; padding-right: 10px; }
+  .yt-ov .yt-title { font-size: 14px; }
+  .yt-ov .yt-chip { font-size: 11px; padding: 2px 7px; }
+  .yt-ov .yt-modes { grid-template-columns: 1fr; }
+  .yt-ov .yt-acts .btn { min-height: 40px; }
+  .yt-ov .yt-guide-card { padding: 10px 11px; }
+  .yt-ov .yt-guide-card div { font-size: 13px !important; line-height: 1.85 !important; }
+  .yt-ov .yt-sentence { font-size: 14px; }
+  .yt-ov .yt-q { font-size: 14.5px; }
+}
+@supports (padding-top: env(safe-area-inset-top)) {
+  @media (max-width: 760px) {
+    .yt-ov .yt-pnl { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+  }
 }
 </style>
