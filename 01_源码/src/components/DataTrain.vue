@@ -406,6 +406,8 @@ function startExamRun() {
   examStart.value = Date.now()
   examQStart.value = Date.now()
   showToast('⏱ 真题组已开始，请按四层顺序作答', 'info')
+  const c = activeCfg(false)
+  if (c && c.key) setTimeout(() => aiOrganizeExam(), 120)
 }
 function examAnswer(k) {
   if (!examRun.value) { showToast('请先点击「▶ 开始本组作答」', 'info'); return }
@@ -688,12 +690,12 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
     <div class="pnl dt-pnl">
       <div class="dt-head">
         <button class="pnl-top-b" style="margin-right: 4px" title="返回上一层（也可按 Esc / 浏览器返回）" @click="emit('close')">← 返回</button>
-        <span class="dt-title">📊 资料分析 · 四层能力训练</span>
+        <span class="dt-title">📊 资料分析 · 真题速算四层拆分训练</span>
         <div class="dt-acts">
           <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span><span v-if="bestChip" class="dt-chip" :title="'该模式·难度历史最佳'" style="color:#fbbf24">🏅 {{ bestChip.ok }}题 {{ bestChip.pct }}%</span>
           <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本轮用时/计时状态">{{ runStarted ? '⏱ 本场 ' + elapsed + 's' : '⏱ 待开始' }}</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
-          <button class="btn btn-pri" title="同一篇材料5问 × 判题/定位/公式/速算" @click="setView('exam')">📝 真题5问</button>
+          <button class="btn btn-pri" title="同一篇材料5问 × 判题/定位/公式/速算" @click="setView('exam')">📝 完整真题5问</button>
           <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
           <button class="pc-close" @click="emit('close')">✕</button>
         </div>
@@ -830,6 +832,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
   <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="padding:1px 8px;font-size:11px;text-decoration:none" title="打开官方/必应搜索，核对真实统计公报与单位">🌐 查官网</a>
   <button class="btn btn-gh" :disabled="srcCheckBusy" style="padding:1px 8px;font-size:11px" @click="checkSourceOnline()">{{ srcCheckBusy ? '⏳ 联网中…' : '📡 联网核实' }}</button>
   </div>
+  <div style="font-size:11px;color:var(--text3);border:1px dashed var(--glass-border);border-radius:8px;padding:4px 8px;margin:2px 0 6px">当前同一篇材料将贯穿 ①判题型 → ②找数据 → ③公式 → ④速算；切换四层只换题型，不换材料。</div>
   <div v-if="srcMode === 'real'" class="dt-mat-note" style="color:#fbbf24;border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:6px 10px;margin:2px 0 8px">📡 真实材料模式：请查看「联网核实」弹窗中的官方口径/真实资料卡；当前选择题仍为同领域模拟数据，因为联网返回的官方数字尚未开放稳定接口，不能用来自动判题。</div>
   
       <div v-if="groupDone && groupSize > 0" class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:10px 12px;margin:4px 0;background:var(--bg2,transparent)">
@@ -929,9 +932,9 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
     <div class="pnl dt-pnl">
       <div class="dt-head">
         <button class="pnl-top-b" style="margin-right:4px" title="返回上一层（Esc）" @click="emit('close')">← 返回</button>
-        <span class="dt-title">📊 资料分析 · 真题式四层训练</span>
+        <span class="dt-title">📊 资料分析 · AI 智能出题 · 完整真题卷</span>
         <div class="dt-acts">
-          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="保留：单层随机速练/理论课堂" @click="setView('classic')">🎛 经典速练</button>
+          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="四层拆分训练，同一篇材料共用" @click="setView('classic')">🗂 真题拆分训练</button>
           <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="emit('close')">✕</button>
         </div>
       </div>
