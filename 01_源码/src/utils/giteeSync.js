@@ -1,6 +1,6 @@
 // giteeSync.js —— Gitee 私人仓库自动互通（国内网页/iPad/安卓均可直连，不需要 GitHub）
 // Gitee API 允许浏览器跨域；同步文件仍放在用户自己的私人仓库，学习数据不公开。
-/* global btoa, atob */
+/* global btoa, atob, FormData */
 import { store, saveCfg } from '../store'
 import { collectAll } from './dataBackup'
 import { applyLocalMerge, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
@@ -43,7 +43,7 @@ function repoSlug(raw) {
 }
 
 function friendlyGiteeStatus(status, text) {
-  const msg = text || 'Gitee HTTP ' + status
+  const msg = text ? String(text).slice(0, 260) : 'Gitee HTTP ' + status
   if (status === 401) return 'Gitee 私人令牌无效或已过期，请到 Gitee「设置 → 安全设置 → 私人令牌」重新生成后填写'
   if (status === 403) return 'Gitee 请求被拒绝（可能令牌权限不足或触发频率限制）：请使用带 projects/repository 写权限的私人令牌后重试'
   if (status === 404) return 'Gitee 仓库/同步文件不存在：第一次同步会自动创建私人仓库 ' + DEFAULT_REPO + '；若仍 404 请检查填写的“用户名/仓库名”'
@@ -55,21 +55,42 @@ async function geFetch(path, options = {}) {
   const g = geCfg()
   const token = String(g.token || '').trim()
   if (!token) throw new Error('请先填写 Gitee 私人令牌')
+  const { query, form, ...opts } = options
   const params = { access_token: token }
-  const { query, ...opts } = options
   if (query) Object.assign(params, query)
-  const qs = Object.entries(params).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v))).join('&')
-  const headers = { 'Content-Type': 'application/json' }
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))
+    .join('&')
+  const init = Object.assign({}, opts, { headers: {} })
+  if (form) {
+    // Gitee API v5 的创建/更新接口要求表单字段，而不是 JSON body。
+    const fd = new FormData()
+    fd.set('access_token', token)
+    for (const [k, v] of Object.entries(form)) {
+      if (v === undefined || v === null) continue
+      fd.set(k, String(v))
+    }
+    init.body = fd
+  }
   let res
   try {
-    res = await fetch(GE_API + path + '?' + qs, Object.assign({}, opts, { headers }))
+    res = await fetch(GE_API + path + '?' + qs, init)
   } catch (e) {
     throw new Error('Gitee 网络连接失败，请检查网络后重试', { cause: e })
   }
+  let text = ''
+  try {
+    text = await res.text()
+  } catch (e) { /* 空响应/连接中断时不抛 JSON 解析错误 */ }
   let json = null
-  try { json = await res.json() } catch (e) { /* 部分错误响应无 JSON */ }
-  if (res.ok) return { json, status: res.status }
-  const raw = json && json.message ? String(json.message) : ''
+  const bodyText = String(text || '').trim()
+  if (bodyText) {
+    try { json = JSON.parse(bodyText) } catch (e) { /* 部分错误响应是 HTML/空页面 */ }
+  }
+  if (res.ok) return { json, status: res.status, text: bodyText }
+  const apiMsg = json && json.message ? String(json.message) : ''
+  const raw = apiMsg || (bodyText && !/^\s*</.test(bodyText) ? bodyText : '')
   const err = new Error(friendlyGiteeStatus(res.status, raw))
   err.status = res.status
   err.is404 = res.status === 404
@@ -100,12 +121,12 @@ async function ensurePrivateRepo() {
     try {
       const made = await geFetch('/user/repos', {
         method: 'POST',
-        body: JSON.stringify({
+        form: {
           name,
           description: '行测AI学习数据自动互通（私人）',
           private: true,
           auto_init: true
-        })
+        }
       })
       repo = made.json || {}
       created = true
@@ -121,38 +142,74 @@ async function ensurePrivateRepo() {
 }
 
 async function readRemote(repo, branch) {
+  let meta = null
   try {
     const r = await geFetch('/repos/' + repo + '/contents/' + SYNC_FILE, {
       query: { ref: branch }
     })
-    const obj = r.json || {}
-    const parsed = JSON.parse(b64DecodeUtf8(obj.content))
-    return { obj: parsed, sha: obj.sha }
+    meta = r.json || {}
   } catch (e) {
     if (e.is404) return null
     throw e
   }
+  if (!meta || !meta.sha) {
+    throw new Error('Gitee 云端同步文件元信息读取失败，请稍后再试')
+  }
+  let rawText = ''
+  if (meta.content) {
+    try {
+      rawText = b64DecodeUtf8(meta.content)
+    } catch (e) {
+      return { obj: null, sha: meta.sha, unreadable: true }
+    }
+  } else {
+    // Gitee contents API 对较大文件不返回 content，改走 raw 下载接口读取全文。
+    try {
+      const raw = await geFetch('/repos/' + repo + '/raw/' + SYNC_FILE, {
+        query: { ref: branch }
+      })
+      rawText = raw.text || ''
+    } catch (e) {
+      return { obj: null, sha: meta.sha, unreadable: true }
+    }
+  }
+  if (!String(rawText || '').trim()) {
+    return { obj: null, sha: meta.sha, unreadable: true }
+  }
+  let parsed = null
+  try {
+    parsed = JSON.parse(rawText)
+  } catch (e) {
+    return { obj: null, sha: meta.sha, unreadable: true }
+  }
+  return { obj: parsed, sha: meta.sha }
 }
 
 async function writeRemote(repo, branch, content, sha) {
-  const payload = {
+  const baseForm = {
     content: b64EncodeUtf8(content),
     message: '行测AI自动互通 ' + new Date().toLocaleString(),
     branch
   }
-  if (sha) payload.sha = sha
+  const path = '/repos/' + repo + '/contents/' + SYNC_FILE
+  const send = (method, extra = {}) => geFetch(path, {
+    method,
+    form: Object.assign({}, baseForm, extra)
+  })
+  if (!sha) return send('POST')
   try {
-    await geFetch('/repos/' + repo + '/contents/' + SYNC_FILE, {
-      method: sha ? 'PUT' : 'POST',
-      body: JSON.stringify(payload)
-    })
+    return await send('PUT', { sha })
   } catch (e) {
-    // 个别 Gitee 版本只开放 POST 新建/更新；带 sha 更新遇到 404/405/422 时自动改用 POST 重试。
-    if (!sha || (e.status !== 404 && e.status !== 405 && e.status !== 422)) throw e
-    await geFetch('/repos/' + repo + '/contents/' + SYNC_FILE, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+    if (e.status !== 404 && e.status !== 409 && e.status !== 422) throw e
+    // 内容版本冲突时取最新 sha 重试一次，避免用户明明成功却看到失败提示。
+    try {
+      const fresh = await geFetch('/repos/' + repo + '/contents/' + SYNC_FILE, {
+        query: { ref: branch }
+      })
+      const freshSha = fresh.json && fresh.json.sha
+      if (freshSha && freshSha !== sha) return await send('PUT', { sha: freshSha })
+    } catch { /* 重试失败时交给下方统一提示 */ }
+    throw new Error('Gitee 同步文件更新冲突，请再次点击「立即同步」重试；若仍失败，请到 Gitee 删除仓库里的 ' + SYNC_FILE + ' 后重新开启自动互通', { cause: e })
   }
 }
 
@@ -161,12 +218,13 @@ export async function runGiteeSync() {
   if (!g.token || !String(g.token).trim()) throw new Error('请先填写 Gitee 私人令牌')
   const repoInfo = await ensurePrivateRepo()
   const remoteFile = await readRemote(repoInfo.full, repoInfo.branch)
-  const remoteRaw = remoteFile ? remoteFile.obj : null
+  const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
-  if (!plan.sameAsRemote) {
+  // 云端文件无法解析时仍用最新 sha 覆盖重建，不让用户手动去仓库删文件。
+  if (!plan.sameAsRemote || (remoteFile && remoteFile.unreadable)) {
     await writeRemote(repoInfo.full, repoInfo.branch, JSON.stringify(body), remoteFile ? remoteFile.sha : '')
     putTs = body.t
   }
