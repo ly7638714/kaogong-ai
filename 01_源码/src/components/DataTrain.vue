@@ -43,6 +43,8 @@ const examFinished = ref(false)
 const examStart = ref(0)
 const examQStart = ref(0)
 const examElapsed = ref(0)
+const examAiBusy = ref(false)
+const examAiText = ref('')
 const examLayerStats = ref({
   type: { ok: 0, bad: 0 },
   locate: { ok: 0, bad: 0 },
@@ -375,6 +377,8 @@ function initExam() {
   examStart.value = 0
   examQStart.value = 0
   examElapsed.value = 0
+  examAiText.value = ''
+  examAiBusy.value = false
   examHist.value = []
   examLayerStats.value = {
     type: { ok: 0, bad: 0 },
@@ -432,6 +436,29 @@ function examNext() {
     if (!cur || total >= (cur.total || 0)) all[domK] = { total, ok, pct, ts: Date.now() }
     localStorage.setItem('xc_dt_exam_best', JSON.stringify(all))
   } catch (e) {}
+}
+async function aiOrganizeExam() {
+  if (examAiBusy.value) return
+  const c = activeCfg(false)
+  if (!c || !c.key) {
+    examAiText.value = '尚未配置文字大模型 Key：可先用当前“数据可验算材料”训练，或在「设置 → 模型」配置 Key 后让 AI 重写更自然的公报式正文。'
+    return
+  }
+  if (!exam.value) return
+  examAiBusy.value = true
+  examAiText.value = ''
+  try {
+    const brief = String(exam.value.materialMd || '').slice(0, 2600)
+    const reply = await chatOnce(c, [
+      { role: 'system', content: '你是统计公报写作助手。只能改写材料口径与语言风格，不能新增或改动任何数字、年份、单位；输出不超过4段，不用寒暄。' },
+      { role: 'user', content: '请把下面这份训练材料改写成更像国家统计局公报正文的 Markdown 文本，保留全部数字、年份、单位与材料结构：\n\n' + brief }
+    ], 1400)
+    examAiText.value = String(reply || '').trim() || 'AI 未返回内容，请重试。'
+  } catch (e) {
+    examAiText.value = 'AI 整理失败：' + ((e && e.message) || e) + '；当前本地材料仍可继续作答。'
+  } finally {
+    examAiBusy.value = false
+  }
 }
 
 function gen() {
@@ -898,10 +925,18 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
         </div>
 
         <div class="dt-train">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-gh" style="padding:2px 8px;font-size:11px" :disabled="examAiBusy" @click="aiOrganizeExam()">{{ examAiBusy ? '🤖 AI 整理中…' : '🤖 AI 整理公报正文' }}</button>
+            <span class="dt-mat-note" style="color:var(--text3)">AI 只改写表达，不改变本地表格数值，保证 5 问仍可自动判题。</span>
+          </div>
           <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
             <div v-if="exam.materialMd" class="dt-mat" v-html="md(exam.materialMd)"></div>
             <div v-if="exam.materialSvg" class="dt-mat dt-mat-svg" v-html="exam.materialSvg"></div>
             <div class="dt-mat-note">📊 训练领域设定：{{ srcLabel }} · 同一篇材料供 5 问连续作答，切换题目不会更换数据。</div>
+          </div>
+          <div v-if="examAiText" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
+            <div class="dt-mat-note">🤖 AI 整理正文（仅阅读；表格与题目仍以本地可判数据为准）</div>
+            <div class="dt-mat" v-html="md(examAiText)"></div>
           </div>
 
           <div v-if="examCurrent && examLayerItem" class="dt-card">
