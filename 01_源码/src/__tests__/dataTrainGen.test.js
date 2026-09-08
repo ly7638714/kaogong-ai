@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { genDataQ, DATA_MODES, CALC_METHOD_LIB } from '../utils/dataTrainGen'
+import { domainOf } from '../data/dataDomains'
 
 describe('genDataQ 资料分析四层训练生成器', () => {
   it('四种模式都能生成结构完整、唯一正确的题目', () => {
@@ -36,10 +37,30 @@ describe('genDataQ 资料分析四层训练生成器', () => {
       seen.add(q.extra.name)
       // 解析里必须指出该题型
       expect(q.explain).toContain(q.extra.name)
-      // 题干提问关键词应能匹配该题型的 ask 词（通过 extra 间接保证）
-      expect(q.options.map((o) => o.t)).toContain(q.extra.name)
+      if (q.extra.name === '综合分析') {
+        expect(q.materialMd).toContain('【材料】')
+        expect(q.materialMd).toContain('| 年份 |')
+        expect(q.q).toContain('能够推出')
+      } else {
+        expect(q.options.map((o) => o.t)).toContain(q.extra.name)
+      }
     }
     expect(seen.size).toBeGreaterThanOrEqual(14)
+  })
+
+  it('综合分析题不再用省略号占位，给出完整文字+表格材料与可推出的语句选项', () => {
+    let hit = null
+    for (let i = 0; i < 500 && !hit; i++) {
+      const q = genDataQ('type', 120000 + i, 2)
+      if (q.extra.name === '综合分析') hit = q
+    }
+    expect(hit).toBeTruthy()
+    expect(hit.materialMd).not.toContain('……')
+    expect(hit.materialMd).toContain('2021—2024年')
+    expect(hit.materialMd).toContain('同比增长')
+    expect(hit.options).toHaveLength(4)
+    expect(hit.options.some((o) => String(o.t).includes('同比增速'))).toBe(true)
+    expect(hit.explain).toContain('综合分析')
   })
 
   it('找数据定位覆盖 文字/表格/图表 三种材料', () => {
@@ -59,6 +80,22 @@ describe('genDataQ 资料分析四层训练生成器', () => {
     expect(types.has('text')).toBe(true)
     expect(types.has('table')).toBe(true)
     expect(types.has('chart')).toBe(true)
+  })
+
+  it('选领域时出现两两/三者混合材料（文字+表/图）', () => {
+    const seen = new Set()
+    for (let i = 0; i < 160; i++) {
+      const q = genDataQ('locate', 66000 + i, 2, undefined, domainOf('汽车'))
+      seen.add(q.materialType)
+      expect(q.materialMd).toContain('汽车')
+      if (q.materialType === 'mixed') {
+        expect(q.materialMd).toMatch(/文字材料|统计表/)
+        const hasText = q.materialMd.includes('文字材料')
+        const hasTable = q.materialMd.includes('统计表')
+        expect(hasText || hasTable).toBe(true)
+      }
+    }
+    expect(seen.has('mixed')).toBe(true)
   })
 
   it('公式应激覆盖多种公式族，选项含 LaTeX 且互不相同', () => {

@@ -241,10 +241,61 @@ const TYPE_DIST = {
   comp: ['增长率', '基期量', '增长量']
 }
 
+function compCtx(seed, dom) {
+  const area = (dom && dom.n) || '某省'
+  const inds = (dom && Array.isArray(dom.inds) && dom.inds.length ? dom.inds.slice() : ['水果产量', '园林水果产量', '水果出口量'])
+  const main = inds[0], sub = inds[1] || '相关指标'
+  const unit = (dom && dom.unit) || '万吨'
+  const years = [2021, 2022, 2023, 2024]
+  const mainVals = years.map((y, i) => rndVal(seed, i * 13 + 2, 3000, 90000))
+  const mainRates = years.map((y, i) => rndRate(seed, i * 17 + 3, 1, 15))
+  const ratio = 0.2 + hashIdx(seed + 9, 40) / 100
+  const subVals = mainVals.map((v) => Math.round((v * ratio) / 10) * 10)
+  const subRates = years.map((y, i) => {
+    let r = rndRate(seed, i * 23 + 5, 1, 15)
+    if (r === mainRates[i]) r = r < 14 ? r + 1 : r - 1
+    return r
+  })
+  const title = '【材料】' + area + '「' + main + '」及相关指标运行情况（2021—2024年）'
+  const txt = '2024年，' + area + main + '为' + fmt(mainVals[3]) + unit + '，同比增长' + mainRates[3] + '%；其中，' + sub + '为' + fmt(subVals[3]) + unit + '，同比增长' + subRates[3] + '%。总体保持平稳增长，主要指标口径按年度统计公报整理。'
+  const head = '| 年份 | ' + main + '（' + unit + '） | ' + main + '同比增速 | ' + sub + '（' + unit + '） | ' + sub + '同比增速 |'
+  const sep = '| --- | --- | --- | --- | --- |'
+  const rows = years.map((y, i) => '| ' + y + ' | ' + fmt(mainVals[i]) + ' | ' + mainRates[i] + '% | ' + fmt(subVals[i]) + ' | ' + subRates[i] + '% |').join('\n')
+  const note = '注：材料为训练模拟数据，非官方实际公布值；用于练习统计阅读与综合分析，真实官方数值请以官网为准。'
+  const materialMd = title + '\n\n' + txt + '\n\n' + head + '\n' + sep + '\n' + rows + '\n\n' + note
+  return { area, main, sub, unit, years, mainVals, mainRates, subVals, subRates, materialMd }
+}
+
+function buildComp(seed, dom) {
+  const c = compCtx(seed, dom)
+  const mr = c.mainRates[3], sr = c.subRates[3]
+  const compare = mr > sr ? '高于' : '低于'
+  const trueOpt = '2024年「' + c.main + '」的同比增速（' + mr + '%）' + compare + '「' + c.sub + '」（' + sr + '%）'
+  const falseOpts = [
+    '2024年「' + c.main + '」的同比增速' + (compare === '高于' ? '低于' : '高于') + '「' + c.sub + '」',
+    '2024年「' + c.main + '」数值较上年同期下降',
+    '2021年以来「' + c.main + '」与「' + c.sub + '」均逐年下降'
+  ]
+  const opts = buildOpts([trueOpt], falseOpts, seed)
+  const explain = '【综合判断】从材料最后一列可直接比较：' + c.main + '同比增速 ' + mr + '%，' + c.sub + '同比增速 ' + sr + '%，增速大小关系为「' + compare + '」，对应正确选项可推出。\n\n逐项排除：反方向比较与增速结论矛盾；两指标 2024 年增速均为正，均非下降；2021—2024 年各年增速均为正，不存在“逐年下降”。\n\n口诀：综合分析先看绝对数字与增速方向，再比较大小，最后回表验证。'
+  return {
+    mode: 'type',
+    materialType: 'mixed',
+    materialMd: c.materialMd,
+    q: '【问】根据上述材料，能够推出的是（　）',
+    options: opts.options,
+    answer: opts.answer,
+    explain,
+    tip: '口诀：综合分析先排“下降/方向反”等绝对错项，再比较指标大小，答案必须能在表中直接验证。',
+    extra: { name: '综合分析', formula: '逐项验证：先看趋势方向 → 比较增速 → 回表核对' }
+  }
+}
+
 function buildType(seed) {
   const keys = Object.keys(TYPE_BANK)
   const k = keys[hashIdx(seed, keys.length)]
   const t = TYPE_BANK[k]
+  if (t.name === '综合分析') return buildComp(seed)
   const stem = t.mk(seed)
   const opts = buildOpts([t.name], TYPE_DIST[k], seed)
   const explain = '【题型判定】提问关键词「' + t.ask.join(' / ') + '」→ 该题考 **' + t.name + '**。\n\n公式：' + t.formula + '\n\n口诀：' + t.tip
@@ -925,9 +976,11 @@ function buildCalc(seed, level, stage) {
 export function genDataQ(mode, seed, level = 2, stage, domain) {
   if (seed === undefined) seed = Date.now() % 100000
   const domCfg = domain && typeof domain === 'object' ? domain : null
+  // 同一种子下四种能力训练使用不同材料种子，避免“判题型/找数据/公式/速算”看到的材料完全相同。
+  const modeSeedShift = mode === 'type' ? 101 : mode === 'locate' ? 223 : mode === 'formula' ? 331 : 457
   for (let attempt = 0; attempt < 8; attempt++) {
-    const s = seed + attempt * 137
-    const q = mode === 'type' ? buildType(s)
+    const s = seed + modeSeedShift + attempt * 137
+    const q = mode === 'type' ? buildType(s, domCfg)
       : mode === 'locate' ? (domCfg ? buildLocateForDomain(s, domCfg) : buildLocate(s))
       : mode === 'formula' ? buildFormula(s)
       : buildCalc(s, level, stage)
@@ -943,9 +996,31 @@ function buildLocateForDomain(seed, dom) {
   const inds = Array.isArray(dom && dom.inds) && dom.inds.length ? dom.inds.slice() : ['粮食产量', '肉类产量', '水产品产量']
   const unit = (dom && dom.unit) || '万吨'
   const area = (dom && dom.n) || '该领域'
-  const text = iRand(seed, 0, 1) === 0
-  if (text) return buildLocateTextDomain(seed, inds, unit, area)
-  return buildLocateTableDomain(seed, inds, unit, area)
+  const kind = 3 + hashIdx(seed + 29, 4)
+  if (kind <= 1) return buildLocateTextDomain(seed, inds, unit, area)
+  if (kind <= 2) return buildLocateTableDomain(seed, inds, unit, area)
+  return buildLocateMixedDomain(seed, inds, unit, area, kind)
+}
+function buildLocateMixedDomain(seed, inds, unit, area, kind) {
+  const textQ = buildLocateTextDomain(seed + 101, inds, unit, area)
+  const tableQ = buildLocateTableDomain(seed + 202, inds, unit, area)
+  const years = [2021, 2022, 2023, 2024]
+  const vals = years.map((y, i) => rndVal(seed + 303, i * 7 + 2, 3000, 90000))
+  const rates = years.map((y, i) => rndRate(seed + 303, i * 11 + 3, 0.5, 16))
+  const chartS = chartSvg(years.map((y) => y + '年'), vals, rates)
+  const parts = []
+  if (kind === 3 || kind === 4 || kind === 6) parts.push('**第一部分 · 文字材料**\n\n' + textQ.materialMd)
+  if (kind === 3 || kind === 5 || kind === 6) parts.push('**第二部分 · 统计表**\n\n' + tableQ.materialMd)
+  if (kind >= 4) parts.push('**第三部分 · 组合图表**（下表为该领域主要指标趋势）')
+  const materialMd = '【材料】' + area + '领域 · 混合材料（真题排版练习）\n\n' + parts.join('\n\n')
+  const base = kind === 3 || kind === 5 ? tableQ : textQ
+  return {
+    ...base,
+    materialType: 'mixed',
+    materialMd,
+    materialSvg: chartS,
+    explain: base.explain + '\n\n口诀：混合材料先分清“文字段/表格/图表”各自定位，题干问哪个口径就回哪个区。'
+  }
 }
 function buildLocateTextDomain(seed, inds, unit, area) {
   const themes = ['总体运行情况', '分项结构情况', '同比对比情况']
