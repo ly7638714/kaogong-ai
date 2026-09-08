@@ -1,12 +1,12 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { genDataQ, CALC_METHOD_LIB, createSharedPaper } from '../utils/dataTrainGen'
-import { buildDataTrainExam, EXAM_LAYER_KEYS, applyPaperOptions } from '../utils/dataTrainExam'
+import { buildDataTrainExam, EXAM_LAYER_KEYS, applyPaperOptions, questionSemanticNeed } from '../utils/dataTrainExam'
 import { genLocateChain } from '../utils/dataTrainChain' // v3.8.203 同材料连问
 import { DOMAINS, domainOf } from '../data/dataDomains' // v3.8.213 领域字典 60+
 import { KNOWLEDGE_CARDS, KB_LAYERS, searchCards, cardForQuiz } from '../utils/dataTrainLib'
 import { renderMd } from '../utils/renderMd'
-import { REAL_REF, findLockWords, smartLockHighlights } from '../utils/dataTrainTips' // v3.8.200 小技巧层
+import { REAL_REF, findLockWords, semanticLockHighlights } from '../utils/dataTrainTips' // v3.8.200 小技巧层
 import { showToast } from '../utils/toast'
 import { store, addWrong } from '../store'
 import { chatOnce, activeCfg } from '../api'
@@ -362,38 +362,38 @@ function chainNext() {
   else { showToast('🎉 本材料连问完成，共 ' + chain.value.qs.length + ' 问', 'success'); chain.value = null }
 }
 const lockWords = ref({ time: [], ind: [], unit: [] })
+function fallbackQuestionNeed(qq, pp) {
+  const need = { words: [], nums: [] }
+  if (!qq || !pp) return need
+  const answerOpt = (qq.options || []).find((o) => o.k === qq.answer)
+  const raw = [String(qq.q || ''), answerOpt ? String(answerOpt.t || '') : '']
+  const joined = raw.join(' ')
+  ;(String(joined).match(/\d[\d,]*(?:\.\d+)?\s?(?:%|万吨|亿吨|亿元|万人|万辆|万平方米|万公顷|万台|亿件|元)?/g) || []).forEach((n) => {
+    if (/\d{3,}/.test(n) || /%/.test(n)) need.nums.push(n)
+  })
+  ;(pp.inds || []).forEach((x) => { if (joined.includes(x)) need.words.push(x) })
+  ;(pp.periodLabels || []).forEach((x) => { if (joined.includes(x)) need.words.push(x) })
+  if (pp.unit && joined.includes(String(pp.unit))) need.words.push(String(pp.unit))
+  if (qq.extra && qq.extra.name && /(增长|比重|平均|倍数|基期|间隔|综合)/.test(qq.extra.name)) need.words.push(qq.extra.name)
+  return need
+}
 function materialHighlights(mdText) {
   if (!lockShow.value || !mdText) return mdText
-  const need = { nums: [], words: [] }
+  let need = null
   if (view.value === 'exam') {
     const ec = examCurrent.value
-    const el = examLayerItem.value
-    if (ec && el) {
-      const ansOpt = el.options.find((o) => o.k === el.answer)
-      ;[ec.stem, el.q, ansOpt && ansOpt.t, el.explain, el.tip].forEach((s) => {
-        if (!s) return
-        need.nums.push(String(s))
-        need.words.push(String(s).replace(/<[^>]+>/g, ' '))
-      })
-      if (ec.typeLabel) need.words.push(ec.typeLabel)
+    if (ec && paper.value && (ec.kind || ec.typeLabel)) {
+      const kindMap = { 增长率: 'rate', 增长量: 'delta', 现期比重: 'share', 基期量: 'base', 间隔增长率: 'interval', 两期比重差: 'shareDiff', 年均增长率: 'annual', 综合分析: 'comp' }
+      const kind = ec.kind || kindMap[ec.typeLabel]
+      need = kind ? questionSemanticNeed(paper.value, kind) : null
     }
   } else if (q.value) {
     const qq = q.value
-    const ansOpt = (qq.options || []).find((o) => o.k === qq.answer)
-    ;[qq.q, qq.explain, ansOpt && ansOpt.t].forEach((s) => {
-      if (!s) return
-      need.nums.push(String(s))
-      need.words.push(String(s).replace(/<[^>]+>/g, ' '))
-    })
-    if (qq.extra && qq.extra.name) need.words.push(qq.extra.name)
+    const kindMap = { 增长率: 'rate', 增长量: 'delta', 现期比重: 'share', 基期量: 'base', 间隔增长率: 'interval', 两期比重差: 'shareDiff', 年均增长率: 'annual', 综合分析: 'comp' }
+    const kind = kindMap[qq.extra && qq.extra.name]
+    need = kind && paper.value ? questionSemanticNeed(paper.value, kind) : fallbackQuestionNeed(qq, paper.value)
   }
-  if (paper.value) {
-    const combined = need.nums.concat(need.words).join(' ')
-    ;(paper.value.inds || []).forEach((x) => { if (combined.includes(x)) need.words.push(x) })
-    ;(paper.value.periodLabels || []).forEach((x) => { if (combined.includes(x)) need.words.push(x) })
-    if (combined.includes(String(paper.value.unit || ''))) need.words.push(String(paper.value.unit))
-  }
-  return smartLockHighlights(mdText, need)
+  return semanticLockHighlights(mdText, need || { words: [], nums: [] })
 }
 const grpStats = computed(() => {
   const total = stats.value.total
@@ -1341,7 +1341,7 @@ onUnmounted(() => {
                 <span class="dt-qidx">第 {{ idx }} 题</span>
               </div>
             <div v-if="q.materialMd || q.materialSvg" class="dt-mat-scroll"><div v-if="q.materialMd" class="dt-mat" v-html="md(materialHighlights(q.materialMd))"></div><div v-if="q.materialSvg" class="dt-mat dt-mat-svg" v-html="q.materialSvg"></div></div>
-            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">{{ q._srcLabel ? '📊 训练领域设定：' + q._srcLabel + ' · ' : '' }}🧪 材料数值为本地模拟，仅练定位/速算；真实官方数值需以「🌐 查官网 / 📡 联网核实」结果为准。</div>
+            <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note">{{ q._srcLabel ? '📊 训练领域设定：' + q._srcLabel + ' · ' : '' }}🧪 材料数值为本地模拟，仅练定位/速算；真实官方数值需以「🌐 查官网 / 📡 联网核实」结果为准。<span v-if="q._qcPass" style="color:#34d399"> ✅ 题干/解析源数据质检通过</span></div>
 <div v-if="q.materialMd || q.materialSvg" class="dt-mat-note" style="color:var(--text3)">⇄ 手机上左右滑动可查看完整图/表材料</div>
       <div v-if="realRef" class="dt-mat-note" style="border-color:rgba(52,211,153,.45);color:var(--text2)">{{ realRef }}</div>
               <div class="dt-q" v-html="md(q.q)"></div>
@@ -1503,7 +1503,7 @@ onUnmounted(() => {
             <div v-if="examAiText" class="dt-mat" v-html="md(materialHighlights(examAiText))"></div>
             <div v-else-if="examPaper && examPaper.materialMd" class="dt-mat" v-html="md(materialHighlights(examPaper.materialMd))"></div>
             <div v-if="examPaper && examPaper.materialSvg" class="dt-mat dt-mat-svg" v-html="examPaper.materialSvg"></div>
-            <div class="dt-mat-note">📊 组卷来源：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇（{{ examPaper && examPaper.domName }}），同一篇供 5 问连续作答；10/15/20 题会自动混编多领域材料。</div>
+            <div class="dt-mat-note">📊 组卷来源：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇（{{ examPaper && examPaper.domName }}），同一篇供 5 问连续作答；10/15/20 题会自动混编多领域材料。<span v-if="exam && exam.qc && exam.qc.ok" style="color:#34d399"> ✅ 材料/题干/选项/解析本地质检通过</span></div>
           </div>
 
           <div v-if="examCurrent && examLayerItem" class="dt-card">

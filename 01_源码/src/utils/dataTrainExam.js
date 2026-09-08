@@ -246,23 +246,20 @@ function renderRichMaterial(seed, paper) {
   const sepB = '| --- | ' + paper.years.map(() => '---').join(' | ') + ' |'
   const rowsB = paper.inds.map((ind, ci) => '| ' + ind + '（' + U + '） | ' + paper.years.map((y, ri) => fmtNum(paper.vals[ci][ri])).join(' | ') + ' |').join('\n')
   const tableB = headB + '\n' + sepB + '\n' + rowsB
-  const headC = '| 指标 | 单位 | 2023年 | 2024年 | 2024同比增速 |'
-  const sepC = '| --- | --- | --- | --- | --- |'
-  const rowsC = paper.inds.map((ind, ci) => '| ' + ind + ' | ' + U + ' | ' + fmtNum(paper.vals[ci][last - 1]) + ' | ' + fmtNum(paper.vals[ci][last]) + ' | ' + paper.rates[ci][last] + '% |').join('\n')
-  const tableC = headC + '\n' + sepC + '\n' + rowsC
   const tableNote = '注：①表中数值均为全年累计口径；②增速按可比口径复算；③本材料为训练模拟数据，非官方实际公布值。'
-  const tablePick = hashIdx(seed + 5, 3)
+  // v3.8.257：默认材料也保留完整五年数值表，避免“部分考题需要首末/上年值但材料截断”
+  const tablePick = hashIdx(seed + 5, 2)
   const rateNote = pickV(seed + 6, [
     '口径补充：' + main + '2023年同比增速为' + R3 + '%，2024年为' + R4 + '%。',
     '分年看，2023年' + main + '同比增长' + R3 + '%，2024年同比增长' + R4 + '%。',
     '其中2023年、2024年' + main + '同比增速分别为' + R3 + '%、' + R4 + '%。'
   ])
-  const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n' + tableNote + '\n\n' + rateNote
+  const tableMd = (tablePick === 0 ? tableA : tableB) + '\n\n' + tableNote + '\n\n' + rateNote
   const chartPick = hashIdx(seed + 9, 4)
   const labels = paper.years.map((y) => y + '年')
   const svg = chartPick === 0 ? chartBarSvg(labels, paper.vals[0]) : chartPick === 1 ? chartLineSvg(labels, paper.vals[0]) : chartPick === 2 ? chartComboSvg(labels, paper.vals[0], paper.rates[0]) : chartPieSvg(paper.inds, paper.vals.map((row) => row[last]))
   const chartTitle = chartPick === 0 ? '三、年度规模图（柱形）' : chartPick === 1 ? '三、年度规模图（折线）' : chartPick === 2 ? '三、年度规模与增速图（柱线组合）' : '三、2024年分项结构图（饼形）'
-  const tableTitle = tablePick === 0 ? '二、主要指标表' : tablePick === 1 ? '二、分项统计表（指标横向展开）' : '二、主要指标比较表'
+  const tableTitle = tablePick === 0 ? '二、主要指标表' : '二、分项统计表（指标横向展开）'
   return {
     materialMd: titleTpl + '\n\n' + textMd + '\n\n' + tableTitle + '\n\n' + tableMd + '\n\n' + chartTitle + '（' + main + '）',
     materialSvg: svg,
@@ -295,9 +292,19 @@ export function renderTrainMaterial(seed, paper, opts = {}) {
   const S1 = fmtNum(paper.vals[1][last])
   const S2 = fmtNum(paper.vals[2][last])
   const S3 = fmtNum(paper.vals[3][last])
+  const S1P = fmtNum(paper.vals[1][last - 1])
+  const S2P = fmtNum(paper.vals[2][last - 1])
+  const S3P = fmtNum(paper.vals[3][last - 1])
   const SR1 = paper.rates[1][last]
   const SR2 = paper.rates[2][last]
   const SR3 = paper.rates[3][last]
+  const R3P = R3
+  const R1P = paper.rates[1] ? paper.rates[1][last - 1] : R3
+  const R2P = paper.rates[2] ? paper.rates[2][last - 1] : R3
+  const R3P2 = paper.rates[3] ? paper.rates[3][last - 1] : R3
+  const SR1P = R1P
+  const SR2P = R2P
+  const SR3P = R3P2
   const grow = Math.round(((paper.vals[0][last] - paper.vals[0][0]) / paper.vals[0][0]) * 1000) / 10
   const delta = fmtNum(Math.round(paper.vals[0][last] - paper.vals[0][last - 1]))
   let form = opts.form || paper.form || 'auto'
@@ -308,23 +315,24 @@ export function renderTrainMaterial(seed, paper, opts = {}) {
   const hasTable = ['table', 'textTable', 'tableChart', 'all'].includes(form)
   const hasChart = ['textChart', 'tableChart', 'all'].includes(form)
   const labels = (paper._displayYears && paper._displayYears.map((y) => y + '年')) || (paper.years || []).map((y) => y + '年')
-  const tablePick = hashIdx(seed + 5, 3)
+  const tablePick = hashIdx(seed + 5, 2)
   const mainText = [
     '**一、总体情况。**' + cur + '，' + area + main + '为' + V4 + U + '，' + wd + '增长' + R4 + '%，口径为' + win + '；分项中，' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '。',
     '**一、运行综述。**统计资料显示，' + cur + '，' + area + main + '实现' + V4 + U + '，' + wd + '增长' + R4 + '%；其中' + sub + '完成' + S1 + U + '、' + sub2 + '完成' + S2 + U + '、' + sub3 + '完成' + S3 + U + '。',
     '**一、总量与结构。**' + main + '是反映' + area + '经济运行的重要指标，' + cur + '为' + V4 + U + '，' + wd + '增长' + R4 + '%；同期' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '。'
   ][hashIdx(seed + 1, 3)]
   const structText = [
-    '**二、结构与对比。**分项看，' + sub + '增速' + SR1 + '%，' + sub2 + '增速' + SR2 + '%，' + sub3 + '增速' + SR3 + '%；' + main + '绝对量较' + prev + '净增' + delta + U + '，主指标与分项增长方向一致。',
-    '**二、分项表现。**' + sub + wd + '增长' + SR1 + '%，' + sub2 + wd + '增长' + SR2 + '%，' + sub3 + wd + '增长' + SR3 + '%；' + main + '在' + prev + V3 + U + '的基础上继续走高，' + cur + '达到' + V4 + U + '。',
-    '**二、增速差异。**' + main + '的' + wd + '增速为' + R4 + '%，上一期为' + R3 + '%；' + sub + '、' + sub2 + '、' + sub3 + '增速分别为' + SR1 + '%、' + SR2 + '%、' + SR3 + '%。'
+    '**二、结构与对比。**' + prev + '，' + main + '为' + V3 + U + '；' + cur + '，' + main + '为' + V4 + U + '，净增' + delta + U + '。分项看，' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '，主指标与分项增长方向一致。',
+    '**二、分项表现。**' + prev + '，' + sub + '为' + S1P + U + '、' + sub2 + '为' + S2P + U + '、' + sub3 + '为' + S3P + U + '；' + cur + '，' + main + '为' + V4 + U + '，' + sub + '为' + S1 + U + '，' + sub2 + '为' + S2 + U + '，' + sub3 + '为' + S3 + U + '。',
+    '**二、增速与上期。**' + main + '的' + wd + '增速为' + R4 + '%，上一期为' + R3 + '%；' + prev + main + '为' + V3 + U + '，' + cur + '为' + V4 + U + '；' + sub + '、' + sub2 + '、' + sub3 + '增速分别为' + SR1 + '%、' + SR2 + '%、' + SR3 + '%。'
   ][hashIdx(seed + 2, 3)]
   const trendText = [
     '**三、趋势与口径。**从' + pRange(paper) + '看，' + main + '整体呈上行，' + cur + '较' + first + '增长约' + grow + '%；本材料数据均为' + win + '口径，为训练模拟数值，非官方实际公布值。',
     '**三、纵向比较。**与' + first + V0 + U + '相比，' + cur + main + '增长约' + grow + '%，统计期内整体扩张；上述数据按同口径可比复算，仅用于能力训练。',
     '**三、周期观察。**从' + pRange(paper) + '看，' + main + '累计增幅约' + grow + '%，' + win + '增速保持平稳，材料文字与' + (hasTable ? '表格' : '图表') + '可相互印证。'
   ][hashIdx(seed + 3, 3)]
-  const textMd = mainText + '\n\n' + structText + '\n\n' + trendText
+  const allPeriodText = paper.periodLabels.map((lab, ri) => lab + '：' + paper.inds.map((ind, ci) => ind + fmtNum(paper.vals[ci][ri]) + U).join('、')).join('；')
+  const textMd = mainText + '\n\n' + structText + '\n\n' + trendText + '\n\n**四、口径对照。**' + cur + '：' + main + V4 + U + '、' + sub + S1 + U + '、' + sub2 + S2 + U + '、' + sub3 + S3 + U + '；' + prev + '：' + main + V3 + U + '、' + sub + S1P + U + '、' + sub2 + S2P + U + '、' + sub3 + S3P + U + '。' + cur + wd + '增速：' + main + R4 + '%、' + sub + SR1 + '%、' + sub2 + SR2 + '%、' + sub3 + SR3 + '%；' + prev + wd + '增速：' + main + R3P + '%、' + sub + SR1P + '%、' + sub2 + SR2P + '%、' + sub3 + SR3P + '%。统计起始期' + first + '：' + main + V0 + U + '。\n\n**五、逐期对照。**' + allPeriodText
   const headA = '| ' + (paper.periodKind === 'annual' ? '年份' : '统计期') + ' | ' + paper.inds.join(' | ') + ' |'
   const sepA = '| --- | ' + paper.inds.map(() => '---').join(' | ') + ' |'
   const rowsA = paper.periodLabels.map((lab, ri) => '| ' + lab + ' | ' + paper.inds.map((ind, ci) => fmtNum(paper.vals[ci][ri])).join(' | ') + ' |').join('\n')
@@ -334,11 +342,7 @@ export function renderTrainMaterial(seed, paper, opts = {}) {
   const sepB = '| --- | ' + paper.periodLabels.map(() => '---').join(' | ') + ' |'
   const rowsB = paper.inds.map((ind, ci) => '| ' + ind + '（' + U + '） | ' + paper.periodLabels.map((lab, ri) => fmtNum(paper.vals[ci][ri])).join(' | ') + ' |').join('\n')
   const tableB = headB + '\n' + sepB + '\n' + rowsB
-  const headC = '| 指标 | 单位 | ' + prev + ' | ' + cur + ' | ' + wd + '增速 |'
-  const sepC = '| --- | --- | --- | --- | --- |'
-  const rowsC = paper.inds.map((ind, ci) => '| ' + ind + ' | ' + U + ' | ' + fmtNum(paper.vals[ci][last - 1]) + ' | ' + fmtNum(paper.vals[ci][last]) + ' | ' + paper.rates[ci][last] + '% |').join('\n')
-  const tableC = headC + '\n' + sepC + '\n' + rowsC
-  const tableMd = (tablePick === 0 ? tableA : tablePick === 1 ? tableB : tableC) + '\n\n注：①表中数值为' + win + '口径；②增速按可比口径复算；③本材料为训练模拟数据，非官方实际公布值。\n\n' + '口径补充：' + main + prev + wd + '增速为' + R3 + '%，' + cur + '为' + R4 + '%；' + sub + '为' + SR1 + '%、' + sub2 + '为' + SR2 + '%、' + sub3 + '为' + SR3 + '%。'
+  const tableMd = (tablePick === 0 ? tableA : tableB) + '\n\n注：①表中数值为' + win + '口径；②增速按可比口径复算；③本材料为训练模拟数据，非官方实际公布值。\n\n' + '口径补充：' + main + prev + wd + '增速为' + R3P + '%，' + cur + '为' + R4 + '%；' + sub + prev + '增速为' + SR1P + '%、' + cur + '为' + SR1 + '%；' + sub2 + prev + '增速为' + SR2P + '%、' + cur + '为' + SR2 + '%；' + sub3 + prev + '增速为' + SR3P + '%、' + cur + '为' + SR3 + '%。'
   const svg = hasChart
     ? (chartKind === 0 ? chartBarSvg(labels, paper.vals[0]) : chartKind === 1 ? chartLineSvg(labels, paper.vals[0]) : chartKind === 2 ? chartComboSvg(labels, paper.vals[0], paper.rates[0]) : chartPieSvg(paper.inds, paper.vals.map((row) => row[last])))
     : ''
@@ -374,6 +378,153 @@ export function applyPaperOptions(paper, seed, opts = {}) {
   const m = renderTrainMaterial(seed, paper, opts)
   Object.assign(paper, m)
   return paper
+}
+// ================= v3.8.257：语义高亮元数据 + 材料/题干/选项/解析 质检 =================
+function lockWordsOf(paper, words) {
+  const list = words.concat(paper.inds || []).map((x) => String(x == null ? '' : x).trim()).filter(Boolean)
+  return Array.from(new Set(list))
+}
+export function questionSemanticNeed(paper, kind) {
+  if (!paper || !paper.vals) return { words: [], nums: [] }
+  const last = paper.years.length - 1
+  const prev = Math.max(0, last - 1)
+  const first = 0
+  const U = paper.unit || ''
+  const cur = pL(paper, last)
+  const prevL = pL(paper, prev)
+  const prev2 = pL(paper, Math.max(0, prev - 1))
+  const firstL = pL(paper, first)
+  const main = paper.inds[0] || ''
+  const sub = paper.inds[1] || ''
+  const sub2 = paper.inds[2] || ''
+  const sub3 = paper.inds[3] || ''
+  const vals = paper.vals || []
+  const rates = paper.rates || []
+  const nums = []
+  const words = []
+  const addVal = (ci, ri) => {
+    if (vals[ci] && vals[ci][ri] != null) nums.push(fmtNum(vals[ci][ri]))
+  }
+  const addRate = (ci, ri) => {
+    if (rates[ci] && rates[ci][ri] != null) nums.push(rates[ci][ri] + '%')
+  }
+  const addTerms = (...xs) => xs.filter(Boolean).forEach((x) => words.push(x))
+  switch (kind) {
+    case 'rate':
+    case 'delta':
+      addVal(0, prev); addVal(0, last)
+      addTerms(main, cur, prevL, U)
+      break
+    case 'share':
+      addVal(1, last); addVal(0, last)
+      addTerms(sub, main, cur, U)
+      break
+    case 'base':
+      addVal(0, last); addRate(0, last)
+      addTerms(main, cur, U)
+      break
+    case 'interval':
+      addRate(0, prev); addRate(0, last)
+      addTerms(main, cur, prevL, prev2, U)
+      break
+    case 'shareDiff':
+      addVal(1, last); addVal(0, last)
+      addVal(1, prev); addVal(0, prev)
+      addRate(1, last); addRate(0, last)
+      addTerms(sub, main, cur, prevL, U)
+      break
+    case 'annual':
+      addVal(0, first); addVal(0, last)
+      addTerms(main, firstL, cur, pRange(paper), U)
+      break
+    case 'comp':
+      addVal(1, last); addVal(1, prev)
+      addVal(0, last); addVal(0, prev)
+      addTerms(sub, sub2, sub3, main, cur, prevL, U)
+      break
+    default:
+      vals.forEach((row, ci) => {
+        if (ci < 4 && row && row[last] != null) { nums.push(fmtNum(row[last])); addTerms(paper.inds[ci]) }
+      })
+      break
+  }
+  return { words: lockWordsOf(paper, words), nums: Array.from(new Set(nums)) }
+}
+function normQc(s) { return String(s == null ? '' : s).replace(/[,\s\u00a0]/g, '').replace(/[\u3000]/g, '') }
+function qcExpected(q, paper) {
+  const last = paper.years.length - 1
+  const prev = Math.max(0, last - 1)
+  const vals = paper.vals
+  const rates = paper.rates
+  const A = vals[0][prev]
+  const B = vals[0][last]
+  const U = paper.unit
+  switch (q.kind) {
+    case 'rate': return r1(rateBetween(A, B)) + '%'
+    case 'delta': return fmtNum(Math.round(B - A)) + U
+    case 'share': return r1((vals[1][last] / Math.max(1, vals[0][last])) * 100) + '%'
+    case 'base': return fmtNum(Math.round(B / (1 + rates[0][last] / 100))) + U
+    case 'interval': {
+      const r3 = rates[0][prev]
+      const r4 = rates[0][last]
+      return r1(r3 + r4 + (r3 * r4) / 100) + '%'
+    }
+    case 'annual': return r1((Math.pow(B / Math.max(1, vals[0][0]), 1 / 4) - 1) * 100) + '%'
+    case 'shareDiff': {
+      const whole = vals[0][last]
+      const part = vals[1][last]
+      const b = rates[0][last]
+      const a = rates[1][last]
+      const nowShare = (part / Math.max(1, whole)) * 100
+      const prevShare = (part / (1 + a / 100)) / (whole / (1 + b / 100)) * 100
+      const diff = r1(prevShare - nowShare)
+      const abs = Math.abs(diff)
+      const dir = diff > 0 ? '上升' : diff < 0 ? '下降' : '不变'
+      return dir === '不变' ? '保持不变' : dir + abs.toFixed(1) + '个百分点'
+    }
+    case 'comp': {
+      const nowShare = (vals[1][last] / Math.max(1, vals[0][last])) * 100
+      const prevShare = (vals[1][prev] / Math.max(1, vals[0][prev])) * 100
+      const dir = nowShare > prevShare ? '上升' : nowShare < prevShare ? '下降' : '持平'
+      return pL(paper, last) + '「' + paper.inds[1] + '」占「' + paper.inds[0] + '」的比重较' + pL(paper, prev) + dir
+    }
+    default: return ''
+  }
+}
+export function qcDataTrainExam(exam, paper) {
+  const errors = []
+  const checks = []
+  if (!exam || !paper || !paper.vals) return { ok: false, errors: ['缺少质检上下文（paper）'] }
+  const mdPlain = normQc(String(exam.materialMd || '')) + normQc(String(exam.materialSvg || ''))
+  ;(exam.qs || []).forEach((q, qi) => {
+    const calc = q.layers && q.layers.calc
+    const ansOpt = calc && calc.options.find((o) => o.k === calc.answer)
+    if (!calc || !ansOpt) { errors.push('第' + (qi + 1) + '题缺少速算层/答案'); return }
+    const expected = qcExpected(q, paper)
+    const actual = normQc(ansOpt.t)
+    const exp = normQc(expected)
+    if (!expected) { errors.push('第' + (qi + 1) + '题无法计算期望答案（' + q.kind + '）'); return }
+    if (actual !== exp) {
+      errors.push('第' + (qi + 1) + '题参考答案不一致：期望「' + expected + '」，实际「' + ansOpt.t + '」')
+    }
+    const meta = questionSemanticNeed(paper, q.kind)
+    ;(meta.nums || []).forEach((n) => {
+      const nm = normQc(n)
+      if (nm.replace(/[^0-9.]/g, '').length >= 3 && !mdPlain.includes(nm)) errors.push('第' + (qi + 1) + '题(' + q.kind + ')材料缺少源数据 ' + n)
+    })
+    if (calc.explain && exp) {
+      const ex = normQc(calc.explain)
+      if (q.kind === 'comp') {
+        if (!(ex.includes(q.typeLabel || '') || ex.includes('比重')) || !ex.includes('持平') && !ex.includes('上升') && !ex.includes('下降')) {
+          errors.push('第' + (qi + 1) + '题综合判断题解析缺少比重方向结论')
+        }
+      } else if (!ex.includes(exp)) {
+        errors.push('第' + (qi + 1) + '题解析未复现答案数值：期望「' + expected + '」')
+      }
+    }
+    checks.push({ q: qi + 1, kind: q.kind, expected })
+  })
+  return { ok: !errors.length, total: checks.length, errors, checks }
 }
 const TYPE_META = {
   base: { name: '基期量', formula: '基期量 = 现期量 ÷ (1 + 增长率)', locateTip: '现期与增速' },
@@ -693,7 +844,7 @@ export function buildDataTrainExam(seed = Date.now() % 100000, dom = null, opts 
       return l && l.options && l.options.length === 4 && l.answer && new Set(l.options.map((o) => o.t)).size === 4
     })
   })
-  return {
+  const examOut = {
     paperSeed: seed,
     area: paper.area,
     domName: (dom && dom.n) || main,
@@ -710,6 +861,12 @@ export function buildDataTrainExam(seed = Date.now() % 100000, dom = null, opts 
     periodRange: hasPaperOpts ? paper.periodRange : paper.years[0] + '—' + paper.years[paper.years.length - 1] + '年',
     qs
   }
+  const qc = qcDataTrainExam(examOut, paper)
+  examOut.qc = qc
+  if (opts.qc !== false && !qc.ok) {
+    throw new Error('资料分析试卷本地质检未通过：' + qc.errors.join('；'))
+  }
+  return examOut
 }
 
 export const EXAM_LAYER_KEYS = [
@@ -718,4 +875,4 @@ export const EXAM_LAYER_KEYS = [
   { k: 'formula', t: '③ 选公式', d: '识别概念并选正确公式' },
   { k: 'calc', t: '④ 速算', d: '回算并选出最终答案' }
 ]
-export default { buildDataTrainExam, EXAM_LAYER_KEYS }
+export default { buildDataTrainExam, EXAM_LAYER_KEYS, questionSemanticNeed, qcDataTrainExam }

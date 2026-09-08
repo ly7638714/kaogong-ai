@@ -1397,6 +1397,24 @@ function buildSharedLocate(seed, ctx) {
   const opts = buildOpts([fmt(correct)], ctx.vals[0].filter((v, i) => i !== ri).map((v) => fmt(v)), seed)
   return { mode: 'locate', materialType: 'rich', materialMd: ctx.materialMd, materialSvg: ctx.materialSvg, q: '图中' + yr + '「' + ctx.inds[0] + '」的数值约为多少' + ctx.unit + '？', options: opts.options, answer: opts.answer, explain: '【读图】' + yr + '数值看对应柱/数据点 → **' + fmt(correct) + ctx.unit + '**。', tip: '口诀：数值看柱高/数据点、增速看折线。', extra: { name: '数据定位', area: ctx.area } }
 }
+// v3.8.257：共享篇章单题本地质检：题干/正确答案/解析出现的源数据必须能在材料中复现
+function qcSharedQuestion(q, ctx, mode) {
+  if (!q || !verifyUnique(q)) return false
+  q._qcPass = true
+  const mdPlain = String(ctx.materialMd || '') + String(ctx.materialSvg || '')
+    .replace(/<[^>]*>/g, ' ')
+  const mdNoComma = mdPlain.replace(/,/g, '')
+  const ansTxt = q.options.find((o) => o.k === q.answer)
+  const text = [String(q.q || ''), mode === 'locate' && ansTxt ? String(ansTxt.t) : ''].join(' ')
+  const nums = (text.match(/\d[\d,]*(?:\.\d+)?\s?(?:%|万吨|亿吨|亿元|万人|万辆|万平方米|万公顷|万台|亿件|元)?/g) || [])
+  for (const n of nums) {
+    const pure = n.replace(/[^0-9.]/g, '')
+    if (/^20(1[6-9]|2[0-6])$/.test(pure)) continue // 年份/统计期数字跳过，不当作源数据
+    const needle = n.replace(/,/g, '').replace(/\s/g, '')
+    if (pure.length >= 4 && !mdNoComma.includes(needle) && !mdNoComma.includes(pure)) return false
+  }
+  return true
+}
 function genSharedQ(mode, seed, level, stage, ctx) {
   for (let attempt = 0; attempt < 8; attempt++) {
     const s = seed + attempt * 977
@@ -1404,7 +1422,7 @@ function genSharedQ(mode, seed, level, stage, ctx) {
       : mode === 'locate' ? buildSharedLocate(s, ctx)
         : mode === 'formula' ? buildSharedFormula(s, ctx)
           : buildSharedCalc(s, level, stage, ctx)
-    if (q && verifyUnique(q)) return q
+    if (q && qcSharedQuestion(q, ctx, mode)) return q
   }
   return null
 }

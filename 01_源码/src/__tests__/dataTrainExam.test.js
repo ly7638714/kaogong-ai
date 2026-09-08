@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDataTrainExam, EXAM_LAYER_KEYS, applyPaperOptions } from '../utils/dataTrainExam'
+import { buildDataTrainExam, EXAM_LAYER_KEYS, applyPaperOptions, qcDataTrainExam } from '../utils/dataTrainExam'
 import { genDataQ, createSharedPaper } from '../utils/dataTrainGen'
 import { domainOf } from '../data/dataDomains'
 
@@ -165,5 +165,40 @@ describe('dataTrainExam 真题式四层训练引擎', () => {
       }
     }
     expect(mats.size).toBe(1)
+  })
+
+  it('本地质检能发现参考答案与解析不一致（不允许带病出题）', () => {
+    const dom = domainOf('烟酒')
+    const seed = 909007
+    const opts = { form: 'all', timeKind: 'annual', chart: 'auto' }
+    const paper = applyPaperOptions(createSharedPaper(seed, dom), seed + 55, opts)
+    const good = buildDataTrainExam(seed, dom, Object.assign({}, opts, { qc: false }))
+    expect(qcDataTrainExam(good, paper).ok).toBe(true)
+    const bad = JSON.parse(JSON.stringify(good))
+    const target = bad.qs.find((q) => q.kind !== 'comp') || bad.qs[0]
+    const ansOpt = target.layers.calc.options.find((o) => o.k === target.layers.calc.answer)
+    ansOpt.t = '999.9%'
+    const r1 = qcDataTrainExam(bad, paper)
+    expect(r1.ok).toBe(false)
+    expect(r1.errors.join('')).toContain('参考答案不一致')
+    const bad2 = JSON.parse(JSON.stringify(good))
+    const t2 = bad2.qs.find((q) => q.kind !== 'comp') || bad2.qs[0]
+    t2.layers.calc.explain = '这是一段不含真实答案的占位解析。'
+    const r2 = qcDataTrainExam(bad2, paper)
+    expect(r2.ok).toBe(false)
+    expect(r2.errors.join('')).toContain('解析未复现答案数值')
+  })
+
+  it('材料完整表始终包含首末/上年数值，纯文字模式也能支持所有考点取数', () => {
+    const dom = domainOf('烟酒')
+    for (const form of ['text', 'table', 'textChart', 'tableChart', 'all']) {
+      for (let i = 0; i < 40; i++) {
+        const seed = 808000 + i * 37
+        const paper = applyPaperOptions(createSharedPaper(seed, dom), seed + 55, { form, timeKind: 'auto', chart: 'auto' })
+        const exam = buildDataTrainExam(seed, dom, { form, timeKind: 'auto', chart: 'auto', qc: false })
+        const qc = qcDataTrainExam(exam, paper)
+        expect(qc.ok, form + ' ' + seed + '：' + qc.errors.join('；')).toBe(true)
+      }
+    }
   })
 })
