@@ -393,7 +393,22 @@ function initExam() {
   const base = Date.now() % 100000
   const papers = []
   const need = Math.ceil(Math.max(5, examGroupSize.value) / 5)
-  for (let i = 0; i < need; i++) papers.push(buildDataTrainExam(base + i * 9173, dom))
+  const others = DOMAINS.filter((d) => d.n !== dom.n)
+  const usedNames = [dom.n]
+  for (let i = 0; i < need; i++) {
+    let d = dom
+    if (i > 0 && others.length) {
+      let idx = (base + i * 137) % others.length
+      let guard = 0
+      while (usedNames.includes(others[idx].n) && guard < 40) {
+        idx = (idx + 7) % others.length
+        guard++
+      }
+      d = others[idx] || dom
+      usedNames.push(d.n)
+    }
+    papers.push(buildDataTrainExam(base + i * 9173, d))
+  }
   exam.value = { papers, total: Math.max(5, examGroupSize.value) }
   examQIdx.value = 0
   examLayerIdx.value = 0
@@ -1021,7 +1036,7 @@ onUnmounted(() => saveRunBest()) // v3.8.198 关闭时结算本轮
           <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
             <div v-if="examPaper && examPaper.materialMd" class="dt-mat" v-html="md(examPaper.materialMd)"></div>
             <div v-if="examPaper && examPaper.materialSvg" class="dt-mat dt-mat-svg" v-html="examPaper.materialSvg"></div>
-            <div class="dt-mat-note">📊 训练领域设定：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇材料，同一篇供 5 问连续作答。</div>
+            <div class="dt-mat-note">📊 组卷来源：{{ srcLabel }} · 当前第 {{ Math.floor(examQIdx / 5) + 1 }} 篇（{{ examPaper && examPaper.domName }}），同一篇供 5 问连续作答；10/15/20 题会自动混编多领域材料。</div>
           </div>
           <div v-if="examAiText" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
             <div class="dt-mat-note">🤖 AI 整理正文（仅阅读；表格与题目仍以本地可判数据为准）</div>
