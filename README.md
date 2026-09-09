@@ -33,7 +33,6 @@ powershell -ExecutionPolicy Bypass -File ..\scripts\sync-dist.ps1
 正式访问地址：
 
 - Cloudflare Pages：https://kaogong-ai.pages.dev
-- Workers 备用：https://kaogong-ai.ly7638714502.workers.dev
 
 ## 安卓端
 
