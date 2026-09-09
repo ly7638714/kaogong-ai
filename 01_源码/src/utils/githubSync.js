@@ -134,10 +134,13 @@ async function readGitHubRemote(repo) {
   try {
     const r = await ghFetch('/repos/' + repo + '/contents/' + SYNC_FILE)
     const obj = r.json || {}
-    const text = b64DecodeUtf8(obj.content)
     let parsed = null
-    try { parsed = JSON.parse(text) } catch (e) {
-      throw new Error('云端同步文件已损坏；请删除私人仓库里的 ' + SYNC_FILE + ' 后再同步', { cause: e })
+    try {
+      const text = b64DecodeUtf8(obj.content)
+      parsed = JSON.parse(text)
+    } catch (e) {
+      // 自动自愈：云端文件损坏时直接覆盖重建，不再要求用户手动删除
+      return { obj: null, sha: obj.sha, corrupted: true }
     }
     return { obj: parsed, sha: obj.sha }
   } catch (e) {
@@ -156,7 +159,7 @@ export async function runGitHubSync() {
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
-  if (!plan.sameAsRemote) {
+  if (!plan.sameAsRemote || (remoteFile && remoteFile.corrupted)) {
     const payload = {
       message: '行测AI自动互通 ' + new Date(body.t).toLocaleString(),
       content: b64EncodeUtf8(JSON.stringify(body))

@@ -381,12 +381,12 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
         </div>
         <div class="zpv-page"><canvas ref="canvasEl"></canvas><div v-if="msg" class="zpv-msg">{{ msg }}</div></div>
         <div class="zpv-ctrl">
-          <button class="zpv-btn" @click="prevPage()" :disabled="page <= 1">‹ 上一页</button>
+          <button class="zpv-btn" :disabled="page <= 1" @click="prevPage()">‹ 上一页</button>
           <span class="zpv-pg">第 {{ page }} / {{ pages }} 页</span>
-          <button class="zpv-btn" @click="nextPage()" :disabled="page >= pages">下一页 ›</button>
+          <button class="zpv-btn" :disabled="page >= pages" @click="nextPage()">下一页 ›</button>
           <span class="zpv-gap"></span>
           <button class="zpv-btn" @click="zoomOut()">−</button>
-          <button class="zpv-btn" @click="fitW()" :title="'缩放：' + Math.round(scale * 100) + '%'">适应宽 {{ Math.round(scale * 100) }}%</button>
+          <button class="zpv-btn" :title="'缩放：' + Math.round(scale * 100) + '%'" @click="fitW()">适应宽 {{ Math.round(scale * 100) }}%</button>
           <button class="zpv-btn" @click="zoomIn()">+</button>
         </div>
       </template>

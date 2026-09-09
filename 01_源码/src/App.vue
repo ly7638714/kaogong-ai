@@ -37,6 +37,7 @@ import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup,
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { renderMd } from './utils/renderMd'
 import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice } from './utils/pet'
+import { petBatchCollectTodayWrong } from './utils/petBatch'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
 const petMd = (t) => renderMd(String(t || ''))
@@ -1422,6 +1423,21 @@ function copyFigKey() {
 }
 const petAskText = ref('')
 const skinShow = ref(false)
+const petBatchBusy = ref(false)
+async function doPetTodayBatch() {
+  if (petBatchBusy.value) return
+  petBatchBusy.value = true
+  try {
+    const r = await petBatchCollectTodayWrong()
+    petSpeak(r.msg)
+    showToast(r.count > 0 ? '✅ 已批量加入错题集' : 'ℹ️ 今日暂无截图错题', r.count > 0 ? 'success' : 'info')
+  } catch (e) {
+    petSpeak('今天收错题失败了：' + ((e && e.message) || e))
+    showToast('批量收错题失败：' + ((e && e.message) || e), 'error')
+  } finally {
+    petBatchBusy.value = false
+  }
+}
 function onPetImgFile(ev) {
   const f = ev.target.files && ev.target.files[0]
   ev.target.value = ''
@@ -3457,17 +3473,13 @@ onUnmounted(() => {
         <div class="about-box">
           <p class="ab-warn">⚠️ 本项目仅供个人学习使用，切勿商用，违者必究。</p>
           <p><b>隐私与数据</b>：全部数据（对话 / 错题 / 知识库 / 设置 / 萌宠）只保存在你自己的浏览器 localStorage，应用无后端服务器、不上传任何数据；API Key 也只存本机。迁移可用「数据与同步 → 导出/导入备份、WebDAV 云同步、保存到本地文件夹」。</p>
-          <p><b>版本</b>：v{{ APP_VERSION }}（更新历史见仓库 CHANGELOG.md）</p>
+          <p><b>版本</b>：v{{ APP_VERSION }}</p>
           <p><b>使用提示</b>：首次使用请先完成「设置引导」（重点：文字模型 + 视觉模型 + 语音试听）；日常按「看板→对话刷题→错题二刷→积累复习→统计→导出」闭环提分。</p>
           <details class="guide">
-            <summary>🔧 开发者说明（模块地图 / 配置键 / 存储键 / 构建流程）</summary>
+            <summary>🔧 开发者说明</summary>
             <div class="guide-body">
-              <p><b>技术栈</b>：Vue3（Composition API）+ Vite + PWA。`01_源码` 为唯一活跃源码；`scripts/sync-dist.ps1` 一键构建并同步三端（网页 / 发布包 / 安卓 web 资源）。</p>
-              <p><b>模块地图</b>：<code>src/App.vue</code> 设置面板与全局壳；<code>src/store.js</code> 全局状态（cfg/对话/错题/记忆/笔记）；<code>src/api/*</code> 各厂商 AI 适配（chat/vision/figEnhance）；<code>src/utils/tts*.js</code> 四引擎朗读与音色克隆；<code>src/utils/pet.js</code> 萌宠角色系统；<code>src/utils/music.js</code> 背景音乐；<code>src/kb.js</code> 知识库与名师方法论提示词；<code>src/components/*</code> 各板块页面。</p>
-              <p><b>设置面板结构（本次重构）</b>：6 大分组 = 🧠 模型与 AI / 🗣️ 语音朗读 / 🎨 外观与主题 / 💾 数据与同步 / 🎵 趣味与陪伴 / ❓ 帮助与关于。每组一个手风琴标题（`set-group-hd`）+ 内容容器（`set-group-bd`）；顶部 `set-status` 状态总览；导航 `setNav` 按组跳转（`scrollSet` 自动展开所属组）。新增设置项时：①在对应组内添加区块（`sec-t` + 内容 + 可选 `sec-desc`）②在 <code>store.cfg</code> 增加字段 ③必要时加入 <code>SEC_GROUP</code> / <code>SET_GUIDE</code>。</p>
-              <p><b>关键配置键（store.cfg）</b>：<code>text/vision</code>=文字/视觉模型（prov/key/url/model）；<code>fig</code>=图形增强；<code>ttsMode/ttsGm/ttsOpenAI/ttsEdgeVoice/ttsRate/ttsOn</code>=朗读；<code>petSkin/skinVoices/skinImgs/customSkins</code>=萌宠；<code>musicOn/musicVol/musicList</code>=音乐；<code>szFrom/szTo</code>=时政范围；<code>dataDir</code>=本地文件夹。</p>
-              <p><b>关键存储键（localStorage）</b>：<code>xc_cfg</code>=设置；<code>xc_msgs</code>=对话；<code>xc_wqs</code>=错题；<code>xc_my_mem</code>=记忆库；<code>xc_notes</code>=笔记；<code>xc_pet</code>=萌宠养成；<code>xc_chat_fast_model</code>=对话快模型。</p>
-              <p><b>质量流程</b>：网页/iPad 改动后跑 <code>npm run lint</code>（零告警）→ <code>npm test</code> → <code>npm run build</code> → <code>scripts/sync-dist.ps1</code>；手机端在独立仓库 <code>06_MobileApp-DeepDev/frontend</code> 单独维护。</p>
+              <p>本项目是自研行测备考工具。开发内容不向使用者展开源码内部细节。</p>
+              <p>源码、构建流程与更新记录均保存在开发者本机；API Key 与个人数据不会写入应用界面说明。</p>
             </div>
           </details>
         </div>
@@ -3824,6 +3836,7 @@ onUnmounted(() => {
           <button class="btn btn-gh pp-act" @click="petNextSpeed()">⏱ {{ Math.round((store.cfg.ttsRate || 1) * 100) }}%</button>
           <button class="btn btn-gh pp-act" @click="doPetAsk('给我安排今天的高效学习计划')">📋 计划</button>
           <button class="btn btn-gh pp-act" @click="doPetAsk('根据我的学习数据，告诉我目前强弱项和下一步建议')">📊 概况</button>
+          <button class="btn btn-gh pp-act" :disabled="petBatchBusy" @click="doPetTodayBatch()">{{ petBatchBusy ? '⏳ 收题中' : '📥 今日截图收错题' }}</button>
           <button class="btn btn-gh pp-act" @click="skinShow = !skinShow">🎭 {{ skinShow ? '收起' : '换装' }}</button>
         </div>
         <div v-if="skinShow" class="pp-skins">

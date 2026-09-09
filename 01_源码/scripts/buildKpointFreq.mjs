@@ -22,7 +22,6 @@ const splitFreq = (total, parts) => {
   })
   return r
 }
-const lang = S['言语理解'] || {}
 const center = t('言语理解', '中心理解')
 const yanyu = {
   ...splitFreq(center, [['中心理解', 0.65], ['意图判断', 0.35]]),

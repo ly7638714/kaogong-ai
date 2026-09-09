@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { weakPlates, wrongTotal, profileLine } from '../utils/petProfile'
+import { weakPlates, profileLine } from '../utils/petProfile'
 
 describe('P2 petProfile 错题画像', () => {
   it('按板块统计最弱前二', () => {

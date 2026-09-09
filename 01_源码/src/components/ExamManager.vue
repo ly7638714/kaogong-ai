@@ -3,7 +3,7 @@
 // 列出全部考试（国考内置不可删），支持新增 / 编辑 / 删除 / 设为当前。
 // 通过 store.uiCtx.examMgr 控制显隐；数据全部走 store 管理方法 → 持久化于 xc_cfg。
 import { ref, computed } from 'vue'
-import { store, getActiveExam, addExam, updateExam, removeExam, setActiveExam } from '../store'
+import { store, addExam, updateExam, removeExam, setActiveExam } from '../store'
 import { showToast } from '../utils/toast'
 
 const COLOR_PRESETS = ['#ff5c7c', '#5cc8ff', '#ffb454', '#7ee787', '#c792ea', '#ff8a65', '#4dd0e1', '#f06292']
@@ -75,7 +75,7 @@ function close() {
         <div class="em-head">
           <div class="em-title">📅 考试管理</div>
           <div class="em-sub">管理你的国考 / 省考 / 事业单位等考试，各自独立倒计时、数据互不冲突</div>
-          <button class="em-x" @click="close" aria-label="关闭">×</button>
+          <button class="em-x" aria-label="关闭" @click="close">×</button>
         </div>
 
         <!-- 考试列表 -->
@@ -118,18 +118,18 @@ function close() {
               <button
                 v-for="c in COLOR_PRESETS" :key="c"
                 class="em-color" :class="{ on: form.color === c }"
-                :style="{ background: c }" @click="form.color = c" :aria-label="c"
+                :style="{ background: c }" :aria-label="c" @click="form.color = c"
               ></button>
             </div>
           </div>
           <div class="em-form-btns">
-            <button class="btn btn-gh" @click="openAdd()" v-if="editingId">＋ 新增</button>
-            <button class="btn btn-gh" @click="cancelEdit()" v-if="editingId">取消编辑</button>
+            <button v-if="editingId" class="btn btn-gh" @click="openAdd()">＋ 新增</button>
+            <button v-if="editingId" class="btn btn-gh" @click="cancelEdit()">取消编辑</button>
             <button class="btn btn-pri" @click="save()">{{ editingId ? '保存修改' : '添加考试' }}</button>
           </div>
         </div>
 
-        <button class="em-add-line" @click="openAdd()" v-if="!editingId">＋ 添加考试</button>
+        <button v-if="!editingId" class="em-add-line" @click="openAdd()">＋ 添加考试</button>
       </div>
     </div>
   </Teleport>

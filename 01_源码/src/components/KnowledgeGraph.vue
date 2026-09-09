@@ -7,7 +7,7 @@ import { store } from '../store'
 import { markLearned, learnedSet } from '../utils/learned'
 
 const props = defineProps({ cards: { type: Array, default: () => [] } })
-const emit = defineEmits(['ask'])
+const emit = defineEmits(['ask', 'ask-example'])
 
 const PLATES = [
   { k: '判断推理', e: '🧠' },

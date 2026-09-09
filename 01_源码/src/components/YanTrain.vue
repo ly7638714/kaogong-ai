@@ -29,6 +29,9 @@ const mode = ref('topic')
 const picked = ref('')
 const sentenceIdx = ref(0)
 const helpShow = ref(false)
+// 手机端“最大做题区”：顶部工具/侧栏进度统计默认折叠
+const ytUiOpen = ref(false)
+const ytSideOpen = ref(false)
 const aiBusy = ref(false)
 const aiText = ref('')
 const runStarted = ref(false)
@@ -127,6 +130,8 @@ function newPassage() {
 function startRun() {
   if (runStarted.value) return
   runStarted.value = true
+  ytUiOpen.value = false
+  ytSideOpen.value = false
   elapsed.value = 0
   qStart.value = Date.now()
 }
@@ -181,6 +186,8 @@ function launchExam(force = false, fromSplit = false) {
 function examStartRun() {
   if (!examCurrent.value || examRun.value) return
   examRun.value = true
+  ytUiOpen.value = false
+  ytSideOpen.value = false
   examFinished.value = false
   examStart.value = Date.now()
   examQStart.value = Date.now()
@@ -287,7 +294,8 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
       <div class="yt-head">
         <button class="pnl-top-b" @click="ready || examReady ? backHome() : emit('close')">← {{ ready || examReady ? '首页' : '返回' }}</button>
         <span class="yt-title">📖 片段阅读 · {{ examReady ? '完整 5 问真题卷' : ready ? '四步拆分训练' : '结构四步拆解' }}</span>
-        <div class="yt-acts">
+        <button class="btn btn-gh yt-ui-toggle" @click="ytUiOpen = !ytUiOpen">{{ ytUiOpen ? '▲ 收起工具' : '⚙️ 工具' }}</button>
+        <div class="yt-acts" :class="{ off: !ytUiOpen }">
           <span class="yt-chip" title="本场正确率">🎯 {{ examReady ? examScore.pct + '%' : totalScore.pct + '%' }}</span>
           <span class="yt-chip" title="计时状态">{{ examReady ? (examRun ? '⏱ ' + examElapsed + 's' : '⏱ 待开始') : (runStarted ? '⏱ ' + elapsed + 's' : '⏱ 待开始') }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
@@ -328,7 +336,8 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
       </div>
       <template v-else-if="ready">
         <div class="yt-body">
-          <div class="yt-side">
+          <button class="btn btn-gh yt-side-toggle" :class="{ on: ytSideOpen }" @click="ytSideOpen = !ytSideOpen">{{ ytSideOpen ? '▲ 收起 进度/统计' : '🧭 四步进度 · 统计 ▾' }}</button>
+          <div class="yt-side" :class="{ off: !ytSideOpen }">
             <div class="yt-card">
               <div class="yt-card-t">🧭 四步能力进度</div>
               <div v-for="lp in modePct" :key="lp.k" class="yt-py-row" :class="{ on: mode === lp.k }" @click="switchMode(lp.k)">
@@ -422,7 +431,8 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
           </div>
         </div>
         <div v-else class="yt-body">
-          <div class="yt-side">
+          <button class="btn btn-gh yt-side-toggle" :class="{ on: ytSideOpen }" @click="ytSideOpen = !ytSideOpen">{{ ytSideOpen ? '▲ 收起 进度/统计' : '🧭 本套进度 · 统计 ▾' }}</button>
+          <div class="yt-side" :class="{ off: !ytSideOpen }">
             <div class="yt-card">
               <div class="yt-card-t">🧭 本套 5 问</div>
               <div v-for="i in 5" :key="i" class="yt-py-row" :class="{ on: examQIdx === i - 1 }">
@@ -531,11 +541,21 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
 .yt-ex-t.bad { color: #fb7185; }
 .yt-ex-b { font-size: 13px; line-height: 1.8; margin-top: 6px; }
 .yt-help { font-size: 13px; line-height: 1.8; }
+/* 手机端“最大做题区”：桌面保留原布局，窄屏把顶部工具/侧栏折叠 */
+.yt-ui-toggle, .yt-side-toggle { display: none; }
 @media (max-width: 760px) {
   .yt-body { flex-direction: column; }
   .yt-side { flex: none; max-height: 35vh; }
   .yt-title { font-size: 13.5px; }
   .yt-opts { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .yt-ui-toggle, .yt-side-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; min-height: 34px; padding: 5px 10px; border-radius: 20px;
+  }
+  .yt-side-toggle { align-self: flex-start; margin-bottom: 2px; }
+  .yt-acts.off, .yt-side.off { display: none !important; }
 }
 /* ===== v3.8.259：网页/iPad/手机 自适应字号与等距边距 ===== */
 .yt-ov { -webkit-tap-highlight-color: transparent; }

@@ -35,6 +35,10 @@ const score = ref(0)
 const elapsed = ref(0)
 const runStarted = ref(false)
 const resultShow = ref(false)
+// 手机端“最大做题区”：工具/进度/统计默认折叠，点开才显示
+const dtUiOpen = ref(false)
+const dtSideOpen = ref(false)
+const dtCfgOpen = ref(true)
 // ===== 真题式 5 问 × 四层（v3.8.244 核心特色） =====
 const exam = ref(null)
 const examGroupSize = ref(5)
@@ -406,6 +410,9 @@ function setGroup(n) { groupSize.value = n; groupDone.value = false; reset() }
 function startRun() {
   if (runStarted.value) return
   runStarted.value = true
+  dtUiOpen.value = false
+  dtSideOpen.value = false
+  dtCfgOpen.value = false
   stats.value.start = Date.now()
   elapsed.value = 0
   qStart.value = Date.now()
@@ -1148,7 +1155,8 @@ onUnmounted(() => {
       <div class="dt-head">
         <button class="pnl-top-b" style="margin-right: 4px" title="返回上一层（也可按 Esc / 浏览器返回）" @click="emit('close')">← 返回</button>
         <span class="dt-title">📊 资料分析 · 真题速算四层拆分训练</span>
-        <div class="dt-acts">
+        <button class="btn btn-gh dt-ui-toggle" @click="dtUiOpen = !dtUiOpen">{{ dtUiOpen ? '▲ 收起工具' : '⚙️ 工具' }}</button>
+        <div class="dt-acts" :class="{ off: !dtUiOpen }">
           <span class="dt-chip" title="累计积分：答对+10，连击有加成">🏆 {{ score }}</span><span v-if="bestChip" class="dt-chip" :title="'该模式·难度历史最佳'" style="color:#fbbf24">🏅 {{ bestChip.ok }}题 {{ bestChip.pct }}%</span>
           <span class="dt-chip" :class="{ hot: streak >= 3 }" title="连续答对">🔥 ×{{ streak }}<span v-if="bestStreak" class="dt-chip-sub">（最高{{ bestStreak }}）</span></span><span class="dt-chip" title="本轮用时/计时状态">{{ runStarted ? '⏱ 本场 ' + elapsed + 's' : '⏱ 待开始' }}</span><span v-if="groupSize > 0" class="dt-chip" :class="{ hot: groupDone }" title="题组进度">📦 {{ stats.total }}/{{ groupSize }}{{ groupDone ? ' ✅' : '' }}</span>
           <button class="btn btn-gh" @click="helpShow = !helpShow">{{ helpShow ? '收起说明' : '📖 能力说明' }}</button>
@@ -1192,8 +1200,9 @@ onUnmounted(() => {
         </div>
       </div>
       <div v-else class="dt-body">
-        <!-- 左栏：四层进度 + 方法卡 + 统计（手机端自动折叠成横向卡片） -->
-        <div class="dt-side">
+        <!-- 手机端默认折叠：做题时只保留题干/材料/选项，需要进度与统计再展开 -->
+        <button class="btn btn-gh dt-side-toggle" :class="{ on: dtSideOpen }" @click="dtSideOpen = !dtSideOpen">{{ dtSideOpen ? '▲ 收起 进度/统计' : '🧭 四层进度 · 统计 ▾' }}</button>
+        <div class="dt-side" :class="{ off: !dtSideOpen }">
           <div class="dt-card">
             <div class="dt-card-t">🧭 LY 四层能力 · 本场进度</div>
             <div v-for="lp in layerProgress" :key="lp.k" class="dt-py-row" :class="{ on: mode === lp.k }" @click="switchMode(lp.k)">
@@ -1302,7 +1311,8 @@ onUnmounted(() => {
 
       <template v-else-if="q">
 
-  <div class="dt-set" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:11px">
+  <button class="btn btn-gh dt-set-toggle" :class="{ on: dtCfgOpen }" @click="dtCfgOpen = !dtCfgOpen">{{ dtCfgOpen ? '▲ 收起 材料/题组设置' : '⚙️ 材料/题组设置 · 计时 ▾' }}</button>
+  <div class="dt-set" :class="{ off: !dtCfgOpen }" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:11px">
   <span v-if="mode === 'locate' || mode === 'formula'" class="dt-chip" style="cursor:pointer" :title="'三锁定高亮'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 三锁定高亮开' : '🔍 三锁定高亮关' }}</span>
         <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一篇文字+表格+统计图材料连续出 5 问" @click="startChain()">🔁 同材料连问(5问·混合)</button>
         <span v-if="chain" class="dt-chip" style="color:#34d399">📋 同材料 {{ chainIdx + 1 }}/{{ chain.qs.length }}</span>
@@ -1425,7 +1435,8 @@ onUnmounted(() => {
       <div class="dt-head">
         <button class="pnl-top-b" style="margin-right:4px" title="返回上一层（Esc）" @click="emit('close')">← 返回</button>
         <span class="dt-title">📊 资料分析 · AI 智能出题 · 完整真题卷</span>
-        <div class="dt-acts">
+        <button class="btn btn-gh dt-ui-toggle" @click="dtUiOpen = !dtUiOpen">{{ dtUiOpen ? '▲ 收起工具' : '⚙️ 工具' }}</button>
+        <div class="dt-acts" :class="{ off: !dtUiOpen }">
           <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="四层拆分训练，同一篇材料共用" @click="setView('classic')">🗂 真题拆分训练</button>
           <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="查看练习/考试记录并二刷" @click="showRecords()">📜 练习记录</button>
           <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="emit('close')">✕</button>
@@ -1470,7 +1481,8 @@ onUnmounted(() => {
         <button class="btn btn-pri" style="padding:8px 18px;font-size:13px" @click="initExam()">🤖 AI 智能出题</button>
       </div>
       <div v-else-if="exam && !examFinished" class="dt-body">
-        <div class="dt-side">
+        <button class="btn btn-gh dt-side-toggle" :class="{ on: dtSideOpen }" @click="dtSideOpen = !dtSideOpen">{{ dtSideOpen ? '▲ 收起 进度/统计' : '🧭 本套进度 · 统计 ▾' }}</button>
+        <div class="dt-side" :class="{ off: !dtSideOpen }">
           <div class="dt-card">
             <div class="dt-card-t">🧭 本组 {{ examTotal }} 问 · {{ examPapers.length }} 篇材料</div>
             <div v-for="qi in examIndexes" :key="qi" class="dt-py-row" :class="{ on: qi === examQIdx }">
@@ -1690,6 +1702,8 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 .dt-ai { margin-top: 10px; border-top: 1px dashed var(--glass-border); padding-top: 10px; font-size: 13px; line-height: 1.8; color: var(--text); background: rgba(34, 211, 238, 0.06); border-radius: 8px; padding: 10px 12px; }
 .dt-loading { text-align: center; color: var(--text3); padding: 30px 0; }
 
+/* 手机端“最大做题区”：桌面保持两栏全功能，窄屏把非做题面板折叠 */
+.dt-ui-toggle, .dt-side-toggle, .dt-set-toggle { display: none; }
 
 /* ===== 理论课堂 ===== */
 .dt-kb { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
@@ -1726,6 +1740,16 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
   .dt-pnl { max-height: 96vh; }
 }
 
+@media (max-width: 760px) {
+  .dt-ui-toggle, .dt-side-toggle, .dt-set-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; min-height: 34px; padding: 5px 10px; border-radius: 20px;
+  }
+  .dt-side-toggle { margin-bottom: 4px; align-self: flex-start; }
+  .dt-set-toggle { margin: 2px 0; }
+  .dt-acts.off, .dt-side.off, .dt-set.off { display: none !important; }
+}
+
 /* ===== 手机（≤760px）：单列自适应，侧栏变横向卡片 ===== */
 @media (max-width: 760px) {
   /* 真·全屏：抵消 .ov 的 40px 内边距与 .ov .pnl 的 88vh/圆角底部抽屉样式
@@ -1748,8 +1772,10 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
   .dt-head { gap: 6px; margin-bottom: 8px; }
   .dt-chip { font-size: 11px; padding: 3px 8px; }
   .dt-chip-sub { display: none; }
-  .dt-opt { font-size: 13px; padding: 11px 10px; min-height: 46px; }
-  .dt-q { font-size: 13.5px; }
+  .dt-opt { font-size: 14.5px; padding: 12px 11px; min-height: 50px; }
+  .dt-q { font-size: 15.5px; line-height: 1.9; }
+  .dt-mat { font-size: 14.5px; line-height: 1.9; }
+  .dt-mat-note { font-size: 12px; }
   .dt-mat :deep(th), .dt-mat :deep(td) { padding: 3px 5px; font-size: 11px; }
   .dt-mat :deep(table) { display: block; overflow-x: auto; }
   .dt-modes .btn, .dt-diff .btn { font-size: 12px; padding: 6px 8px; min-height: 32px; }
@@ -1776,8 +1802,9 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
   .dt-head .btn { font-size: 11.5px; padding: 5px 7px; }
   .dt-side .dt-card { flex: 0 0 88%; }
   .dt-modes .btn, .dt-diff .btn { font-size: 11.5px; padding: 5px 7px; }
-  .dt-opt { font-size: 12.5px; padding: 10px 8px; }
-  .dt-q { font-size: 13px; line-height: 1.7; }
+  .dt-opt { font-size: 13.5px; padding: 10px 9px; }
+  .dt-q { font-size: 14.5px; line-height: 1.85; }
+  .dt-mat { font-size: 13.5px; }
   .dt-ex-b { font-size: 12.5px; }
 }
 

@@ -2068,7 +2068,7 @@ Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 
 </script>
 <template>
-  <div class="page on" style="display: flex; flex-direction: column; height: 100%">
+  <div class="page on chat-page" style="display: flex; flex-direction: column; height: 100%">
     <div class="page-inner" style="display: flex; flex-direction: column; flex: 1; min-height: 0">
     <ChatTools :ctx="fpctx" />
     <ChatMsgs :ctx="fpctx" />

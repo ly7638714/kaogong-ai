@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { plateChecks } from '../utils/quizVerifyProfiles'
 
-const Q = (stem, options, subject = '言语理解', variant = '逻辑填空') => ({ stem, options: options.map((t, i) => ({ k: 'ABCD'[i], t })), answer: 'A', subject })
+const Q = (stem, options, subject = '言语理解') => ({ stem, options: options.map((t, i) => ({ k: 'ABCD'[i], t })), answer: 'A', subject })
 
 describe('言语·逻辑填空质检', () => {
   it('短题干（<60字）但标注空位 → 不再被“文段过短”误杀', () => {
