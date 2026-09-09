@@ -3,6 +3,7 @@
 // 两个开关任一生效即视为「快模型出题」（比思考模型快、质量风险更高 → 需要质量门兜底）。
 import { store } from '../store'
 import { activeCfg } from '../api/client'
+import { fastTextOf } from '../api/modelRegistry'
 
 const KEY_FAST = 'xc_fast_gen_model'
 const KEY_CHAT_FAST = 'xc_chat_fast_model'
@@ -16,9 +17,11 @@ function read(k) {
 }
 export function isFastGenMode() {
   try {
+    const c = activeCfg(false)
     const fgm = String(read(KEY_FAST) || '').trim()
     const useFig = read(KEY_FIG) === '1'
-    return useFig || !!fgm
+    const autoFast = c && c.key && (fastTextOf(c.prov || '')[0] || {}).id
+    return useFig || !!fgm || !!autoFast
   } catch (e) {
     return false
   }
@@ -44,7 +47,8 @@ export function pickGenCfg() {
     if (read(KEY_FIG) === '1' && fig && fig.key) {
       return withUrl({ prov: fig.prov || 'zhipu', key: fig.key, url: fig.url, model: fig.model || 'glm-4.6-flash' })
     }
-    const fast = String(read(KEY_FAST) || read(KEY_CHAT_FAST) || '').trim()
+    const autoFast = (fastTextOf(c.prov || '')[0] || {}).id || ''
+    const fast = String(read(KEY_FAST) || read(KEY_CHAT_FAST) || '').trim() || autoFast
     if (fast) return withUrl({ ...c, model: fast, noThink: true })
   } catch (e) {}
   return withUrl(c)

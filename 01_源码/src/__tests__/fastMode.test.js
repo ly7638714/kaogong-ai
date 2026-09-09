@@ -34,6 +34,10 @@ describe('fastMode 快模型出题检测', () => {
     mem.set('xc_fast_gen_model', '   ')
     expect(isFastGenMode()).toBe(false)
   })
+  it('DeepSeek 配 Key 后即使未手填也自动进入非思考快模式', () => {
+    store.cfg.text = { prov: 'ds', key: 'k', url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-pro' }
+    expect(isFastGenMode()).toBe(true)
+  })
 })
 
 describe('pickGenCfg 快模型生成路由（单题快练/错题变式共用）', () => {
@@ -57,10 +61,11 @@ describe('pickGenCfg 快模型生成路由（单题快练/错题变式共用）'
     expect(pickGenCfg()).toBeNull()
   })
 
-  it('未配快模型时跟随文字模型', () => {
+  it('未配快模型时自动使用服务商快模型并标记非思考', () => {
     const c = pickGenCfg()
     expect(c.key).toBe('k')
     expect(c.model).toBe('deepseek-v4-flash')
+    expect(c.noThink).toBe(true)
   })
 
   it('出题快模型覆盖思考型文字模型', () => {

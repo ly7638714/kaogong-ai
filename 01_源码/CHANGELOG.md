@@ -2,6 +2,11 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.266] — 2026-09-09 · 快答与AI出题默认自动非思考，小白无需填模型名
+- 「⚡快答」开启后即使没有手填任何快模型，也会自动按当前服务商选择内置快模型（DeepSeek 自动使用 V4-Flash 并发送 `thinking: disabled`）。
+- AI 出题/错题变式/单题快练等生成场景默认也自动走非思考快模型，不再要求用户填 `deepseek-chat` / `deepseek-v4-flash` 等模型名；高级自定义仍保留但折叠隐藏。
+- 对话设置里“对话快模型”增加“自动（推荐）”选项，配合自建服务商的高级自定义。
+
 ## [3.8.265] — 2026-09-09 · DeepSeek 旧名兼容 + 快答真实非思考
 - DeepSeek `deepseek-chat` / `deepseek-reasoner` 旧名已于 2026-07-24 停用；代码加入兼容映射：`deepseek-chat` → `deepseek-v4-flash` 非思考，`deepseek-reasoner` → `deepseek-v4-flash` 思考，避免老配置直接请求旧名报错。
 - 对话快答/萌宠/出题快模型现在会对 DeepSeek V4 发送 `thinking: disabled`，真正进入非思考模式，而不是名义上选 V4-Flash 却仍走思考。

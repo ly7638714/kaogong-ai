@@ -2309,14 +2309,14 @@ onUnmounted(() => {
             <label>🚀 对话快模型（非思考/极速档 · 提速，强烈建议）</label>
             <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
               <select style="flex: 1 1 300px; min-width: 0" :value="chatFastModel" @change="chatFastModel = $event.target.value; saveChatFastModel()">
-                <option value="">（留空）跟随文字模型 · 可深度思考但较慢</option>
+                <option value="">🚀 自动（推荐，无需填模型名）</option>
                 <option v-for="f in fastTextOptions()" :key="f.id" :value="f.id">{{ f.label }}{{ f.pub ? ' · 发布 ' + f.pub : '' }}{{ f.note ? ' · ' + f.note : '' }}</option>
                 <option v-if="fastHasCurrentCustom()" :value="chatFastModel">✏️ 自定义：{{ chatFastModel }}</option>
               </select>
               <button class="btn btn-gh" style="font-size: 12px" @click="fastCustomMode = !fastCustomMode; if (fastCustomMode) fastCustomName = fastHasCurrentCustom() ? chatFastModel : ''">{{ fastCustomMode ? '✕ 收起' : '✏️ 自定义' }}</button>
             </div>
             <input v-if="fastCustomMode" v-model="fastCustomName" class="mk-cust-in" style="margin-top: 6px" placeholder="输入同服务商的其它快模型名（需与文字模型同一服务商/Key 才能秒回）" @keyup.enter="applyFastCustom()" />
-            <span class="ep-hint">候选已按上方「文字模型」服务商自动给出（新→旧）；快速模式会用「同服务商+同 Key」的该模型，对话/图推题秒出答案。图片题若该快模型不能识图，会自动用主视觉或「图像增强」兜底。DeepSeek-V4 / Gemini 等思考模型较慢时建议选一个非思考档；留空=完全跟随文字模型。</span>
+            <span class="ep-hint">不用记模型名：开启「⚡快答」后，系统会自动按当前服务商选择内置快模型，DeepSeek 会发送 thinking=disabled 真正非思考。下面的下拉只是给你“换一个快模型”或给自建服务商用；图片题若该快模型不能识图，会自动用主视觉或「图像增强」兜底。</span>
           </div>
           <div class="mk-act">
             <button class="btn btn-gh" :class="{ busy: catUi.text.busy }" :disabled="catUi.text.busy" @click="testCat('text')">{{ catUi.text.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>

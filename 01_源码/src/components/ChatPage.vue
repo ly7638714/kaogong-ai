@@ -38,6 +38,7 @@ function scrollThrottled() {
 import { store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat } from '../store'
 import { on as evOn, off as evOff } from '../utils/events'
 import { activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE } from '../api'
+import { fastTextOf } from '../api/modelRegistry'
 import { analyzeFigImage, readQuestionFromImage, figCfg } from '../api/figEnhance'
 import { buildChatHistory, ensureImgNotesForHistory, lastImgTopics } from '../utils/imgMemory'
 import { probe, detectAskDir, taskShape } from '../utils/intentProbe'
@@ -611,8 +612,9 @@ async function runChat() {
   let needImgRead = false
   try {
     chatFast = String(localStorage.getItem('xc_chat_fast_model') || localStorage.getItem('xc_fast_gen_model') || '').trim()
-    if (chatFast && quickMode.value) {
-      const fastC = { ...replyC, model: chatFast, noThink: true }
+    if (quickMode.value) {
+      const autoFast = (fastTextOf((replyC && replyC.prov) || '')[0] || {}).id || ''
+      const fastC = { ...replyC, model: chatFast || autoFast, noThink: true }
       const fv = supportsVision(fastC)
       if (!curIsImg || !fv) {
         replyC = fastC

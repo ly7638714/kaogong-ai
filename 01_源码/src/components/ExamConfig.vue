@@ -210,9 +210,12 @@ function toggleStrengthen(v) {
         <span class="ep-hint">整卷倒计时 = 题数 × 每题限时</span>
       </div>
       <div class="ep-param">
-        <label>出题快模型（提速）</label>
-        <input v-model="fastGenModel" class="pv-edit" style="margin-top: 6px" placeholder="留空=跟随文字模型；填 deepseek-v4-flash 等非思考模型名，出题/预生成用它提速（需与文字模型同一服务商/Key）" @change="saveFastGenModel()" />
-        <span class="ep-hint">为什么：v4-flash 默认可思考，快答/出题会把 thinking 设为 disabled 走非思考模式，速度更快；DeepSeek 旧名 deepseek-chat/reasoner 已于 2026-07-24 停用。</span>
+        <label>🚀 AI 出题用非思考快模式（自动）</label>
+        <span class="ep-hint">默认自动开启：系统会按你的文字模型服务商自动选内置快模型（如 DeepSeek 自动用 V4-Flash 并关闭思考），你不需要填模型名。</span>
+        <details style="margin-top: 6px">
+          <summary style="cursor:pointer;font-size:12px;color:var(--text3)">高级：手动指定快模型名（一般不需要）</summary>
+          <input v-model="fastGenModel" class="pv-edit" style="margin-top: 6px" placeholder="留空=自动；自建/特殊服务商才需要填快模型名" @change="saveFastGenModel()" />
+        </details>
       </div>
       <div class="ep-param">
         <label><input v-model="useFigGen" type="checkbox" /> 🚀 出题用智谱快模型（图形增强里配置的 GLM）</label>
