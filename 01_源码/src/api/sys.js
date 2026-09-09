@@ -3,8 +3,23 @@ import { store } from '../store'
 import { SYS, KB } from '../kb'
 import { retrieveCards, renderCards } from '../kb/retrieve'
 import { retrieveDetailed } from '../kb/retrieveV2'
+import { normalizePlate } from '../kb/cards-index'
 import { confusableHints } from '../utils/intentProbe'
 import { kbFlowHead, kbFlowFallback, isMethodOverview } from '../utils/kbFlow'
+
+// buildSys 的 extraMode 是 KB 模式键（luoji/yanyu…），方法卡统一按六大板块 plate 检索
+const MODE_PLATE = {
+  luoji: '判断推理',
+  leibi: '判断推理',
+  dingyi: '判断推理',
+  tutu: '判断推理',
+  yanyu: '言语理解',
+  zhanggong: '言语理解',
+  ziliao: '资料分析',
+  shuliang: '数量关系',
+  zhengzhi: '政治理论',
+  changshi: '常识判断'
+}
 
 export function buildSys(extraMode, question) {
   let sp = (store.cfg.sys || '').trim()
@@ -19,8 +34,9 @@ export function buildSys(extraMode, question) {
     if (kbText && !useFull) sp += '\n【流程执行·按步作答】先说出正在执行该板块流程第几步（如言语①定题型→②定结构→③主题词→④对比择优→⑤答案），再逐步走完并落到本题，禁止跳步直接给结论。'
     // 批次7·S1+retrieveV2：按板块+题干检索方法卡注入（V2 强命中优先；无命中退回旧检索避免噪音）
     try {
-      const plate = extraMode || store.mode || ''
+      const modeKey = extraMode || store.mode || ''
       const q = question || ''
+      const plate = normalizePlate(MODE_PLATE[modeKey] || modeKey)
       const v2 = retrieveDetailed(plate, q, 4)
       const cards = v2.length ? v2.map((x) => x.card) : retrieveCards(plate, q, 4)
       if (cards.length) sp += renderCards(cards)

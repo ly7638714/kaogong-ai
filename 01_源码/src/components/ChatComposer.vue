@@ -8,13 +8,7 @@ const {
   store,
   setDepth,
   DEPTH_LABEL,
-  enhanceAskBtn,
   closeAssist,
-  confirmPlate,
-  applyChip,
-  askWarn,
-  forceSend,
-  gotoFix,
   text,
   openAssist,
   wzSel,
@@ -43,7 +37,7 @@ function toggleTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = !toolsO
 </script>
 
 <template>
-      <!-- 🧭 提问助手（v3.8.76）：输入即识别板块/题型/意图，缺信息就轻轻提示，可一键结构化 -->
+      <!-- 🧭 自动识别（v3.8.76+）：输入时只展示识别结果，不再要求手动补全 -->
       <div v-if="askShow" class="ask-assist">
         <div class="aa-row1">
           <span v-if="ask.plate.name" class="aa-chip" :class="{ low: ask.lowConf }" :title="'置信度 ' + Math.round(ask.plate.conf * 100) + '%'">
@@ -58,29 +52,13 @@ function toggleTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = !toolsO
           <span class="aa-depth" title="回答深度：详讲 / 简答 / 只给秒杀">
             <button v-for="d in ['detail', 'brief', 'flash']" :key="d" class="aa-dp" :class="{ on: (store.cfg.answerDepth || 'detail') === d }" @click="setDepth(d)">{{ DEPTH_LABEL[d] }}</button>
           </span>
-          <button class="aa-enh" title="把口语化/残缺的提问自动结构化（纯本地，不会编造题目数据）" @click="enhanceAskBtn()">✨ 增强提问</button>
-          <button class="aa-off" title="关闭提问助手（关闭后本条不再出现）" @click="closeAssist()">✕</button>
-        </div>
-        <div v-for="(h, hi) in ask.hints" :key="hi" class="aa-hint">
-          <span class="aa-hic">{{ h.ic }}</span><span>{{ h.t }}</span>
-        </div>
-        <div v-if="ask.lowConf && ask.candidates.length" class="aa-pick">
-          <span class="aa-pk-t">是哪个板块？</span>
-          <button v-for="c in ask.candidates" :key="c" class="aa-pk-b" @click="confirmPlate(c)">{{ c }}</button>
-        </div>
-        <div v-if="ask.chips.length" class="aa-chips">
-          <button v-for="(c, ci) in ask.chips" :key="ci" class="aa-cp" :title="'插入：' + c.ins" @click="applyChip(c.ins)">{{ c.t }}</button>
-        </div>
-        <div v-if="askWarn" class="aa-warn">
-          <span>⚠️ {{ askWarn }}</span>
-          <button class="aa-wb pri" @click="forceSend()">仍要发送</button>
-          <button class="aa-wb" @click="gotoFix()">去补充</button>
+          <button class="aa-off" title="关闭自动识别（关闭后本条不再出现）" @click="closeAssist()">✕</button>
         </div>
       </div>
       <!-- 助手已关闭时的一键重开入口（仅在输入内容时出现，平时零打扰） -->
       <div v-else-if="store.cfg.askAssist === false && text.trim().length > 3" class="ask-assist">
         <div class="aa-row1">
-          <button class="aa-enh" @click="openAssist()">🧭 开启提问助手（识别板块·题型，提示补全信息）</button>
+          <button class="aa-enh" @click="openAssist()">🧭 开启自动识别</button>
         </div>
       </div>
       <div v-if="wzSel && wzSel.plate" class="wz-active">

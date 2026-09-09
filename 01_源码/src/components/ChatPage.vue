@@ -50,7 +50,7 @@ import { verifyReply } from '../utils/replyVerify'
 import { wrongExplainPrompt } from '../utils/plateCoach'
 import { detectMode, askModeSys, MODE_MAP } from '../data/askModes'
 let _lastAskCtx = null
-import { analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
+import { analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS } from '../utils/askAssist'
 import { hasStepHeadings } from '../utils/replySteps' // v3.8.190 分步解析
 import { digestOlder } from '../utils/historyDigest' // v3.8.205 长历史自动摘要
 import { calcVerifySys } from '../utils/calcProtocol' // v3.8.205 数值题可算必验
@@ -118,9 +118,8 @@ function toggleQuickMode() {
 }
 // ===== 提问助手（v3.8.76）：输入即分析板块/题型/意图/缺失，并在输入区轻量引导 =====
 const ask = ref(null) // AskAnalysis | null
-const askShow = computed(() => store.cfg.askAssist !== false && !!ask.value && !ask.value.empty)
-const sendGuard = ref(0) // 温柔校验让行计数：0=首次提醒不发送，≥1=强行发送
-const askWarn = ref('') // 温柔校验提示文案（可一键忽略，非阻塞弹窗）
+// 识别不到板块时不再展示“未识别”提示条：避免变相要求用户补关键词
+const askShow = computed(() => store.cfg.askAssist !== false && !!ask.value && !ask.value.empty && (!!ask.value.plate.name || !!ask.value.sub.name))
 let _askT = null
 function reAnalyze() {
   if (store.cfg.askAssist === false) { ask.value = null; return }
@@ -128,18 +127,10 @@ function reAnalyze() {
 }
 watch(text, () => {
   if (store.cfg.askAssist === false) { ask.value = null; return }
-  sendGuard.value = 0 // 内容变了，重新计一次让行
   clearTimeout(_askT)
   _askT = setTimeout(reAnalyze, 200) // 200ms 防抖，纯本地正则，不阻塞输入
 })
 watch(() => imgs.value.length, () => { if (store.cfg.askAssist !== false && text.value.trim()) reAnalyze() })
-// 低置信时用户点选板块 → 一次性覆盖自动识别（用户纠正优先级最高）
-function confirmPlate(name) {
-  store.cfg.pendingPlate = name
-  saveCfg()
-  if (ask.value) { ask.value.plate = { name, score: 99, conf: 1 }; ask.value.lowConf = false; ask.value.candidates = [] }
-  showToast('✅ 已按「' + name + '」的方法论作答', 'success')
-}
 // ===== 四步发题向导（AskWizard）：发送前 板块→细分→题型→意图 手动定位，runChat 按路径定向注入 =====
 const wzOpen = ref(false)
 const wzSel = ref(null) // { plate, sub, type, mode }
@@ -160,26 +151,6 @@ function wzCancel() {
   if (store.cfg.pendingPlate) { store.cfg.pendingPlate = ''; saveCfg() }
   wzSel.value = null
 }
-// 快捷 chip：把模板文本追加进输入框（不覆盖已有内容）
-function applyChip(ins) {
-  const cur = text.value
-  text.value = cur ? cur.replace(/\s+$/, '') + '\n' + ins : ins
-  nextTick(() => {
-    const ta = document.querySelector('.e-dock textarea')
-    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length }
-  })
-}
-// ✨ 增强提问：纯规则结构化改写（零 API、不编造题干数据）
-function enhanceAskBtn() {
-  const r = enhanceAsk(text.value, { hasImg: imgs.value.length > 0, curQ: store.curQ })
-  if (!r.changed) { showToast('ℹ️ 已是结构化提问，无需增强', 'info'); return }
-  text.value = r.text
-  showToast('✨ 已结构化：把留空处补上，AI 会更精准', 'success')
-  nextTick(() => {
-    const ta = document.querySelector('.e-dock textarea')
-    if (ta) ta.focus()
-  })
-}
 function setDepth(d) {
   store.cfg.answerDepth = d
   saveCfg()
@@ -190,24 +161,16 @@ function closeAssist() {
   store.cfg.askAssist = false
   saveCfg()
   ask.value = null
-  askWarn.value = ''
-  showToast('已关闭提问助手；下次输入题目时可在输入框上方一键重开', 'info')
+  showToast('已关闭实时识别；需要时可在输入框上方一键重开', 'info')
 }
 function openAssist() {
   store.cfg.askAssist = true
   saveCfg()
   reAnalyze()
-  showToast('🧭 提问助手已开启：会实时识别板块·题型并提示补全', 'success')
+  showToast('🧭 自动识别已开启：发送时自动按板块·题型定向作答', 'success')
 }
-// 温柔校验条：仍要发送 / 去补充
-function forceSend() { askWarn.value = ''; sendGuard.value = 1; send() }
-function gotoFix() {
-  askWarn.value = ''
-  nextTick(() => {
-    const ta = document.querySelector('.e-dock textarea')
-    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length }
-  })
-}
+// 同型再练等快捷入口仍需要“设完文本后直接发送”，不再经过补全拦截
+function forceSend() { send() }
 const live = ref(null) // 当前流式消息 {role:'ai', text, think, thinkOpen}
 const msgsBox = ref(null)
 const atBottom = ref(true) // 是否在最新处（用于"回到最新"按钮显隐）
@@ -526,19 +489,6 @@ async function send() {
     store.busy = false
     return
   }
-  // 提问助手·温柔校验（v3.8.76）：仅提醒一次，再次点发送必定发出，绝不阻塞
-  if (store.cfg.askAssist !== false && !sendGuard.value && txt) {
-    let a = ask.value && !ask.value.empty ? ask.value : null
-    if (!a) { try { a = analyzeAsk(txt, { hasImg: imgs.value.length > 0, curQ: store.curQ }) } catch (e) { a = null } }
-    if (a && !a.empty && (a.intent === '求解' || a.intent === '判错解释') && a.missing.length) {
-      ask.value = a
-      askWarn.value = '本题似乎缺：' + a.missing.join('、') + '。直接发送 AI 只能基于有限信息作答。'
-      sendGuard.value = 1
-      store.busy = false
-      return
-    }
-  }
-  askWarn.value = ''
   const hasImg = imgs.value.length > 0
   const imgData = hasImg ? imgs.value[0] : ''
   const c = activeCfg(hasImg)
@@ -578,8 +528,6 @@ async function send() {
   text.value = ''
   imgs.value = []
   ask.value = null // 提问助手：发送后复位
-  askWarn.value = ''
-  sendGuard.value = 0
   scroll()
   // 截图完整题目 → 先整理成可作答卡片，询问「直接讲解 / 先做一遍」，不直接解析
   if (hasImg && figRead && figRead.ok) {
@@ -640,11 +588,19 @@ async function runChat() {
   let _plate = ''
   let _taskShape = null
   if (store.mode === 'all' && store.cfg.kb !== false) {
+    // 提问助手的加权板块词典比 detectBanKuai 更宽：先算一次，避免“口语化但没写题型词”完全拿不到方法库
+    let _autoPlate = ''
+    try {
+      if (store.cfg.askAssist !== false) {
+        const _aa0 = analyzeAsk(curTxt, { hasImg: curIsImg, curQ: store.curQ })
+        if (_aa0.plate && _aa0.plate.name) _autoPlate = _aa0.plate.name
+      }
+    } catch (e) {}
     // P0-1b 换题/追问状态机：追问锁上一轮板块/细分；换题/刷新则重建并记忆
     const _pr = probe(curTxt, { hasImg: curIsImg })
     _taskShape = taskShape(curTxt, { imgRead: curFigRead || '' })
     const _nx = _lastAskCtx ? nextContext(_lastAskCtx, _pr) : null
-    _plate = store.cfg.pendingPlate || (_nx && _nx.kind === 'followup' && _nx.plate6 ? _nx.plate6 : (_pr.plate6 || (_nx && _nx.plate6) || detectBanKuai(curTxt) || ''))
+    _plate = store.cfg.pendingPlate || (_nx && _nx.kind === 'followup' && _nx.plate6 ? _nx.plate6 : (_pr.plate6 || (_nx && _nx.plate6) || detectBanKuai(curTxt) || _autoPlate || ''))
     if (_nx && (_nx.kind === 'newQ' || _nx.kind === 'refresh')) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _nx.sub || _pr.sub, text: curTxt }
     else if (!_nx) _lastAskCtx = { plate6: _plate || _pr.plate6, sub: _pr.sub, text: curTxt }
   }
@@ -691,8 +647,12 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
       const aa = analyzeAsk(curTxt, { hasImg: curIsImg, curQ: store.curQ, forcePlate: _plate })
       if (!aa.empty) {
         // ① 题型级：让模型直接用该题型的专属解法，而不是泛讲整个板块
-        if (aa.sub && aa.sub.name && aa.plate.name) {
-          sys += '\n【本题题型已识别】' + aa.plate.name + '·' + aa.sub.name + '题：请直接调用该题型的专属解法与高频陷阱，不要泛泛复述整个板块的方法论。'
+        if (aa.plate.name) {
+          if (aa.sub && aa.sub.name) {
+            sys += '\n【本题题型已识别】' + aa.plate.name + '·' + aa.sub.name + '题：请直接调用该题型的专属解法与高频陷阱，不要泛泛复述整个板块的方法论。'
+          } else {
+            sys += '\n【本题板块已自动识别】' + aa.plate.name + '题：请直接按该板块已蒸馏方法论定向作答；若只是泛问/闲聊，保持自然口语回应即可，无需反问用户补充板块。'
+          }
         }
         // ② 子意图片段（出题已由上方 _askQuiz 处理，避免重复下发）
         if (aa.intent !== '出题' && INTENT_SYS[aa.intent]) sys += INTENT_SYS[aa.intent]
@@ -742,8 +702,10 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
     if (_hits.length) {
       _hitNote = '📚 依据卡：' + _hits.map((x) => '[' + x.card.plate + '·' + x.card.type + ']' + (x.strong ? '✓' : '')).join(' ')
       sys += '\n【引用纪律】凡按已蒸馏方法作答，请在解析开头写出处卡名（如〔言语·中心理解·转折结构〕）；若某一步不是卡内方法，请明说“此处为通用推理”，不得冒充卡内方法。'
-    } else {
-      _hitNote = '📚 提示：未匹配到已蒸馏方法，以下按通用思路作答，请谨慎核对'
+    } else if (_plate || detectBanKuai(curTxt)) {
+      // 已自动定向到板块但没有“字面完全命中”的单一卡：不再让用户补关键词，改为按板块已蒸馏流程兜底
+      const _shown = _plate || detectBanKuai(curTxt) || ''
+      _hitNote = '📚 已自动按《' + _shown + '》已蒸馏方法论作答'
     }
   } catch (e) {}
   const _AICAP = 4000 // 单条 assistant 回答最多发送字符
@@ -2101,7 +2063,7 @@ onUnmounted(() => window.removeEventListener('resize', onToolsResize))
 defineEmits(['export-review'])
 
 // v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
-const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, enhanceAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, sendGuard, askWarn, _askT, reAnalyze, confirmPlate, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, applyChip, enhanceAskBtn, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, gotoFix, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
 Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 
 </script>
