@@ -2,6 +2,10 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.268] — 2026-09-09 · Cloudflare Pages 中转兼容 cun.ai 中转站
+- 新增 Cloudflare Pages Function：网页端把 API 地址设为 `https://kaogong-ai.pages.dev/api/...` 后，请求由 Pages 服务端转发到 `https://www.cun.ai/v1/...`，绕开 cun.ai 不允许浏览器跨域导致的 `Failed to fetch`。
+- 适配示例：文本/视觉模型 API 地址填 `https://kaogong-ai.pages.dev/api/chat/completions`，Key 仍填你的中转站密钥，模型名正常填 `claude-fable-5` 等。
+
 ## [3.8.267] — 2026-09-09 · 自定义/中转站模型名可直接输入
 - 设置里服务商为「自定义 API / 中转站」时，文字、视觉、语音讲稿改写模型栏自动变成输入框，可粘贴中转站模型名，不再要求先点“➕ 添加模型”再选择。
 - 图形增强的本地模型（Ollama/LM Studio/Jan）也支持直接输入模型名。
