@@ -17,7 +17,7 @@
 //  - 图像增强(图)卡 = 图片理解/复刻类开源 VLM；OpenAI gpt-image 属"生成"模型且非 chat 协议，不列
 //  - 个别快照 id（厂商带日期后缀，如 qwen3.7-max-2026-05-20）通常可省略日期直接用基名
 
-export const REGISTRY_VERSION = '2026.09-r2'
+export const REGISTRY_VERSION = '2026.09-r3'
 
 // ── 类别元数据（供展示）──
 export const CAT_META = {
@@ -72,8 +72,9 @@ export const PROVIDERS = {
 export const MODELS = {
   // ========== ① 文本大模型 ==========
   text: {
-    // DeepSeek V4（2026-04-24 发布；1M 上下文，Thinking/非 Thinking 双模；chat/reasoner 旧名已于 2026-07-24 停用）
+    // DeepSeek（2026-04-24 V4 发布；chat/reasoner 旧名已于 2026-07-24 停用；V4.1-Flash 按平台可选模型列入，官方未公布前不设为默认）
     ds: [
+      { id: 'deepseek-v4.1-flash', label: 'DeepSeek-V4.1-Flash（如平台可选）', pub: '2026-09', tag: 'fast', note: 'Flash 系列新定价·缓存命中更省' },
       { id: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash（快·推荐）', pub: '2026-04', tag: 'fast', note: '项目默认·便宜省 token' },
       { id: 'deepseek-v4-pro',   label: 'DeepSeek-V4-Pro（强推理·Agent）', pub: '2026-04', tag: 'think', note: '对标顶级闭源' }
     ],

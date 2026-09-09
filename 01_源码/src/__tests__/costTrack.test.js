@@ -23,11 +23,31 @@ describe('AI 用量与花费追踪 costTrack', () => {
 
   it('calcCost 返回输入/输出/固定/合计明细', () => {
     const c = calcCost('deepseek-chat', 1000, 500)
-    // 2026-09 官方价（联网核验）：deepseek-chat = V4-Flash 非思考，输入 0.0015/输出 0.0045 元每千 token
-    expect(c.total).toBeCloseTo(0.0015 * 1 + 0.0045 * 0.5, 5)
-    expect(c.in).toBeCloseTo(0.0015, 5)
-    expect(c.out).toBeCloseTo(0.00225, 5)
+    // 2026-09-10 起 Flash 新价：deepseek-chat = V4-Flash 非思考，输入 0.001/输出 0.004 元每千 token（空闲档·缓存未命中）
+    expect(c.total).toBeCloseTo(0.001 * 1 + 0.004 * 0.5, 5)
+    expect(c.in).toBeCloseTo(0.001, 5)
+    expect(c.out).toBeCloseTo(0.002, 5)
     expect(c.fixed).toBe(0)
+  })
+
+  it('deepseek-v4.1-flash 按 2026-09-10 Flash 新价估算', () => {
+    const c = calcCost('deepseek-v4.1-flash', 1000, 1000)
+    expect(c.in).toBeCloseTo(0.001, 5)
+    expect(c.out).toBeCloseTo(0.004, 5)
+    expect(c.total).toBeCloseTo(0.005, 5)
+  })
+
+  it('旧版保存的 DeepSeek Flash 默认价自动迁移到新价', () => {
+    localStorage.setItem('xc_cost_p', JSON.stringify({
+      'deepseek-v4-flash': { in: 0.0015, out: 0.0045, note: 'old' },
+      'deepseek-v4-pro': { in: 0.0045, out: 0.0135, note: 'keep' }
+    }))
+    localStorage.removeItem('xc_cost_p_v')
+    const p = getPrices()
+    expect(p['deepseek-v4-flash'].in).toBe(0.001)
+    expect(p['deepseek-v4-flash'].out).toBe(0.004)
+    expect(p['deepseek-v4-pro'].in).toBe(0.0045)
+    expect(p['deepseek-v4.1-flash'].in).toBe(0.001)
   })
 
   it('recordCost 记录图文类型/思考token/耗时/费用明细', () => {
@@ -65,10 +85,10 @@ describe('AI 用量与花费追踪 costTrack', () => {
     recordCost({ feature: 'tts', provider: 'glm', model: 'glm-tts', cost: 0.001, note: '10 字' })
     const s = costStats()
     expect(s.totalN).toBe(2)
-    // deepseek-chat 现价 in 0.0015 / out 0.0045 元每千：1K+1K = 0.0015+0.0045 = 0.006
-    expect(s.byFeat.chat).toBeCloseTo(0.006, 5)
+    // deepseek-chat 2026-09-10 起 in 0.001 / out 0.004 元每千：1K+1K = 0.005
+    expect(s.byFeat.chat).toBeCloseTo(0.005, 5)
     expect(s.byFeat.tts).toBeCloseTo(0.001, 5)
-    expect(s.byModel['deepseek-chat']).toBeCloseTo(0.006, 5)
+    expect(s.byModel['deepseek-chat']).toBeCloseTo(0.005, 5)
   })
 
   it('recordCost 无 usage 时按文本长度估算 token', () => {
@@ -120,4 +140,3 @@ describe('costTrack 今日预算熔断（批次3.4）', () => {
     expect(budgetBlocked()).toBe(true)
   })
 })
-

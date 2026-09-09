@@ -6,6 +6,14 @@ import { reactive } from 'vue'
 
 const KEY = 'xc_cost'
 const MAX_RECORDS = 3000
+const PRICE_SCHEMA = '2026-09-10-deepseek-flash-v1'
+const DEEPSEEK_FLASH_KEYS = [
+  'deepseek-v4.1-flash',
+  'deepseek-v4-flash-vision-exp',
+  'deepseek-v4-flash',
+  'deepseek-reasoner',
+  'deepseek-chat'
+]
 
 // ---------- 计价表（元/千 token；朗读为 元/千字；克隆为 元/次）----------
 // 默认值按主流公开价估算；用户可在「💰 用量与花费」面板里自行改成自己账单的真实单价。
@@ -25,13 +33,15 @@ export const DEF_PRICES = {
   // 下列为 2026-09 联网核验的公开价默认参考，可在「💰 用量与花费」面板改成你账单真实单价。
   // 注意：priceOf 按「模型名包含该 key」做子串匹配，故同族里「更具体/更长」的 key 必须排在「更泛化」的 key 之前，否则会被泛化 key 截胡。
 
-  // ---------- DeepSeek（2026-08-17 起峰谷定价，官方价格页 2026-09 核验）----------
-  // 高峰：北京 09:00–12:00、14:00–18:00（其余为空闲档，价格×0.5）；缓存命中输入更低。下表取「空闲档·缓存未命中」作默认。
-  'deepseek-v4-flash-vision-exp': { in: 0.0015, out: 0.0045, note: 'DeepSeek 官方·V4-Flash-Vision-Exp 空闲档·缓存未命中 输入1.5/输出4.5 元每百万(高峰×2；图片转 token 计费)', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  // ---------- DeepSeek（2026-09-10 12:00 起 Flash 系列新定价，官方公告/价格页核验）----------
+  // Flash 新价（元/百万）：空闲缓存命中输入 0.02、空闲缓存未命中输入 1、空闲输出 4；高峰为 2 倍。
+  // 本表仍取「空闲档·缓存未命中」作默认，属于保守估算；若 API 返回缓存命中可自行调低输入单价。
+  'deepseek-v4.1-flash': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4.1-Flash（新）空闲档·缓存未命中 输入1/输出4 元每百万（高峰×2；缓存命中输入0.02 元/百万）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-v4-flash-vision-exp': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash-Vision-Exp 空闲档·缓存未命中 输入1/输出4 元每百万（2026-09-10 起；高峰×2；图片转 token 计费）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4-pro': { in: 0.0045, out: 0.0135, note: 'DeepSeek 官方·V4-Pro 空闲档·缓存未命中 输入4.5/输出13.5 元每百万(高峰×2；缓存命中更低)', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
-  'deepseek-v4-flash': { in: 0.0015, out: 0.0045, note: 'DeepSeek 官方·V4-Flash 空闲档·缓存未命中 输入1.5/输出4.5 元每百万(高峰×2)', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
-  'deepseek-reasoner': { in: 0.0015, out: 0.0045, note: 'DeepSeek 官方·V4-Flash 思考模式(兼容名) 价同 V4-Flash；思考会多产出输出 token', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
-  'deepseek-chat': { in: 0.0015, out: 0.0045, note: 'DeepSeek 官方·V4-Flash 非思考(兼容名) 价同 V4-Flash', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-v4-flash': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 空闲档·缓存未命中 输入1/输出4 元每百万（2026-09-10 起；高峰×2）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-reasoner': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 思考模式(兼容名) 价同 V4-Flash；思考会多产出输出 token', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-chat': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 非思考(兼容名) 价同 V4-Flash', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
 
   // ---------- 智谱 GLM（open.bigmodel.cn/pricing 2026-09 核验；取 [32+) 档为默认）----------
   'glm-4.7-flash': { in: 0, out: 0, note: '智谱官方·GLM-4.7-Flash 免费', src: 'https://open.bigmodel.cn/pricing' },
@@ -81,12 +91,32 @@ export const DEF_PRICES = {
 export function getPrices() {
   try {
     const raw = localStorage.getItem(KEY + '_p')
-    if (raw) return { ...DEF_PRICES, ...JSON.parse(raw) }
+    if (raw) {
+      const saved = JSON.parse(raw)
+      if (localStorage.getItem(KEY + '_p_v') !== PRICE_SCHEMA) {
+        // 老版保存过「旧 DeepSeek Flash 默认价」的用户自动迁移到 2026-09-10 新价；
+        // 用户手动改过的非旧默认价保留不动。
+        let changed = false
+        for (const k of DEEPSEEK_FLASH_KEYS) {
+          const s = saved[k]
+          if (s && Math.abs(Number(s.in) - 0.0015) < 1e-9 && Math.abs(Number(s.out) - 0.0045) < 1e-9) {
+            saved[k] = DEF_PRICES[k]
+            changed = true
+          }
+        }
+        if (changed) localStorage.setItem(KEY + '_p', JSON.stringify(saved))
+        localStorage.setItem(KEY + '_p_v', PRICE_SCHEMA)
+      }
+      return { ...DEF_PRICES, ...saved }
+    }
   } catch (e) {}
   return { ...DEF_PRICES }
 }
 export function savePrices(p) {
-  try { localStorage.setItem(KEY + '_p', JSON.stringify(p)) } catch (e) {}
+  try {
+    localStorage.setItem(KEY + '_p', JSON.stringify(p))
+    localStorage.setItem(KEY + '_p_v', PRICE_SCHEMA)
+  } catch (e) {}
 }
 // 朗读单价（元/千字）：优先按引擎真实价（已核验：dash=qwen3-tts ¥0.8/万字符=0.08/千字），
 // 未核验引擎回退 ttsPer1k（可在「计价表」里改成你账单实际值）

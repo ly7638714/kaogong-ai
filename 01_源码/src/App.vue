@@ -3569,7 +3569,7 @@ onUnmounted(() => {
           <div v-if="costStat.list[costOpen].note"><b>备注：</b>{{ costStat.list[costOpen].note }}</div>
         </div>
         <details class="guide" style="margin-top: 10px">
-          <summary>⚙️ 计价表（2026-09 联网核验真实公开价：DeepSeek V4 峰谷 / 智谱 GLM-5·4.7 系列 / 通义 Qwen3 系列 / OpenAI GPT-5 系列 / Kimi K3·K2.6 / Gemini 3.x / 豆包 Seed-1.6-Flash / 朗读单价，均按官方价目页核验；美元模型按 ¥7 折算。单位：输入框=元/千 token = 官方价(元/百万)÷1000。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
+          <summary>⚙️ 计价表（2026-09-10 起 DeepSeek Flash 新价：空闲缓存未命中输入1/输出4 元每百万，缓存命中输入0.02，高峰×2；另含智谱/通义/OpenAI/Kimi/Gemini/豆包等官方公开价。单位：输入框=元/千 token = 官方价(元/百万)÷1000。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
           <div class="guide-body">
             <template v-for="(pr, mk) in costPrices" :key="mk"><div v-if="mk !== 'ttsPrices'" class="cost-price-row">
               <span class="cp-name">{{ mk === 'ttsPer1k' ? '朗读(元/千字)' : mk === 'cloneFee' ? '克隆(元/次)' : mk }}</span>
