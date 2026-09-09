@@ -20,7 +20,7 @@ const {
         <p style="margin-bottom: 8px">这道题当前已有 <b>{{ reasonModal.old.length }}</b> 条旧错因，AI 结合你的作答与解析归纳出 <b>{{ reasonModal.neu.length }}</b> 条新错因：</p>
         <div class="rv-group"><b>旧错因：</b><span v-for="r in reasonModal.old" :key="r" class="chip on">{{ r }}</span></div>
         <div class="rv-group"><b>AI 新错因：</b><span v-for="r in reasonModal.neu" :key="r" class="chip ai-chip">{{ r }}</span></div>
-        <p style="font-size: 12px; color: var(--text3); margin-top: 6px">选择「用新替换旧」会删除旧错因并改用 AI 新错因；「保留合并」新旧并存；「取消」不改动错因（答案/秒杀/笔记仍会填入）。</p>
+        <p style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">选择「用新替换旧」会删除旧错因并改用 AI 新错因；「保留合并」新旧并存；「取消」不改动错因（答案/秒杀/笔记仍会填入）。</p>
         <div class="pnl-btns">
           <button class="btn btn-pri" @click="reasonModal.resolve('replace')">✅ 用新替换旧</button>
           <button class="btn btn-gh" @click="reasonModal.resolve('merge')">➕ 保留合并</button>

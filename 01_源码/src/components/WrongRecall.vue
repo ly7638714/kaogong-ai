@@ -26,14 +26,14 @@ function extractChoicesLocal(text) {
   <div v-if="rcShow" class="ov show" @click.self="rcClose()">
     <div class="pnl" style="max-width: 640px">
       <h3>🧠 主动回忆复盘（先默写 · 再展开）</h3>
-      <p style="font-size: 12px; color: var(--text3); margin: 2px 0 10px">
+      <p style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 2px 0 10px">
         回忆是最强巩固。先别看答案——凭记忆写下：这道题考什么、为什么选这个、上次错在哪。写不出来也没关系，点「展开解析」再对照。
       </p>
       <div v-if="rcQ" style="border: 1px solid rgba(127,127,127,.2); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px">
-        <div style="font-size: 12px; color: var(--text2); margin-bottom: 4px">{{ rcQ.subject || '未分类' }} · 错 {{ rcQ.wrongCount || 1 }} 次 · 上次错因：{{ (rcQ.reasons || []).join('、') || '未标' }}</div>
+        <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); margin-bottom: 4px">{{ rcQ.subject || '未分类' }} · 错 {{ rcQ.wrongCount || 1 }} 次 · 上次错因：{{ (rcQ.reasons || []).join('、') || '未标' }}</div>
         <div class="rc-stem" v-html="md(String(rcQ.question || rcQ.q || rcQ.stem || '').replace(/\n{3,}/g, '\n\n'))"></div>
         <div v-if="optsOf.length" style="margin-top: 6px">
-          <div v-for="o in optsOf" :key="o.k" style="font-size: 13px; padding: 1px 0"><b>{{ o.k }}.</b> <span v-html="md(String(o.t || ''))"></span></div>
+          <div v-for="o in optsOf" :key="o.k" style="font-size: calc(13px * var(--ui-fs-scale, 1)); padding: 1px 0"><b>{{ o.k }}.</b> <span v-html="md(String(o.t || ''))"></span></div>
         </div>
       </div>
       <textarea v-model="rcRecall" rows="3" placeholder="✍️ 先默写：考点 / 关键判断依据 / 上次为什么错…（可留空，直接展开）" style="width: 100%; box-sizing: border-box"></textarea>
@@ -43,12 +43,12 @@ function extractChoicesLocal(text) {
       </div>
       <template v-else>
         <div style="border: 1px dashed rgba(52,211,153,.5); border-radius: 10px; padding: 8px 10px; margin-top: 8px">
-          <div style="font-size: 13px"><b>✅ 答案：{{ rcQ.answer || '未填' }}</b></div>
-          <div v-if="rcQ.method" style="font-size: 12.5px; color: #fbbf24; margin-top: 4px">⚡ 秒杀：{{ rcQ.method }}</div>
-          <div v-if="rcQ.note" style="font-size: 12.5px; color: var(--text2); margin-top: 4px">📝 {{ rcQ.note }}</div>
-          <div v-if="rcQ.explain || rcQ.analysis" style="font-size: 12.5px; color: var(--text2); margin-top: 4px; white-space: pre-wrap">{{ String(rcQ.explain || rcQ.analysis || '').slice(0, 1200) }}</div>
+          <div style="font-size: calc(13px * var(--ui-fs-scale, 1))"><b>✅ 答案：{{ rcQ.answer || '未填' }}</b></div>
+          <div v-if="rcQ.method" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: #fbbf24; margin-top: 4px">⚡ 秒杀：{{ rcQ.method }}</div>
+          <div v-if="rcQ.note" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 4px">📝 {{ rcQ.note }}</div>
+          <div v-if="rcQ.explain || rcQ.analysis" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 4px; white-space: pre-wrap">{{ String(rcQ.explain || rcQ.analysis || '').slice(0, 1200) }}</div>
         </div>
-        <div v-if="rcRecall && rcRecall.trim()" style="font-size: 12.5px; color: var(--text2); margin-top: 6px">🖊 你的回忆：{{ rcRecall }}</div>
+        <div v-if="rcRecall && rcRecall.trim()" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 6px">🖊 你的回忆：{{ rcRecall }}</div>
         <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px">
           <button class="btn btn-pri" @click="rcSelf(true)">✅ 回忆到位（算二刷答对）</button>
           <button class="btn btn-gh" @click="rcSelf(false)">❌ 没想起来（算二刷答错，记复错）</button>

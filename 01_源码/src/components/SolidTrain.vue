@@ -2074,7 +2074,7 @@ const foldProgPct = computed({
             <div class="tip-list">
               <details v-for="(t, i) in tipFiltered" :key="i" class="tip-it">
                 <summary>{{ t.q }}</summary>
-                <div class="tip-a">{{ t.a }}</div><button class="btn btn-gh st-tip-send" style="margin-top:6px;padding:2px 10px;font-size:12px" @click="askTipDetail(t)">💬 问 AI 讲透并给口诀</button>
+                <div class="tip-a">{{ t.a }}</div><button class="btn btn-gh st-tip-send" style="margin-top:6px;padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="askTipDetail(t)">💬 问 AI 讲透并给口诀</button>
               </details>
               <div v-if="!tipFiltered.length" class="tip-empty">没有匹配的考点，换个关键词或点「问 AI」</div>
             </div>

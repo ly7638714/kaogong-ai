@@ -571,7 +571,7 @@ async function exportReport(days = 7, fmt = 'md') {
           <div class="ass-item"><div class="ass-num">{{ assessment.pct }}%</div><div class="ass-l">达成度</div></div>
         </div>
         <div class="ass-bar"><i :style="{ width: Math.min(100, assessment.pct) + '%' }"></i></div>
-        <div v-if="goalBreakdown.some((b) => b.v != null)" class="gb-breakdown" style="margin-top: 8px; font-size: 12px">
+        <div v-if="goalBreakdown.some((b) => b.v != null)" class="gb-breakdown" style="margin-top: 8px; font-size: calc(12px * var(--ui-fs-scale, 1))">
           <div style="color: var(--text3); margin-bottom: 4px">🎯 目标 {{ assessment.goal }} 分拆解到板块（按权重）：</div>
           <div v-for="b in goalBreakdown" :key="b.label" style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px">
             <span style="width: 60px">{{ b.label }}</span>
@@ -587,16 +587,16 @@ async function exportReport(days = 7, fmt = 'md') {
           <label>🎯 行测目标分数（100 制，动态评估你的得分情况）</label>
           <input v-model.number="store.cfg.goalScore" type="number" min="0" max="100" style="width: 96px" @change="saveCfg()" />
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-top: 4px">当前预估分 = 六大板块按题量权重加权（判断/言语各30、资料20、数量8、常识7、政治5）；掌握度来自做题正确率 + 错题复盘 + 错题量。</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">当前预估分 = 六大板块按题量权重加权（判断/言语各30、资料20、数量8、常识7、政治5）；掌握度来自做题正确率 + 错题复盘 + 错题量。</div>
       </div>
 
-      <div class="sec-t">🧠 AI 能力自评（灰度）<span style="font-weight: 400; font-size: 12px; color: var(--text3)">纵向自评口径，非全国排名</span></div>
-      <div class="assess-card" style="font-size: 13px">
+      <div class="sec-t">🧠 AI 能力自评（灰度）<span style="font-weight: 400; font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3)">纵向自评口径，非全国排名</span></div>
+      <div class="assess-card" style="font-size: calc(13px * var(--ui-fs-scale, 1))">
         <template v-if="ability.predictionReady">
           <div style="margin-bottom: 6px">📊 基于作答流水 {{ ability.total }} 次的纵向能力估算（Elo θ，样本越足越稳）：</div>
           <div v-for="r in ability.rows" :key="r.label" style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
             <span style="width: 64px">{{ r.label }}</span>
-            <span class="ass-num" style="font-size: 14px">{{ r.theta }}</span>
+            <span class="ass-num" style="font-size: calc(14px * var(--ui-fs-scale, 1))">{{ r.theta }}</span>
             <span style="color: var(--text3)">样本 {{ r.n }} 题</span>
           </div>
           <div style="color: var(--text3); margin-top: 4px">说明：θ 由每次作答（含用时折价）按考点重放更新，仅供自我纵向对比；想得到“绝对校准”，可定期做锚点自测（每板块 10 道固定真题）。</div>
@@ -613,13 +613,13 @@ async function exportReport(days = 7, fmt = 'md') {
             <span v-if="ability.anchorReady">；已累计 {{ ability.total }} 题，可定期做一次锚点自测（每板块 10 道固定真题）做绝对校准。</span>
           </div>
         </template>
-        <div v-if="qcSum" style="font-size: 11px; color: var(--text3); border-top: 1px dashed var(--bg3,#334155); margin-top: 8px; padding-top: 6px">🧾 出题质检运行数据（本机累计 {{ qcSum.gen }} 题）：重出 {{ qcSum.retried }} 题 · 未过闸 {{ qcSum.failed }} 题<span v-if="qcSum.reasonsTop"> · 高频失败原因：{{ qcSum.reasonsTop }}</span>（失败题不会入卷，属 fail-closed）</div>
-        <div v-if="health.length" style="font-size: 11px; color: var(--text3); margin-top: 4px">🔬 跨卷出题薄弱点（各 板块·题型 出题≥5）：<span v-for="h in health" :key="h.plate + h.variant" style="margin-right: 8px">{{ h.plate }}·{{ h.variant }} 失败{{ h.fail }}/{{ h.gen }}（{{ Math.round((h.fail / h.gen) * 100) }}%）</span>—— 这些类型常反复难出：可在出题配置关「严格质检/双模型互检」、换更快模型，或点「只补失败题」续出</div>
-        <div v-if="calibRows.length" style="font-size: 11px; color: var(--text3); margin-top: 4px">🎚️ 难度校准（板块实测，n≥8）：<span v-for="c in calibRows" :key="c.pl" style="margin-right: 8px">{{ c.pl }} 实测{{ Math.round(c.p * 100) }}%（{{ c.tag }}）</span></div>
+        <div v-if="qcSum" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); border-top: 1px dashed var(--bg3,#334155); margin-top: 8px; padding-top: 6px">🧾 出题质检运行数据（本机累计 {{ qcSum.gen }} 题）：重出 {{ qcSum.retried }} 题 · 未过闸 {{ qcSum.failed }} 题<span v-if="qcSum.reasonsTop"> · 高频失败原因：{{ qcSum.reasonsTop }}</span>（失败题不会入卷，属 fail-closed）</div>
+        <div v-if="health.length" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">🔬 跨卷出题薄弱点（各 板块·题型 出题≥5）：<span v-for="h in health" :key="h.plate + h.variant" style="margin-right: 8px">{{ h.plate }}·{{ h.variant }} 失败{{ h.fail }}/{{ h.gen }}（{{ Math.round((h.fail / h.gen) * 100) }}%）</span>—— 这些类型常反复难出：可在出题配置关「严格质检/双模型互检」、换更快模型，或点「只补失败题」续出</div>
+        <div v-if="calibRows.length" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">🎚️ 难度校准（板块实测，n≥8）：<span v-for="c in calibRows" :key="c.pl" style="margin-right: 8px">{{ c.pl }} 实测{{ Math.round(c.p * 100) }}%（{{ c.tag }}）</span></div>
       </div>
 
       <div v-if="heatTop.length" class="sec-t">🔎 考点热度 Top{{ heatTop.length }}（近 30 天 · 做题量 × 正确率）</div>
-      <div v-if="heatTop.length" class="assess-card" style="font-size: 12px">
+      <div v-if="heatTop.length" class="assess-card" style="font-size: calc(12px * var(--ui-fs-scale, 1))">
         <div v-for="k in heatTop" :key="k.kp" style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
           <span style="flex: 0 0 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="k.kp">{{ k.kp }}</span>
           <span style="flex: 1; height: 8px; border-radius: 4px; background: var(--bg2, #1e293b); overflow: hidden"><i style="display: block; height: 8px; border-radius: 4px" :style="{ width: Math.min(100, Math.round((k.total / heatTop[0].total) * 100)) + '%', background: k.rate == null ? '#64748b' : k.rate >= 80 ? '#34d399' : k.rate >= 60 ? '#fbbf24' : '#fb7185' }"></i></span>
@@ -629,36 +629,36 @@ async function exportReport(days = 7, fmt = 'md') {
       </div>
 
       <div v-if="heatGrid && heatGrid.kps && heatGrid.kps.length" style="margin-top: 8px">
-        <button class="btn btn-gh" style="font-size: 12px; padding: 2px 10px" @click="toggleMatrix()">
+        <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); padding: 2px 10px" @click="toggleMatrix()">
           {{ showMatrix ? '🔼 收起 考点×周矩阵' : '🗺️ 展开 考点×周矩阵（近 8 周 · Top' + Math.min(40, heatGrid.kps.length) + '）' }}
         </button>
         <div v-if="showMatrix" style="margin-top: 6px">
           <div style="overflow-x: auto">
             <div ref="heatEl" class="hm-chart" :style="{ height: matrixRowH + 'px', width: '680px' }"></div>
           </div>
-          <div style="color: var(--text3); font-size: 11px; margin-top: 2px">行=考点（按做题量 Top{{ Math.min(40, heatGrid.kps.length) }}，题量最多在顶部）；列=近 8 周滚动窗口（最右=本周）。颜色=正确率（绿≥80 / 黄 60-79 / 红&lt;60），越深=题量越大；空白=该周未练；悬停看完整考点与对错。横滑可看全列。</div>
+          <div style="color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); margin-top: 2px">行=考点（按做题量 Top{{ Math.min(40, heatGrid.kps.length) }}，题量最多在顶部）；列=近 8 周滚动窗口（最右=本周）。颜色=正确率（绿≥80 / 黄 60-79 / 红&lt;60），越深=题量越大；空白=该周未练；悬停看完整考点与对错。横滑可看全列。</div>
         </div>
       </div>
 
-      <details v-if="flaggedList.length" class="assess-card" style="font-size: 12px">
+      <details v-if="flaggedList.length" class="assess-card" style="font-size: calc(12px * var(--ui-fs-scale, 1))">
         <summary style="cursor: pointer; color: #fbbf24">⚠️ 疑题反馈榜（{{ flaggedList.length }} 条 · 已自动降低同类题出题权重）<span style="margin-left:6px; color:var(--text3); font-weight:400">待复核 {{ flagChips.open }} · 已确认 {{ flagChips.confirmed }} · 误报 {{ flagChips.dismissed }}</span></summary>
         <div style="margin-top: 4px">📊 按 板块|考点 排行：<span v-for="rk in flagRank" :key="rk.k" style="margin-right: 8px">{{ rk.k }}×{{ rk.n }}</span></div>
-        <button class="btn btn-gh" style="padding: 1px 8px; font-size: 11px; margin-top: 2px" @click="exportFlagged()">📄 导出MD</button><button class="btn btn-gh" style="padding: 1px 8px; font-size: 11px; margin-top: 2px; margin-left: 4px" @click="exportFlaggedCsv()">📊 导出CSV</button>
+        <button class="btn btn-gh" style="padding: 1px 8px; font-size: calc(11px * var(--ui-fs-scale, 1)); margin-top: 2px" @click="exportFlagged()">📄 导出MD</button><button class="btn btn-gh" style="padding: 1px 8px; font-size: calc(11px * var(--ui-fs-scale, 1)); margin-top: 2px; margin-left: 4px" @click="exportFlaggedCsv()">📊 导出CSV</button>
         <div v-for="f in flaggedList" :key="f.id" style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
           <span style="flex: 0 0 90px">{{ f.plate }}</span>
           <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="f.question">{{ f.kpoint || f.variant || '综合' }} · {{ f.note }}</span>
-          <span style="font-size: 10px" :style="{ color: f.status === 'confirmed' ? '#34d399' : f.status === 'dismissed' ? '#94a3b8' : '#fbbf24' }">{{ f.status === 'confirmed' ? '已确认' : f.status === 'dismissed' ? '误报' : '待复核' }}</span>
-          <template v-if="!f.status || f.status === 'open'"><button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" title="确认题目确实有问题（继续降权同类题）" @click="markFlag(f.id, 'confirmed')">✅确有问题</button><button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" title="判定为误报（解除降权）" @click="markFlag(f.id, 'dismissed')">❌误报</button></template>
-          <button class="btn btn-gh" style="padding: 1px 6px; font-size: 11px" @click="rmFlagged(f.id)">移除</button>
+          <span style="font-size: calc(10px * var(--ui-fs-scale, 1))" :style="{ color: f.status === 'confirmed' ? '#34d399' : f.status === 'dismissed' ? '#94a3b8' : '#fbbf24' }">{{ f.status === 'confirmed' ? '已确认' : f.status === 'dismissed' ? '误报' : '待复核' }}</span>
+          <template v-if="!f.status || f.status === 'open'"><button class="btn btn-gh" style="padding: 1px 6px; font-size: calc(11px * var(--ui-fs-scale, 1))" title="确认题目确实有问题（继续降权同类题）" @click="markFlag(f.id, 'confirmed')">✅确有问题</button><button class="btn btn-gh" style="padding: 1px 6px; font-size: calc(11px * var(--ui-fs-scale, 1))" title="判定为误报（解除降权）" @click="markFlag(f.id, 'dismissed')">❌误报</button></template>
+          <button class="btn btn-gh" style="padding: 1px 6px; font-size: calc(11px * var(--ui-fs-scale, 1))" @click="rmFlagged(f.id)">移除</button>
         </div>
       </details>
 
       <div class="sec-t">📈 学习趋势</div>
       <div v-if="weekStat.length" style="display:flex;gap:5px;align-items:flex-end;margin:6px 0 2px">
-        <span style="font-size:11px;color:var(--text3);margin-right:4px">本周每日完成（做题+复盘）</span>
+        <span style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);margin-right:4px">本周每日完成（做题+复盘）</span>
         <span v-for="d in weekStat" :key="d.key" style="display:flex;flex-direction:column;align-items:center;gap:2px" :title="d.key + ' 做题' + d.q + ' · 复盘' + d.r + ' · ' + d.min + '分'">
           <i :style="{ display:'block', width:'12px', height: Math.max(2, Math.round(d.total / weekStatMax * 20)) + 'px', background:'var(--accent2,#22d3ee)', borderRadius:'2px', opacity:.8 }"></i>
-          <em style="font-style:normal;font-size:10px;color:var(--text3)">{{ d.label }}</em>
+          <em style="font-style:normal;font-size: calc(10px * var(--ui-fs-scale, 1));color:var(--text3)">{{ d.label }}</em>
         </span>
       </div>
       <div class="trend-card">
@@ -790,7 +790,7 @@ async function exportReport(days = 7, fmt = 'md') {
             </div>
           </div>
           <details v-if="kpoints[i] && kpoints[i].list.length" class="subm-kp" style="margin-top:6px">
-            <summary style="cursor:pointer;font-size:12.5px;color:var(--text2)">🔍 考点下钻（{{ kpoints[i].list.length }} 个考点）</summary>
+            <summary style="cursor:pointer;font-size: calc(12.5px * var(--ui-fs-scale, 1));color:var(--text2)">🔍 考点下钻（{{ kpoints[i].list.length }} 个考点）</summary>
             <div class="subm-vars" style="margin-top:6px">
               <div v-for="x in kpoints[i].list" :key="x.k" class="subm-var">
                 <span class="sv-name">{{ x.k }}</span>
@@ -821,7 +821,7 @@ async function exportReport(days = 7, fmt = 'md') {
         <div class="rp-inner" :style="{ width: revRate + '%' }"></div>
         <span class="rp-l">{{ revRate }}%</span>
       </div>
-      <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+      <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
         已复盘 {{ store.wqs.filter((q) => q.reviewed).length }} / {{ store.wqs.length }} 题 — 复盘到位是提分关键
       </div>
 
@@ -830,7 +830,7 @@ async function exportReport(days = 7, fmt = 'md') {
     <div class="ov" :class="{ show }" @click.self="show = false">
       <div class="pnl">
         <h3>📊 明细</h3>
-        <pre style="white-space: pre-wrap; font-size: 13px; font-family: inherit">{{ detail }}</pre>
+        <pre style="white-space: pre-wrap; font-size: calc(13px * var(--ui-fs-scale, 1)); font-family: inherit">{{ detail }}</pre>
         <div class="pnl-btns"><button class="btn btn-gh" @click="show = false">关闭</button></div>
       </div>
     </div>

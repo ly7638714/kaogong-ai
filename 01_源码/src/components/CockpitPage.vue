@@ -397,29 +397,29 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
   <div class="ck-plan" style="margin:10px 0 4px;border-radius:12px;padding:10px 12px">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <b>🎯 今日目标</b>
-      <span v-if="ps.allDone" style="color:#34d399;font-size:12px">✅ 已达成</span>
+      <span v-if="ps.allDone" style="color:#34d399;font-size: calc(12px * var(--ui-fs-scale, 1))">✅ 已达成</span>
       <span :style="{ color: morningOk ? '#34d399' : 'var(--text3)', fontSize: '12px' }">🌅 晨练{{ morningOk ? ' ✅' : ' 未做' }}</span>
       <span style="flex:1"></span>
-      <span style="font-size:12px;color:var(--text3)">进度 {{ ps.pct }}%</span>
+      <span style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">进度 {{ ps.pct }}%</span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;align-items:center">
-      <span style="font-size:12px">复习到期 <b style="color:#fb7185">{{ tp.due }}</b></span>
-      <span style="font-size:12px">做题 <b>{{ tp.q }}/{{ planCfg.quiz }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.quiz" @change="setPlanGoal('quiz', $event.target.value)" /></span>
-      <span style="font-size:12px">复盘 <b>{{ tp.rev }}/{{ planCfg.review }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.review" @change="setPlanGoal('review', $event.target.value)" /></span>
-      <span style="font-size:12px">时长分 <b>{{ tp.minutes }}/{{ planCfg.minutes }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.minutes" @change="setPlanGoal('minutes', $event.target.value)" /></span>
+      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">复习到期 <b style="color:#fb7185">{{ tp.due }}</b></span>
+      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">做题 <b>{{ tp.q }}/{{ planCfg.quiz }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.quiz" @change="setPlanGoal('quiz', $event.target.value)" /></span>
+      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">复盘 <b>{{ tp.rev }}/{{ planCfg.review }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.review" @change="setPlanGoal('review', $event.target.value)" /></span>
+      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">时长分 <b>{{ tp.minutes }}/{{ planCfg.minutes }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.minutes" @change="setPlanGoal('minutes', $event.target.value)" /></span>
     </div>
     <div style="height:6px;border-radius:4px;background:rgba(127,127,127,.15);margin-top:8px;overflow:hidden"><i :style="{ display:'block', height:'6px', width: ps.pct + '%', background:'linear-gradient(90deg,#34d399,#fbbf24)' }"></i></div>
     <div style="display:flex;gap:6px;margin-top:8px;align-items:flex-end">
-      <span style="font-size:11px;color:var(--text3);margin-right:6px">本周</span>
+      <span style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);margin-right:6px">本周</span>
       <span v-for="(d, i) in week" :key="d.key" style="display:flex;flex-direction:column;align-items:center;gap:2px" :title="d.key + ' 做题' + d.q + ' · 复盘' + d.r + ' · ' + d.min + '分'">
         <i :style="{ display:'block', width:'10px', height: Math.max(2, Math.round(d.total / weekMax * 22)) + 'px', background:'var(--accent2,#22d3ee)', borderRadius:'2px', opacity:.85 }"></i>
-        <em style="font-style:normal;font-size:10px;color:var(--text3)">{{ d.label }}</em>
+        <em style="font-style:normal;font-size: calc(10px * var(--ui-fs-scale, 1));color:var(--text3)">{{ d.label }}</em>
       </span>
     </div>
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="openHub()">🗓️ 复习中枢</button>
-      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="goQuizAsk()">⚡ 单题快练</button>
-      <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="goWrongs()">📋 错题</button>
+      <button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="openHub()">🗓️ 复习中枢</button>
+      <button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="goQuizAsk()">⚡ 单题快练</button>
+      <button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="goWrongs()">📋 错题</button>
     </div>
   </div>
   <!-- 考试切换 chips：各自独立倒计时 -->
@@ -555,7 +555,7 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         <div class="rp-inner" :style="{ width: ck.revRate + '%' }"></div>
         <span class="rp-l">{{ ck.revRate }}%</span>
       </div>
-      <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+      <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
         复盘到位是提分关键。待复盘 {{ ck.w - ck.r }} 题。
       </div>
 
@@ -563,19 +563,19 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
       <div class="sec-t">💗 复盘健康</div>
       <div v-if="health.t" style="border:1px solid rgba(127,127,127,.18);border-radius:12px;padding:10px 12px;background:var(--bg2,rgba(127,127,127,.06))">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <div style="font-size:26px;font-weight:700;line-height:1" :style="{ color: health.score >= 85 ? '#34d399' : health.score >= 60 ? '#fbbf24' : '#fb7185' }">{{ health.score }}</div>
+          <div style="font-size: calc(26px * var(--ui-fs-scale, 1));font-weight:700;line-height:1" :style="{ color: health.score >= 85 ? '#34d399' : health.score >= 60 ? '#fbbf24' : '#fb7185' }">{{ health.score }}</div>
           <div style="flex:1;min-width:150px">
-            <div style="font-size:13px">复盘健康 <b>{{ health.grade }}</b> · 共 {{ health.t }} 题错题</div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--text2);margin-top:3px">
+            <div style="font-size: calc(13px * var(--ui-fs-scale, 1))">复盘健康 <b>{{ health.grade }}</b> · 共 {{ health.t }} 题错题</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size: calc(11.5px * var(--ui-fs-scale, 1));color:var(--text2);margin-top:3px">
               <span>复盘率 {{ health.reviewedRate }}%</span>
               <span>消化率 {{ health.digestRate }}%</span>
               <span v-if="health.repRate != null">复错率 {{ health.repRate }}%</span>
               <span v-if="health.overdue">到期积压 <b style="color:#fb7185">{{ health.overdue }}</b></span>
             </div>
           </div>
-          <button class="btn btn-gh" style="padding:3px 12px;font-size:12px" @click="openHub()">🗓️ 清到期</button>
+          <button class="btn btn-gh" style="padding:3px 12px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="openHub()">🗓️ 清到期</button>
         </div>
-        <div v-if="health.tips.length" style="font-size:11.5px;color:var(--text3);margin-top:6px">{{ health.tips.join('；') }}</div>
+        <div v-if="health.tips.length" style="font-size: calc(11.5px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:6px">{{ health.tips.join('；') }}</div>
       </div>
       <div v-else class="empty" style="padding:10px 0"><div class="empty-d">先收几道错题并复盘，这里会给出「复盘健康分」与建议</div></div>
 
@@ -588,7 +588,7 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
           <div class="cn-d">{{ n.d }}</div>
         </div>
       </div>
-      <div style="font-size: 10.5px; color: var(--text3); margin-top: 4px">
+      <div style="font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
         参考节点，具体以官方公告为准；笔试日为设置里倒计时对应日期。
       </div>
 

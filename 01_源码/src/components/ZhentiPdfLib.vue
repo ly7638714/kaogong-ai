@@ -398,29 +398,29 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
 .zpv-mask { position: fixed; inset: 0; z-index: 980; background: rgba(2, 8, 18, 0.72); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 10px; }
 .zpv-panel { width: min(1000px, 98vw); height: 94vh; background: #0d1a2a; border: 1px solid rgba(80, 200, 255, 0.25); border-radius: 18px; display: flex; flex-direction: column; overflow: hidden; color: #eaf7ff; }
 .zpv-top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(80, 200, 255, 0.16); }
-.zpv-title { flex: 1; font-weight: 700; font-size: 15px; }
-.zpv-f { font-size: 12px; color: var(--text3); font-weight: 400; }
-.zpv-btn { border: 1px solid rgba(80, 200, 255, 0.3); background: rgba(255, 255, 255, 0.06); color: #dbeafe; border-radius: 10px; padding: 7px 12px; font-size: 12.5px; cursor: pointer; flex-shrink: 0; }
+.zpv-title { flex: 1; font-weight: 700; font-size: calc(15px * var(--ui-fs-scale, 1)); }
+.zpv-f { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); font-weight: 400; }
+.zpv-btn { border: 1px solid rgba(80, 200, 255, 0.3); background: rgba(255, 255, 255, 0.06); color: #dbeafe; border-radius: 10px; padding: 7px 12px; font-size: calc(12.5px * var(--ui-fs-scale, 1)); cursor: pointer; flex-shrink: 0; }
 .zpv-btn.pri { background: linear-gradient(135deg, #22d3ee, #2f6fb3); color: #04121f; font-weight: 700; }
 .zpv-btn:disabled { opacity: 0.4; }
 .zpv-modes { display: flex; gap: 8px; padding: 8px 14px 0; }
-.zpv-mode { border: 1px solid rgba(80,200,255,.3); background: rgba(255,255,255,.05); color:#dbeafe; border-radius: 999px; padding: 6px 14px; font-size: 12.5px; cursor:pointer; }
+.zpv-mode { border: 1px solid rgba(80,200,255,.3); background: rgba(255,255,255,.05); color:#dbeafe; border-radius: 999px; padding: 6px 14px; font-size: calc(12.5px * var(--ui-fs-scale, 1)); cursor:pointer; }
 .zpv-mode.on { background: linear-gradient(135deg,#22d3ee,#2f6fb3); color:#04121f; font-weight:700; }
-.zpv-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #a9c9de; text-align: center; padding: 30px; font-size: 14px; }
-.zpv-bread { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 8px 14px; font-size: 12.5px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
-.zpv-link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 2px 2px; font-size: 12.5px; }
+.zpv-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #a9c9de; text-align: center; padding: 30px; font-size: calc(14px * var(--ui-fs-scale, 1)); }
+.zpv-bread { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 8px 14px; font-size: calc(12.5px * var(--ui-fs-scale, 1)); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.zpv-link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 2px 2px; font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
 .zpv-sep { color: var(--text3); }
 .zpv-tip { margin-left: auto; color: var(--text3); }
 .zpv-list { flex: 1; overflow-y: auto; padding: 10px; }
-.zpv-it { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: rgba(255, 255, 255, 0.04); border: 1px solid transparent; border-radius: 12px; padding: 11px 12px; margin-bottom: 6px; color: #dbeafe; font-size: 14px; cursor: pointer; }
+.zpv-it { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: rgba(255, 255, 255, 0.04); border: 1px solid transparent; border-radius: 12px; padding: 11px 12px; margin-bottom: 6px; color: #dbeafe; font-size: calc(14px * var(--ui-fs-scale, 1)); cursor: pointer; }
 .zpv-it:hover { border-color: rgba(80, 200, 255, 0.35); background: rgba(80, 200, 255, 0.08); }
-.zpv-ic { font-size: 18px; }
+.zpv-ic { font-size: calc(18px * var(--ui-fs-scale, 1)); }
 .zpv-name { flex: 1; word-break: break-all; }
-.zpv-msg { color: #fbbf24; font-size: 13px; padding: 6px 2px; }
+.zpv-msg { color: #fbbf24; font-size: calc(13px * var(--ui-fs-scale, 1)); padding: 6px 2px; }
 .zpv-vbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 .zpv-page { flex: 1; overflow: auto; background: #202a38; display: flex; flex-direction: column; align-items: center; padding: 10px; }
 .zpv-page canvas { box-shadow: 0 8px 30px rgba(0,0,0,0.5); max-width: 100%; }
 .zpv-ctrl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.zpv-pg { font-size: 13px; color: var(--hud-cyan); min-width: 86px; text-align: center; }
+.zpv-pg { font-size: calc(13px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); min-width: 86px; text-align: center; }
 .zpv-gap { flex: 1; }
 </style>

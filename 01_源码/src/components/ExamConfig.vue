@@ -82,10 +82,10 @@ function toggleStrengthen(v) {
     <div class="ep-mode-id" :style="'background:linear-gradient(135deg,' + meta.c + '22,transparent);border:1px solid ' + meta.c + '55;border-radius:10px;padding:8px 12px;margin:6px 0'">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <b :style="{ color: meta.c, fontSize: '14px' }">{{ meta.name }}</b>
-        <span style="font-size:12px;color:var(--text2);flex:1;min-width:200px">{{ meta.tag }}</span>
+        <span style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);flex:1;min-width:200px">{{ meta.tag }}</span>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-        <span v-for="p in meta.pts" :key="p" style="font-size:11px;color:var(--text3);border:1px solid rgba(127,127,127,.3);border-radius:10px;padding:1px 9px">{{ p }}</span>
+        <span v-for="p in meta.pts" :key="p" style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);border:1px solid rgba(127,127,127,.3);border-radius:10px;padding:1px 9px">{{ p }}</span>
       </div>
     </div>
     <!-- 深化·续出：组卷残缺被拦截后 → 保留已出成功题、只补失败题的横幅 -->
@@ -213,7 +213,7 @@ function toggleStrengthen(v) {
         <label>🚀 AI 出题用非思考快模式（自动）</label>
         <span class="ep-hint">默认自动开启：系统会按你的文字模型服务商自动选内置快模型（如 DeepSeek 自动用 V4-Flash 并关闭思考），你不需要填模型名。</span>
         <details style="margin-top: 6px">
-          <summary style="cursor:pointer;font-size:12px;color:var(--text3)">高级：手动指定快模型名（一般不需要）</summary>
+          <summary style="cursor:pointer;font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">高级：手动指定快模型名（一般不需要）</summary>
           <input v-model="fastGenModel" class="pv-edit" style="margin-top: 6px" placeholder="留空=自动；自建/特殊服务商才需要填快模型名" @change="saveFastGenModel()" />
         </details>
       </div>
@@ -434,7 +434,7 @@ function toggleStrengthen(v) {
         </select>
         <span class="ep-hint">AI 识别整理后先按「📐 卷面构成」裁剪，再按此上限取题（整卷出题里可调整卷面）</span>
       </div>
-      <div style="font-size: 11px; color: var(--text3); margin-top: 4px">💡 本地试卷数字化：图片/PDF/Word/txt/tex 上传 → AI 统一整理成题 → 按卷面裁剪组卷作答</div>
+      <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">💡 本地试卷数字化：图片/PDF/Word/txt/tex 上传 → AI 统一整理成题 → 按卷面裁剪组卷作答</div>
       <div v-if="imgs.length" class="pp-imgs">
         <div v-for="(im, i) in imgs" :key="'i' + i" class="pp-thumb"><img :src="im" /><button class="pp-x" @click="rmImg(i)">×</button></div>
       </div>
@@ -473,7 +473,7 @@ function toggleStrengthen(v) {
         <summary style="cursor:pointer">🧭 真题题型分布（规则打标 · {{ zhentiTy ? Object.values(zhentiTy.summary).reduce((a, m) => a + Object.values(m).reduce((x, y) => x + y, 0), 0) : '…' }}题）</summary>
         <div v-if="zhentiTy" style="margin-top:6px">
           <div v-for="(m, sec) in zhentiTy.summary" :key="sec" style="margin-bottom:6px">
-            <div style="font-size:12px;color:var(--text3);margin-bottom:2px">{{ sec }}</div>
+            <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3);margin-bottom:2px">{{ sec }}</div>
             <div style="display:flex;flex-wrap:wrap;gap:4px">
               <span v-for="(n, t) in m" :key="t" class="zt-dist-it">{{ t }} {{ n }}</span>
             </div>

@@ -1567,6 +1567,9 @@ function clearErrLog() { clearErrorLog(); errLogList.value = []; showToast('✅ 
 // ===== 外观 & 数据管理（设置页增强）=====
 const fs = ref(store.cfg.fontSize || 14.5)
 function applyFs() {
+  const base = 14.5
+  const scale = Math.max(0.8, Math.min(1.45, fs.value / base))
+  document.documentElement.style.setProperty('--ui-fs-scale', String(scale))
   document.documentElement.style.setProperty('--chat-fs', fs.value + 'px')
   document.body.style.fontSize = fs.value + 'px'
 }
@@ -2135,8 +2138,8 @@ onUnmounted(() => {
       <div class="auth-confirm-title">⚠️ 请确认</div>
       <div class="auth-confirm-msg">{{ authConfirm.msg }}</div>
       <div class="auth-confirm-btns">
-        <button class="btn btn-gh" style="font-size: 13px" @click="authConfirmNo()">取消</button>
-        <button class="btn btn-pri" style="font-size: 13px" @click="authConfirmYes()">✅ 确认</button>
+        <button class="btn btn-gh" style="font-size: calc(13px * var(--ui-fs-scale, 1))" @click="authConfirmNo()">取消</button>
+        <button class="btn btn-pri" style="font-size: calc(13px * var(--ui-fs-scale, 1))" @click="authConfirmYes()">✅ 确认</button>
       </div>
     </div>
   </div>
@@ -2215,13 +2218,13 @@ onUnmounted(() => {
         <button class="cost-pill" :class="{ warn: costToday > 0, live: costLive.active }" :title="costLive.active ? '🔴 正在调用 AI（' + (COST_FEATURES[costLive.feature] || costLive.feature) + ' · ' + (costLive.model || '') + '），完成自动记账' : '💰 AI 用量与花费（实时追踪）：点开查看明细、计价表、清空记录'" @click="costShow = true">
           💰 {{ fmtCost(costToday) }}<span v-if="costLive.active" class="cost-pill-live"></span>
         </button>
-        <button class="btn" style="padding: 4px 12px; font-size: 13px" title="3D 学习数据驾驶舱：查看各板块学习数据的交互式 3D 场景" @click="store.tab = '3d'">
+        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" title="3D 学习数据驾驶舱：查看各板块学习数据的交互式 3D 场景" @click="store.tab = '3d'">
           🌌 3D数据
         </button>
-        <button v-if="nav.stack.length" class="btn" style="padding: 4px 12px; font-size: 13px; color: var(--hud-cyan)" title="返回上一层（也可按键盘 Esc / 浏览器返回）" @click="onPopState(); navBack()">← {{ nav.stack[nav.stack.length - 1].label }}</button>
-        <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="openExp('chat')">📤 导出</button>
-        <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="openSet()">⚙️ 设置</button>
-        <button class="btn" style="padding: 4px 12px; font-size: 13px" @click="doTheme()">
+        <button v-if="nav.stack.length" class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1)); color: var(--hud-cyan)" title="返回上一层（也可按键盘 Esc / 浏览器返回）" @click="onPopState(); navBack()">← {{ nav.stack[nav.stack.length - 1].label }}</button>
+        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" @click="openExp('chat')">📤 导出</button>
+        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" @click="openSet()">⚙️ 设置</button>
+        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" @click="doTheme()">
           {{ theme === 'light' ? '🌙' : '☀️' }}
         </button>
       </div>
@@ -2330,7 +2333,7 @@ onUnmounted(() => {
                 <option v-for="f in fastTextOptions()" :key="f.id" :value="f.id">{{ f.label }}{{ f.pub ? ' · 发布 ' + f.pub : '' }}{{ f.note ? ' · ' + f.note : '' }}</option>
                 <option v-if="fastHasCurrentCustom()" :value="chatFastModel">✏️ 自定义：{{ chatFastModel }}</option>
               </select>
-              <button class="btn btn-gh" style="font-size: 12px" @click="fastCustomMode = !fastCustomMode; if (fastCustomMode) fastCustomName = fastHasCurrentCustom() ? chatFastModel : ''">{{ fastCustomMode ? '✕ 收起' : '✏️ 自定义' }}</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="fastCustomMode = !fastCustomMode; if (fastCustomMode) fastCustomName = fastHasCurrentCustom() ? chatFastModel : ''">{{ fastCustomMode ? '✕ 收起' : '✏️ 自定义' }}</button>
             </div>
             <input v-if="fastCustomMode" v-model="fastCustomName" class="mk-cust-in" style="margin-top: 6px" placeholder="输入同服务商的其它快模型名（需与文字模型同一服务商/Key 才能秒回）" @keyup.enter="applyFastCustom()" />
             <span class="ep-hint">不用记模型名：开启「⚡快答」后，系统会自动按当前服务商选择内置快模型，DeepSeek 会发送 thinking=disabled 真正非思考。下面的下拉只是给你“换一个快模型”或给自建服务商用；图片题若该快模型不能识图，会自动用主视觉或「图像增强」兜底。</span>
@@ -2442,7 +2445,7 @@ onUnmounted(() => {
             <button class="btn btn-gh" :class="{ busy: catUi.rd.busy }" :disabled="catUi.rd.busy" @click="testCat('rd')">{{ catUi.rd.busy ? '⏳ 检测中…' : '🧪 测试连通性' }}</button>
             <span class="mk-stat" :class="catUi.rd.code">{{ catUi.rd.stat || '用所选 Key+模型 发一条最小请求，校验能否用于讲稿改写' }}</span>
           </div>
-          <div class="micro-tip" style="font-size: 11.5px; margin: 2px 0 0; line-height: 1.7">
+          <div class="micro-tip" style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); margin: 2px 0 0; line-height: 1.7">
             💡 <b>小白提示</b>：开启后，朗读前会先用这个模型把干巴巴的题干/解析改写成"说话稿"（加语气、断句更顺），听感更像真人在讲题；它只是一个"改写器"，真人声音仍由上面的「朗读引擎」决定。想省钱就选该服务商<b>免费或最便宜的快模型</b>（如 DeepSeek-V4-Flash），与你的文字模型共用 Key 也行。
           </div>
           <div class="mk-cust">
@@ -2551,37 +2554,37 @@ onUnmounted(() => {
         <div id="set-voice" class="sec-t">🗣️ 语音 · 真人朗读（音色市场 · 去掉 AI 味）</div>
         <div class="sec-desc">真人级朗读统一管理：引擎 / 音色市场 / 克隆原声 / 本机语音；全局音色 = 萌宠音色。</div>
         <div class="fld" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
-          <label style="font-size: 13px; font-weight: 700">自动朗读 AI 回复</label>
+          <label style="font-size: calc(13px * var(--ui-fs-scale, 1)); font-weight: 700">自动朗读 AI 回复</label>
           <button class="btn" :class="store.cfg.ttsOn !== false ? 'btn-pri' : 'btn-gh'" @click="toggleTtsSetting()">{{ store.cfg.ttsOn !== false ? '🔊 已开启' : '🔇 已关闭' }}</button>
-          <span style="font-size: 11px; color: var(--text3)">开启后 AI 回复完成自动朗读；对话里每条消息也有 🔊 朗读按钮。</span>
+          <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">开启后 AI 回复完成自动朗读；对话里每条消息也有 🔊 朗读按钮。</span>
         </div>
 
-        <div class="sec-t" style="font-size: 13px">🎛️ 朗读引擎（真人级音色优先）</div>
-        <div style="font-size: 11px; color: var(--text3); margin: 2px 0 8px; line-height: 1.6">
+        <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🎛️ 朗读引擎（真人级音色优先）</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 2px 0 8px; line-height: 1.6">
           💡 <b>这里的全局音色 = 萌宠音色（同一套）</b>，全局朗读、刷题读题、萌宠讲话都用它。只有当你给某个角色<b>克隆了专属声线（🧬）</b>后，切到该角色才临时用克隆原声，切走即恢复此音色 —— 保证永远一致。
         </div>
-        <div style="font-size: 12px; color: var(--pri); margin-bottom: 4px">🎯 当前生效音色：{{ petEffectiveLabel }}</div>
-        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">每个音色卡都有 <b>✏️ 改名</b> / <b>👻 隐藏</b>（隐藏后可在各列表下方「已隐藏」一键恢复）；克隆音色在下方「🧬 我的克隆音色」管理（可重命名/删除/保留）。</div>
-        <button v-if="voiceUndo" class="btn btn-gh" style="font-size: 11px; margin-bottom: 8px" @click="undoHideVoice()">↩️ 撤销上一步隐藏（{{ voiceUndo.id }}）</button>
+        <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--pri); margin-bottom: 4px">🎯 当前生效音色：{{ petEffectiveLabel }}</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">每个音色卡都有 <b>✏️ 改名</b> / <b>👻 隐藏</b>（隐藏后可在各列表下方「已隐藏」一键恢复）；克隆音色在下方「🧬 我的克隆音色」管理（可重命名/删除/保留）。</div>
+        <button v-if="voiceUndo" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-bottom: 8px" @click="undoHideVoice()">↩️ 撤销上一步隐藏（{{ voiceUndo.id }}）</button>
         <div class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px; margin-bottom: 8px">
           <label style="font-weight: 700">🧬 我的克隆音色（自定义名称 · 可删除/保留）</label>
           <div v-if="petCloneVoiceList().length" style="margin-top: 6px">
-            <div v-for="cv in petCloneVoiceList()" :key="cv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px">
+            <div v-for="cv in petCloneVoiceList()" :key="cv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(12px * var(--ui-fs-scale, 1))">
               <span>{{ cv.char }} · <b>{{ cv.name }}</b> <span style="color: var(--text3)">({{ cv.engine === 'glm' ? '智谱' : 'CosyVoice2' }})</span></span>
-              <button class="btn btn-gh" style="font-size: 11px" @click="ttsPreviewBound(cv.skinId)">▶️ 试听</button>
-              <button v-if="cv.locked" class="btn btn-gh" style="font-size: 11px" disabled title="内置锁定，不可删除/改名">🔒 内置</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="ttsPreviewBound(cv.skinId)">▶️ 试听</button>
+              <button v-if="cv.locked" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" disabled title="内置锁定，不可删除/改名">🔒 内置</button>
               <template v-else-if="cloneRename && cloneRename.skinId === cv.skinId">
-                <input v-model="cloneRename.name" style="width: 110px; font-size: 11px; padding: 1px 3px" @keydown.enter.stop="confirmCloneRename()" />
-                <button class="btn btn-pri" style="font-size: 11px" @click="confirmCloneRename()">✓</button>
-                <button class="btn btn-gh" style="font-size: 11px" @click="cloneRename = null">✖</button>
+                <input v-model="cloneRename.name" style="width: 110px; font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 1px 3px" @keydown.enter.stop="confirmCloneRename()" />
+                <button class="btn btn-pri" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="confirmCloneRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="cloneRename = null">✖</button>
               </template>
               <template v-else>
-                <button class="btn btn-gh" style="font-size: 11px" title="重命名" @click="doRenameCloneVoice(cv.skinId)">✏️</button>
-                <button class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(cv.skinId)">🗑 删除</button>
+                <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" title="重命名" @click="doRenameCloneVoice(cv.skinId)">✏️</button>
+                <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doUnbindSkinVoice(cv.skinId)">🗑 删除</button>
               </template>
             </div>
           </div>
-          <div v-else style="font-size: 11px; color: var(--text3); margin-top: 6px">暂无克隆音色；在「设置 → 萌宠 → 克隆『角色』原声」上传 3-30 秒参考音频即可生成并自动命名。</div>
+          <div v-else style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">暂无克隆音色；在「设置 → 萌宠 → 克隆『角色』原声」上传 3-30 秒参考音频即可生成并自动命名。</div>
         </div>
         <div class="tts-engine-grid">
           <button v-for="eng in TTS_ENGINES" :key="eng.id" class="tts-engine-card" :class="{ on: store.cfg.ttsMode === eng.id }" @click="setTtsMode(eng.id)">
@@ -2591,8 +2594,8 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="mk-tip" style="border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 10px; padding: 10px 12px; margin: 8px 0">
-          <b style="font-size: 12.5px">📖 选哪个朗读引擎？（小白必读）</b>
-          <ul style="margin: 6px 0 0; padding-left: 18px; font-size: 11.5px; line-height: 1.85; color: var(--text2)">
+          <b style="font-size: calc(12.5px * var(--ui-fs-scale, 1))">📖 选哪个朗读引擎？（小白必读）</b>
+          <ul style="margin: 6px 0 0; padding-left: 18px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.85; color: var(--text2)">
             <li>🆓 <b>完全免费、不想折腾 Key</b>：直接选「Edge 免费神经」或「系统语音」，开箱即用、0 成本，适合先体验。</li>
             <li>🌟 <b>想要最像真人的效果（推荐）</b>：选「智谱 GLM-TTS」或「阿里百炼 Qwen3-TTS」，它们是语音大模型，有情绪有语气、几乎听不出机器味；按字数计费（读几万字才几分钱），<b>新人都有免费额度</b>。</li>
             <li>🎨 <b>想克隆你自己的声音 / 用 CosyVoice2</b>：选「OpenAI 兼容」，自备 Key 与服务地址。</li>
@@ -2604,37 +2607,37 @@ onUnmounted(() => {
         <!-- 💰 真人朗读·省钱护栏（语音系统重构 v3.8.90） -->
         <div style="border: 1px dashed rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.05); border-radius: 10px; padding: 10px 12px; margin: 10px 0 4px">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
-            <b style="font-size: 13px; color: #34d399">💰 省钱护栏 · 真人朗读不超支</b>
-            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px">
+            <b style="font-size: calc(13px * var(--ui-fs-scale, 1)); color: #34d399">💰 省钱护栏 · 真人朗读不超支</b>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: calc(12px * var(--ui-fs-scale, 1))">
               <input v-model="store.cfg.ttsGuard" type="checkbox" @change="saveCfg()" />
               启用
             </label>
-            <span style="font-size: 11.5px; color: var(--text3); flex: 1; min-width: 220px; line-height: 1.6">
+            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); flex: 1; min-width: 220px; line-height: 1.6">
               真人引擎（智谱 GLM / CosyVoice）每日免费朗读 {{ (Number(store.cfg.ttsDayCap) || 20000) >= 10000 ? (Number(store.cfg.ttsDayCap) / 10000) + ' 万' : store.cfg.ttsDayCap }} 字，
               用完后<b>自动退回免费 Edge</b> 继续读，绝不乱扣费；Edge / 系统语音永久免费、永不被拦。
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px">
-            <span style="font-size: 12px; color: var(--text2)">📊 今日真人朗读已用：<b style="color: var(--accent)">{{ ttsCharsToday() }}</b> 字</span>
-            <label style="font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 4px">
+            <span style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2)">📊 今日真人朗读已用：<b style="color: var(--accent)">{{ ttsCharsToday() }}</b> 字</span>
+            <label style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); display: flex; align-items: center; gap: 4px">
               每日额度
-              <input v-model.number="store.cfg.ttsDayCap" type="number" min="1000" step="1000" style="width: 84px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px" @change="saveCfg()" />
+              <input v-model.number="store.cfg.ttsDayCap" type="number" min="1000" step="1000" style="width: 84px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: calc(12px * var(--ui-fs-scale, 1))" @change="saveCfg()" />
               字
             </label>
-            <span style="font-size: 11.5px; color: var(--text3)">真人朗读成本约 ¥2 / 百万字量级（智谱/CosyVoice 类），日常几万字仅几分钱；额度用完自动退回免费 Edge，怎么用都不超支。</span>
+            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">真人朗读成本约 ¥2 / 百万字量级（智谱/CosyVoice 类），日常几万字仅几分钱；额度用完自动退回免费 Edge，怎么用都不超支。</span>
           </div>
         </div>
 
         <!-- ① 智谱 GLM-TTS（超拟人）-->
         <div v-if="store.cfg.ttsMode === 'glm'">
-          <div class="sec-t" style="font-size: 13px">🎙️ 音色市场（智谱超拟人 · 真人级）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🎙️ 音色市场（智谱超拟人 · 真人级）</div>
           <div class="fld">
             <label>智谱 API Key（可一键复制图形增强里的智谱 Key）</label>
             <div style="display: flex; gap: 6px">
               <input v-model="store.cfg.ttsGm.key" type="password" placeholder="粘贴智谱 API Key" style="flex: 1" @change="saveCfg()" />
-              <button class="btn btn-gh" style="font-size: 12px; white-space: nowrap" @click="copyFigKey()">📋 复制图形增强 Key</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); white-space: nowrap" @click="copyFigKey()">📋 复制图形增强 Key</button>
             </div>
-            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
               Key 为空时自动复用「图形增强」里已填的智谱 Key；没有 Key 可去 <a href="https://open.bigmodel.cn/" target="_blank" rel="noopener">open.bigmodel.cn</a> 免费注册领取额度。
             </div>
           </div>
@@ -2642,33 +2645,33 @@ onUnmounted(() => {
             <div v-for="v in voiceList('glm', gmVoiceList)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsGm.voice === v.id }" @click="pickVoice('glm', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
-              <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('glm', v.id)">▶️ 试听</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click.stop="ttsPreview('glm', v.id)">▶️ 试听</button>
               <template v-if="voiceRename && voiceRename.engine === 'glm' && voiceRename.id === v.id">
-                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
-                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
-                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+                <input v-model="voiceRename.name" style="width: 96px; font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="cancelRename()">✖</button>
               </template>
-              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('glm', v.id)">✏️</button>
-              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('glm', v.id)">👻</button>
+              <button v-else class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="重命名" @click.stop="startRename('glm', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="隐藏" @click.stop="hideVoice('glm', v.id)">👻</button>
             </div>
           </div>
           <div v-if="hiddenVoicesList('glm', gmVoiceList).length" class="fld" style="margin-top: 4px">
-            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
-            <span v-for="hv in hiddenVoicesList('glm', gmVoiceList)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('glm', hv.id)">恢复</a></span>
+            <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('glm', gmVoiceList)" :key="hv.id" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('glm', hv.id)">恢复</a></span>
           </div>
           <div class="fld" style="display: flex; gap: 6px; align-items: center">
-            <button class="btn btn-gh" style="font-size: 12px" @click="loadGmVoices()">🔄 刷新官方音色</button>
-            <span style="font-size: 11px; color: var(--text3)">{{ gmVoiceStat }}</span>
+            <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="loadGmVoices()">🔄 刷新官方音色</button>
+            <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">{{ gmVoiceStat }}</span>
           </div>
         </div>
 
         <!-- ② OpenAI 兼容（CosyVoice2 等）-->
         <div v-if="store.cfg.ttsMode === 'dash'">
-          <div class="sec-t" style="font-size: 13px">🍊 阿里百炼 Qwen3-TTS（廉价真人 · 实测可用）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🍊 阿里百炼 Qwen3-TTS（廉价真人 · 实测可用）</div>
           <div class="fld">
             <label>通义 DashScope API Key（留空自动复用图形增强/视觉里的通义 Key）</label>
             <input v-model="store.cfg.ttsDash.key" type="password" placeholder="sk-…（与千问/图形增强同一个 Key）" @change="saveCfg()" />
-            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
               官方价 <b>¥0.8/万字符</b>（≈0.08 元/千字），中文自然、支持指令式语气；Key 可在 <a href="https://bailian.console.aliyun.com" target="_blank" rel="noopener">bailian.console.aliyun.com</a> 领取。模型/端点已于 2026-09-02 真实 Key 实测通过。
             </div>
           </div>
@@ -2689,38 +2692,38 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="mk-sec" style="border-left: 3px solid #ff8a3d; padding: 6px 8px; margin: 6px 0; background: rgba(255,138,61,0.06)">
-            <div class="sec-t" style="font-size: 12.5px; color: #ff7a1a">🎨 自定义音色（自然语言 · instruct 模型实测可用）</div>
-            <div style="font-size: 11px; color: var(--text3); margin: 2px 0 5px">用一句话描述你想要的声线，例如「温柔知性的女生，语速稍慢，带一点笑意」。开启后优先于上方预设音色，可保存多个随时切换。</div>
+            <div class="sec-t" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: #ff7a1a">🎨 自定义音色（自然语言 · instruct 模型实测可用）</div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 2px 0 5px">用一句话描述你想要的声线，例如「温柔知性的女生，语速稍慢，带一点笑意」。开启后优先于上方预设音色，可保存多个随时切换。</div>
             <div class="fld-row">
               <input v-model="store.cfg.ttsDash.voiceCustom" style="flex: 1" placeholder="例如：磁性低沉的老年男声，像讲古的先生" @input="saveCfg()" />
               <input v-model="dashCustomName" style="width: 96px" placeholder="预设名" />
-              <button class="btn btn-pri" style="font-size: 12px" @click="saveDashCustomVoice()">💾 存为预设</button>
+              <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="saveDashCustomVoice()">💾 存为预设</button>
             </div>
             <div v-if="store.cfg.ttsDash.customVoices && store.cfg.ttsDash.customVoices.length" class="voice-market" style="margin-top: 6px">
               <div v-for="(c, i) in store.cfg.ttsDash.customVoices" :key="c.id" class="voice-card" :class="{ on: store.cfg.ttsDash.voiceCustom === c.desc }" @click="applyDashCustom(c)">
-                <span style="font-size: 11px">🎨 {{ c.name }}</span>
-                <span style="font-size: 10px; color: var(--text3); display: block; margin-top: 2px">{{ c.desc }}</span>
+                <span style="font-size: calc(11px * var(--ui-fs-scale, 1))">🎨 {{ c.name }}</span>
+                <span style="font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); display: block; margin-top: 2px">{{ c.desc }}</span>
                 <span class="vc-x" @click.stop="rmDashCustomVoice(i)">✕</span>
               </div>
             </div>
-            <div v-if="store.cfg.ttsDash.voiceCustom" style="font-size: 11px; color: #0a8f3c; margin-top: 4px">✅ 当前使用自定义音色：「{{ store.cfg.ttsDash.voiceCustom }}」</div>
+            <div v-if="store.cfg.ttsDash.voiceCustom" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: #0a8f3c; margin-top: 4px">✅ 当前使用自定义音色：「{{ store.cfg.ttsDash.voiceCustom }}」</div>
           </div>
           <div class="fld">
             <label>接口地址（默认即可）</label>
             <input v-model="store.cfg.ttsDash.url" placeholder="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation" @change="saveCfg()" />
           </div>
           <div class="mk-act">
-            <button class="btn btn-gh" style="font-size: 12px" @click="previewVoice('dash', store.cfg.ttsDash.voice)">🧪 试听当前音色</button>
-            <span style="font-size: 11.5px; color: var(--text3)">额度/预算护栏同样适用（每日真人朗读额度用完后自动退回免费 Edge）。</span>
+            <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="previewVoice('dash', store.cfg.ttsDash.voice)">🧪 试听当前音色</button>
+            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">额度/预算护栏同样适用（每日真人朗读额度用完后自动退回免费 Edge）。</span>
           </div>
         </div>
 
         <div v-if="store.cfg.ttsMode === 'openai'">
-          <div class="sec-t" style="font-size: 13px">🎨 OpenAI 兼容引擎（CosyVoice2 真人级）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🎨 OpenAI 兼容引擎（CosyVoice2 真人级）</div>
           <div class="fld">
             <label>API Key</label>
             <input v-model="store.cfg.ttsOpenAI.key" type="password" placeholder="粘贴 OpenAI 兼容 TTS 的 Key" @change="saveCfg()" />
-            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
               支持任意 OpenAI 兼容 /v1/audio/speech 接口。推荐硅基流动（CosyVoice2 中文最自然）：<a href="https://cloud.siliconflow.cn/" target="_blank" rel="noopener">cloud.siliconflow.cn</a> 创建 Key。
             </div>
           </div>
@@ -2738,90 +2741,90 @@ onUnmounted(() => {
           </div>
           <div class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px">
             <label>🧬 音色克隆（大模型克隆原声 · 自动绑定到『{{ petSkin.char }}』）</label>
-            <div style="font-size: 11px; color: var(--text3); margin: 4px 0">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 4px 0">
               上传一段 3-30 秒清晰的参考音频（mp3/wav/m4a/ogg 均可，哪怕后缀是 .mp3 实为 m4a 也能自动转码），大模型克隆后自动绑定给当前角色「{{ petSkin.char }}」，切到它就朗读克隆原声；超长音频会自动裁前 20 秒。也可在「设置 → 萌宠」里克隆。配音相关版权请自行确保。
             </div>
             <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
-              <select v-model="cloneBackend" style="font-size: 12px; max-width: 190px">
+              <select v-model="cloneBackend" style="font-size: calc(12px * var(--ui-fs-scale, 1)); max-width: 190px">
                 <option value="zhipu">🧬 智谱 GLM-TTS-Clone（3 秒即可）</option>
                 <option value="cosy">🎨 CosyVoice2 · 硅基流动</option>
               </select>
-              <button class="btn btn-gh" style="font-size: 12px" @click="$refs.voiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="$refs.voiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
               <input ref="voiceFileInput" type="file" accept="audio/*,video/*,.mp4,.mov,.mkv,.webm,.m4a" style="display: none" @change="onVoiceFile($event)" />
               <input v-model="cloneVoiceName" placeholder="音色名（如 李星云声线）" style="flex: 1; min-width: 120px" />
-              <button class="btn btn-pri" style="font-size: 12px" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
+              <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
             </div>
-            <div v-if="voiceCloneStat" style="font-size: 11px; color: var(--text3); margin-top: 6px">{{ voiceCloneStat }}</div>
+            <div v-if="voiceCloneStat" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">{{ voiceCloneStat }}</div>
           </div>
           <div class="voice-market">
             <div v-for="v in voiceList('openai', OPENAI_PRESET_VOICES)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsOpenAI.voice === v.id }" @click="pickVoice('openai', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
-              <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('openai', v.id)">▶️ 试听</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click.stop="ttsPreview('openai', v.id)">▶️ 试听</button>
               <template v-if="voiceRename && voiceRename.engine === 'openai' && voiceRename.id === v.id">
-                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
-                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
-                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+                <input v-model="voiceRename.name" style="width: 96px; font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="cancelRename()">✖</button>
               </template>
-              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('openai', v.id)">✏️</button>
-              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('openai', v.id)">👻</button>
+              <button v-else class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="重命名" @click.stop="startRename('openai', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="隐藏" @click.stop="hideVoice('openai', v.id)">👻</button>
             </div>
           </div>
           <div v-if="hiddenVoicesList('openai', OPENAI_PRESET_VOICES).length" class="fld" style="margin-top: 4px">
-            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
-            <span v-for="hv in hiddenVoicesList('openai', OPENAI_PRESET_VOICES)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('openai', hv.id)">恢复</a></span>
+            <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('openai', OPENAI_PRESET_VOICES)" :key="hv.id" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('openai', hv.id)">恢复</a></span>
           </div>
         </div>
 
         <!-- ③ Edge 免费神经音色 -->
         <div v-if="store.cfg.ttsMode === 'edge'">
-          <div class="sec-t" style="font-size: 13px">🚀 微软 Edge 神经音色（免费 · 无 Key）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🚀 微软 Edge 神经音色（免费 · 无 Key）</div>
           <div class="voice-market">
             <div v-for="v in voiceList('edge', edgeVoiceList)" :key="v.id" class="voice-card" :class="{ on: store.cfg.ttsEdgeVoice === v.id }" @click="pickVoice('edge', v.id)">
               <span class="vc-emoji">{{ v.emoji }}</span>
               <span class="vc-name">{{ v.name }}</span>
-              <button class="btn btn-gh" style="font-size: 11px" @click.stop="ttsPreview('edge', v.id)">▶️ 试听</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click.stop="ttsPreview('edge', v.id)">▶️ 试听</button>
               <template v-if="voiceRename && voiceRename.engine === 'edge' && voiceRename.id === v.id">
-                <input v-model="voiceRename.name" style="width: 96px; font-size: 11px; padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
-                <button class="btn btn-pri" style="font-size: 10px; padding: 1px 4px" @click.stop="confirmRename()">✓</button>
-                <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" @click.stop="cancelRename()">✖</button>
+                <input v-model="voiceRename.name" style="width: 96px; font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 1px 3px" @click.stop @keydown.enter.stop="confirmRename()" />
+                <button class="btn btn-pri" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="confirmRename()">✓</button>
+                <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" @click.stop="cancelRename()">✖</button>
               </template>
-              <button v-else class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="重命名" @click.stop="startRename('edge', v.id)">✏️</button>
-              <button class="btn btn-gh" style="font-size: 10px; padding: 1px 4px" title="隐藏" @click.stop="hideVoice('edge', v.id)">👻</button>
+              <button v-else class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="重命名" @click.stop="startRename('edge', v.id)">✏️</button>
+              <button class="btn btn-gh" style="font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 4px" title="隐藏" @click.stop="hideVoice('edge', v.id)">👻</button>
             </div>
           </div>
           <div v-if="hiddenVoicesList('edge', edgeVoiceList).length" class="fld" style="margin-top: 4px">
-            <span style="font-size: 11px; color: var(--text3)">👻 已隐藏：</span>
-            <span v-for="hv in hiddenVoicesList('edge', edgeVoiceList)" :key="hv.id" style="font-size: 11px; margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('edge', hv.id)">恢复</a></span>
+            <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">👻 已隐藏：</span>
+            <span v-for="hv in hiddenVoicesList('edge', edgeVoiceList)" :key="hv.id" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-right: 8px">{{ hv.name }} <a style="cursor: pointer; color: var(--pri)" @click="unhideVoice('edge', hv.id)">恢复</a></span>
           </div>
           <div class="fld" style="display: flex; gap: 6px; align-items: center">
-            <button class="btn btn-gh" style="font-size: 12px" @click="loadEdgeVoices()">🔄 刷新官方音色</button>
-            <span style="font-size: 11px; color: var(--text3)">{{ edgeVoiceStat }}</span>
+            <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="loadEdgeVoices()">🔄 刷新官方音色</button>
+            <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">{{ edgeVoiceStat }}</span>
           </div>
-          <div style="font-size: 11px; color: var(--text3)">⚠️ 微软服务器在部分网络（尤其国内）会被拦截，试听失败时请改用智谱 / OpenAI 兼容引擎。</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">⚠️ 微软服务器在部分网络（尤其国内）会被拦截，试听失败时请改用智谱 / OpenAI 兼容引擎。</div>
         </div>
 
         <!-- ④ 系统语音（兜底）-->
         <div v-if="store.cfg.ttsMode === 'sys'">
-          <div class="sec-t" style="font-size: 13px">🧠 系统语音（本机兜底）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🧠 系统语音（本机兜底）</div>
           <div class="fld">
             <label>朗读音色</label>
             <select v-model="store.cfg.ttsScene" @change="saveCfg(); savePetGlobalVoice()">
               <option v-for="s in SCENES" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
-            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">按场景自动匹配最贴近的系统语音；可再选下方本机语音覆盖。</div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">按场景自动匹配最贴近的系统语音；可再选下方本机语音覆盖。</div>
           </div>
-          <div class="sec-t" style="font-size: 13px">🎙️ 本机语音（可选 · 覆盖场景）</div>
+          <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🎙️ 本机语音（可选 · 覆盖场景）</div>
           <div class="fld">
             <select v-model="store.cfg.ttsVoice" @change="saveCfg(); savePetGlobalVoice()">
               <option value="">（跟随上方场景音色）</option>
               <option v-for="v in sysVoices" :key="v.voiceURI || v.name" :value="v.name">{{ v.name }} · {{ v.lang }}</option>
             </select>
             <div style="display: flex; gap: 6px; margin-top: 6px">
-              <button class="btn btn-gh" style="font-size: 12px" @click="loadSysVoices()">🔄 刷新语音</button>
-              <button class="btn btn-gh" style="font-size: 12px" @click="ttsTestVoice()">▶️ 试听本机语音</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="loadSysVoices()">🔄 刷新语音</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="ttsTestVoice()">▶️ 试听本机语音</button>
             </div>
-            <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
               已检测到 {{ sysVoices.length }} 个系统语音。想添加更多本地语音：Windows → 设置 → 时间和语言 → 语音 → 添加语音（如 中文(普通话)）。
             </div>
           </div>
@@ -2852,13 +2855,13 @@ onUnmounted(() => {
           />
           <button
             class="btn btn-gh"
-            style="margin-top: 6px; font-size: 12px"
+            style="margin-top: 6px; font-size: calc(12px * var(--ui-fs-scale, 1))"
             @click="store.cfg.ttsPitch = null; saveCfg()"
           >
             重置音调
           </button>
         </div>
-        <div v-if="ttsStatus.msg" class="fld" style="font-size: 12px; color: var(--text3)">
+        <div v-if="ttsStatus.msg" class="fld" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3)">
           <span :class="ttsStatus.state === 'error' ? 'tts-err' : ttsStatus.state === 'speaking' ? 'tts-run' : ''">{{ ttsStatus.msg }}</span>
         </div>
         <div class="exp-choices" style="grid-template-columns: 1fr 1fr">
@@ -2875,7 +2878,7 @@ onUnmounted(() => {
 <div v-show="setGroup === 'look'" class="set-group-bd">
 <div id="set-look" class="sec-t">🎨 主题与外观</div>
         <div class="sec-desc">主题、强调色、护眼、字体、壁纸、随手记、备考冲刺、导出偏好统一管理。</div>
-        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">主题/文字配色/强调色/护眼/壁纸/随手记/字号 统一在此管理；顶栏 ☀️/🌙 可在「米白纸 / 深空黑」间快速切换白天黑夜。</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">主题/文字配色/强调色/护眼/壁纸/随手记/字号 统一在此管理；顶栏 ☀️/🌙 可在「米白纸 / 深空黑」间快速切换白天黑夜。</div>
         <div class="sec-t">🎨 一键主题包（配色+强调色+护眼+高亮 一次到位）</div>
         <div class="tp-grp-t">☀️ 白天主题</div>
         <div class="theme-grid">
@@ -2891,7 +2894,7 @@ onUnmounted(() => {
             <span class="th-name">{{ p.name }}</span>
           </button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-top: 4px">每套主题包已配好「底色+强调色+护眼+高亮」，一键应用；顶栏 ☀️/🌙 在白天/黑夜配对主题间切换。下方为进阶自定义。</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">每套主题包已配好「底色+强调色+护眼+高亮」，一键应用；顶栏 ☀️/🌙 在白天/黑夜配对主题间切换。下方为进阶自定义。</div>
 
         <div class="fld">
           <label>强调色（更多参考色）</label>
@@ -2973,7 +2976,7 @@ onUnmounted(() => {
           </select>
         </div>
         <div class="fld">
-          <label>聊天字号</label>
+          <label>全站字号（聊天 / 看板 / 知识库 / 错题等全部界面）</label>
           <div class="fs-ctl">
             <button
               class="btn btn-gh"
@@ -3003,7 +3006,7 @@ onUnmounted(() => {
           <button class="btn btn-pri" style="width: 100%" @click="store.uiCtx.examMgr = true">
             📋 考试管理（{{ (store.cfg.exams || []).length }} 个 · 当前：{{ (store.cfg.exams || []).find(e => e.id === store.cfg.activeExamId)?.name || '—' }}）
           </button>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             支持添加省考、事业单位等自定义考试，分别设置笔试日期与独立倒计时；可编辑、删除、设为当前。国考为内置考试不可删除。
           </div>
         </div>
@@ -3013,7 +3016,7 @@ onUnmounted(() => {
             <input v-model="store.cfg.obsidian" type="checkbox" @change="saveCfg()" />
             Obsidian 兼容导出（frontmatter + 标签 + callout 折叠块）
           </label>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             导出的 .md 可直接放入 Obsidian 库；PDF 采用 A4 精排版式，可导入 GoodNotes / Notability 等 iPad 笔记 App 标注。
           </div>
         </div>
@@ -3049,15 +3052,15 @@ onUnmounted(() => {
             <button class="btn btn-gh" :disabled="isNative && !isNativeHost()" :title="isNative && !isNativeHost() ? '5+ 环境不支持（见说明）' : ''" @click="pickDir()">📁 选择保存文件夹</button>
             <button class="btn btn-pri" :disabled="isNative && !isNativeHost()" @click="saveDataDir()">💾 保存全部数据{{ isNativeHost() ? '' : '（桌面）' }}</button>
           <template v-if="isNative">
-            <div style="font-size: 11px; color: var(--hud-cyan); margin-top: 6px">{{ isNativeHost() ? '📱 自建原生宿主：备份自动写入 <b>Download/行测AI导出/行测AI备份.json</b>（公共下载目录，文件管理/下载里可见）；点下方按钮可立即备份/45秒自动备份。' : '📱 5+App(HBuilderX)：原生备份写入 <b>' + (nativePath || '应用备份目录') + '</b>（该目录在部分系统/ROM 文件管理里不可见；需要“找得到文件”请用「📤 分享/导出备份」另存到微信/网盘/文件管理器）。' }}</div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); margin-top: 6px">{{ isNativeHost() ? '📱 自建原生宿主：备份自动写入 <b>Download/行测AI导出/行测AI备份.json</b>（公共下载目录，文件管理/下载里可见）；点下方按钮可立即备份/45秒自动备份。' : '📱 5+App(HBuilderX)：原生备份写入 <b>' + (nativePath || '应用备份目录') + '</b>（该目录在部分系统/ROM 文件管理里不可见；需要“找得到文件”请用「📤 分享/导出备份」另存到微信/网盘/文件管理器）。' }}</div>
             <div class="exp-choices">
               <button class="btn btn-pri" @click="nativeNow()">📱 立即原生备份</button>
               <button class="btn btn-gh" @click="nativeToggle()">{{ nativeOn ? '⏸ 停用自动原生备份' : '▶ 启用自动原生备份(45s)' }}</button>
             </div>
           </template>
           </div>
-          <div v-if="dirLabel" style="font-size: 11px; color: var(--hud-cyan); margin-top: 4px">已选择文件夹：{{ dirLabel }}</div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div v-if="dirLabel" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); margin-top: 4px">已选择文件夹：{{ dirLabel }}</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             保存后会写入：数据备份.json / 错题集.md / 知识库积累.md。手机端或浏览器不支持选文件夹时，用上方「⬇️ 导出备份(JSON)」下载到手机，可自行移动到任意文件夹。所有数据默认存在本机 localStorage，不会上传。
             <br/>✅ 选成功后即开启<b>自动备份</b>：每约 45 秒把全部数据（设置/对话/错题/知识库等）+ 附带文件静默写入该文件夹，无需每次手动保存。若系统选择框一点开就被取消（报 user aborted/安全拦截），请改用上方的「📦导出全部数据」或 WebDAV 云同步。
           </div>
@@ -3090,7 +3093,7 @@ onUnmounted(() => {
         <div class="exp-choices">
           <button class="btn btn-gh" @click="exportQuizLog()">📤 导出出题历史(JSON)</button>
           <button class="btn btn-gh" @click="clearQuizLog()">🧹 清空出题历史</button>
-          <span style="font-size:11px;color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
+          <span style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
 <div class="sec-t">🇨🇳 Gitee 自动互通（国内推荐，网页/iPad/安卓免翻墙直连）</div>
         <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>
@@ -3106,7 +3109,7 @@ onUnmounted(() => {
           <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="geToggleAuto()">{{ geAuto ? '⏸ 关闭 Gitee 自动互通' : '▶ 开启 Gitee 自动互通' }}</button>
           <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGeSync(true)">🔄 立即同步 / 创建仓库</button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ geStat || '提示：Gitee 网页可直接同步，不需要 VPN；不同用户各自填自己的令牌，仓库会自动建在各自名下并保持私有。' }}
         </div>
 
@@ -3125,7 +3128,7 @@ onUnmounted(() => {
           <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
           <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ ghStat || '提示：不同用户请各自填自己的 GitHub Token；首次同步会在你自己的账户下新建私人仓库，数据不会写入别人的仓库。Token 有有效期，到期后重新填写即可。' }}
         </div>
 
@@ -3155,7 +3158,7 @@ onUnmounted(() => {
           <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="wdUp()">⬆️ 上传备份</button>
           <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="wdDown()">⬇️ 下载备份</button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); margin-bottom: 8px">
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ wdStat || '提示：坚果云先在官网「安全选项」生成应用密码（不是登录密码）；地址会自动填好，一般无需手改。自定义地址以 .json 结尾（同一 URL 覆盖旧备份）。' }}
         </div>
 
@@ -3169,7 +3172,7 @@ onUnmounted(() => {
         <div class="fld">
           <label>截止月份（留空 = 动态到今天）</label>
           <input v-model="store.cfg.szTo" type="month" @change="saveCfg()" />
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             悬浮窗时政只推送该时间范围内的国内/贵州事件。
           </div>
         </div>
@@ -3194,7 +3197,7 @@ onUnmounted(() => {
             <label>音量：{{ Math.round(musicVol * 100) }}%</label>
             <input v-model.number="musicVol" type="range" min="0" max="1" step="0.05" style="width: 100%" @change="setVolume(musicVol)" />
           </div>
-          <div v-if="musicStatus" style="font-size: 11px; color: var(--text3); margin-top: 4px">{{ musicStatus }}</div>
+          <div v-if="musicStatus" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">{{ musicStatus }}</div>
         </div>
         <div class="sec-t">🎧 曲目列表（内置开源免费）</div>
         <div class="music-list">
@@ -3218,7 +3221,7 @@ onUnmounted(() => {
             <input v-model="neteaseUrl" placeholder="https://music.163.com/#/playlist?id=… 或 song?id=…" style="flex: 1" @keydown.enter="doNetease()" />
             <button class="btn btn-gh" @click="doNetease()">📥 导入</button>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             内置为「安静钢琴/轻音乐」学习曲（Kevin MacLeod · CC-BY 免费授权）；自定义支持任意直链与本地音频（本地音频仅本次会话播放）。网易云支持歌单(playlist?id=…)与单曲(song?id=…)链接，导入会自动尝试公共解析服务；受版权/接口限制失败时会给出引导（可用第三方工具获取直链后加为自定义曲目）。
           </div>
         </div>
@@ -3235,11 +3238,11 @@ onUnmounted(() => {
               </span>
             </button>
             <button class="skin-card skin-add" @click="doAddCustom()">
-              <span class="skin-name" style="font-size: 22px">➕</span>
+              <span class="skin-name" style="font-size: calc(22px * var(--ui-fs-scale, 1))">➕</span>
               <span class="skin-name">新增自定义</span>
             </button>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 6px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">
             当前角色：<b>{{ petSkin.name }}</b>（{{ petSkin.desc }}）；
             <span v-if="petIsLocked(petSkin.id)">🔒 形象与声音<b>内置锁定</b>（{{ petSkinVoiceOf(petSkin.id).name }}），不可更改。</span>
             <span v-else-if="petSkinVoiceOf(petSkin.id).cloned">已启用克隆原声「<b>{{ petSkinVoiceOf(petSkin.id).name }}</b>」🧬</span>
@@ -3247,17 +3250,17 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-if="!petIsLocked(petSkin.id)" class="fld" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
-          <button class="btn btn-pri" style="font-size: 12px" @click="$refs.setPetImgInput.click()">📷 上传形象</button>
-          <button v-if="petImg" class="btn btn-gh" style="font-size: 12px" @click="doClearPetImg()">🗑 恢复默认</button>
-          <span v-if="petImg" style="font-size: 11px; color: var(--text3)">已使用自定义形象（当前角色）</span>
+          <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="$refs.setPetImgInput.click()">📷 上传形象</button>
+          <button v-if="petImg" class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="doClearPetImg()">🗑 恢复默认</button>
+          <span v-if="petImg" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">已使用自定义形象（当前角色）</span>
           <input ref="setPetImgInput" type="file" accept="image/*" style="display: none" @change="onPetImgFile($event)" />
         </div>
-        <div v-else class="fld" style="font-size: 11px; color: var(--text3)">🔒 该角色为内置角色，形象已固定，不可上传/更改（李星云=Q 版侠客、薛神=内置真人图片）。</div>
+        <div v-else class="fld" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">🔒 该角色为内置角色，形象已固定，不可上传/更改（李星云=Q 版侠客、薛神=内置真人图片）。</div>
 
         <!-- 自定义人物：名字 + 人设（自定义角色显示） -->
         <div v-if="petSkin.custom" class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px">
           <label style="font-weight: 700">🧑 {{ petSkin.name }} 设定</label>
-          <div style="font-size: 11px; color: var(--text3); margin: 4px 0">自定义角色的名字、人设、形象、声线完全由你决定（声线用下方「🎤 克隆角色原声」，形象用上方「📷 上传形象」）。</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 4px 0">自定义角色的名字、人设、形象、声线完全由你决定（声线用下方「🎤 克隆角色原声」，形象用上方「📷 上传形象」）。</div>
           <label style="margin-top: 6px">名字</label>
           <input :value="cusField('name')" placeholder="自定义人物" style="width: 100%" @input="setCusField('name', $event.target.value)" />
           <label style="margin-top: 6px">人设 / 性格（萌宠对话按此扮演）</label>
@@ -3267,44 +3270,44 @@ onUnmounted(() => {
         <!-- 角色原声克隆：大模型克隆（3-30 秒参考音频即可还原音色） -->
         <div v-if="!petIsLocked(petSkin.id)" class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px">
           <label style="font-weight: 700">🎤 克隆『{{ petSkin.char }}』原声（大模型音色克隆 · 原声级）</label>
-          <div style="font-size: 11px; color: var(--text3); margin: 4px 0">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 4px 0">
             上传一段 3-30 秒清晰的参考音频（说话/角色声均可，越清晰越像），大模型会克隆出该音色并<b>自动绑定到『{{ petSkin.char }}』</b>：之后一键切到这个角色，朗读就是克隆原声；切走则恢复「语音」里的全局音色（保持全局一致）。<b>支持 mp3/wav/m4a/aac/ogg 以及 mp4/mov 等视频文件（自动提取其中的声音），哪怕后缀是 .mp3 实为 m4a 也能识别；超过 30 秒会自动裁前 20 秒、去头尾静音、转成标准 WAV 再克隆</b>。配音版权请自行确保。
           </div>
           <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
-            <select v-model="cloneBackend" style="font-size: 12px; max-width: 190px">
+            <select v-model="cloneBackend" style="font-size: calc(12px * var(--ui-fs-scale, 1)); max-width: 190px">
               <option value="zhipu">🧬 智谱 GLM-TTS-Clone（3 秒即可）</option>
               <option value="cosy">🎨 CosyVoice2 · 硅基流动</option>
             </select>
-            <button class="btn btn-gh" style="font-size: 12px" @click="$refs.skinVoiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
+            <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="$refs.skinVoiceFileInput.click()">{{ voiceFileName || '🎤 选择参考音频' }}</button>
             <input ref="skinVoiceFileInput" type="file" accept="audio/*,video/*,.mp4,.mov,.mkv,.webm,.m4a" style="display: none" @change="onVoiceFile($event)" />
             <input v-model="cloneVoiceName" :placeholder="petSkin.char + '声线'" style="flex: 1; min-width: 110px" />
-            <button class="btn btn-pri" style="font-size: 12px" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
+            <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" :disabled="voiceCloning" @click="doCloneVoice()">{{ voiceCloning ? '⏳ 克隆中…' : '🧬 开始克隆并绑定' }}</button>
             <div style="width: 100%">
               <input v-model="cloneVoiceText" placeholder="参考音频对应的文字内容（选填；留空会自动语音识别生成，填了克隆更像）" style="width: 100%; margin-top: 6px" />
             </div>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             需要对应 Key：智谱克隆用「图形增强/语音-智谱」Key；CosyVoice2 用「语音-OpenAI 兼容」Key（硅基流动）。未填时克隆会给出提示。
           </div>
-          <div v-if="voiceCloneStat" style="font-size: 11px; margin-top: 6px; color: var(--text3)">{{ voiceCloneStat }}</div>
+          <div v-if="voiceCloneStat" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-top: 6px; color: var(--text3)">{{ voiceCloneStat }}</div>
           <div v-if="petBoundVoices().length" style="margin-top: 8px">
-            <div style="font-size: 11px; color: var(--text3)">🧬 已绑定的克隆原声：</div>
-            <div v-for="bv in petBoundVoices()" :key="bv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px">
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">🧬 已绑定的克隆原声：</div>
+            <div v-for="bv in petBoundVoices()" :key="bv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(12px * var(--ui-fs-scale, 1))">
               <span>{{ bv.char }} · {{ bv.name || bv.voice }}</span>
-              <button class="btn btn-gh" style="font-size: 11px" @click="ttsPreviewBound(bv.skinId)">▶️ 试听</button>
-              <button class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(bv.skinId)">🗑 解除</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="ttsPreviewBound(bv.skinId)">▶️ 试听</button>
+              <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doUnbindSkinVoice(bv.skinId)">🗑 解除</button>
             </div>
           </div>
           <div v-if="store.cfg.ttsMode === 'dash' && !petIsLocked(petSkin.id)" style="margin-top: 8px; border-top: 1px dashed var(--line, rgba(128,128,128,.35)); padding-top: 8px">
-            <div style="font-size: 11px; color: var(--text3)">🍊 当前引擎为「阿里百炼」，可把现在选中的百炼音色（含自定义）绑定给『{{ petSkin.char }}』，做成 TA 的专属声线：</div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">🍊 当前引擎为「阿里百炼」，可把现在选中的百炼音色（含自定义）绑定给『{{ petSkin.char }}』，做成 TA 的专属声线：</div>
             <div style="display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap">
-              <span style="font-size: 12px">当前：<b>{{ store.cfg.ttsDash.voice || '默认' }}</b><span v-if="store.cfg.ttsDash.voiceCustom">（自定义：{{ store.cfg.ttsDash.voiceCustom }}）</span></span>
-              <button class="btn btn-pri" style="font-size: 11px" @click="bindDashToSkin(petSkin.id)">🔗 绑给『{{ petSkin.char }}』</button>
-              <button v-if="petSkinVoiceOf(petSkin.id).engine === 'dash'" class="btn btn-gh" style="font-size: 11px" @click="doUnbindSkinVoice(petSkin.id)">🗑 解除</button>
+              <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">当前：<b>{{ store.cfg.ttsDash.voice || '默认' }}</b><span v-if="store.cfg.ttsDash.voiceCustom">（自定义：{{ store.cfg.ttsDash.voiceCustom }}）</span></span>
+              <button class="btn btn-pri" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="bindDashToSkin(petSkin.id)">🔗 绑给『{{ petSkin.char }}』</button>
+              <button v-if="petSkinVoiceOf(petSkin.id).engine === 'dash'" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doUnbindSkinVoice(petSkin.id)">🗑 解除</button>
             </div>
           </div>
         </div>
-        <div v-else class="fld" style="font-size: 11px; color: var(--text3)">🔒 该角色声音为内置克隆原声（{{ petSkinVoiceOf(petSkin.id).name }}），已锁定不可更改/重新克隆。想添加可自由定制的角色？点上方「➕ 新增自定义」。</div>
+        <div v-else class="fld" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">🔒 该角色声音为内置克隆原声（{{ petSkinVoiceOf(petSkin.id).name }}），已锁定不可更改/重新克隆。想添加可自由定制的角色？点上方「➕ 新增自定义」。</div>
 
         <div class="fld">
           <label style="display: flex; align-items: center; gap: 6px">
@@ -3319,7 +3322,7 @@ onUnmounted(() => {
             <input v-model="petMuted" type="checkbox" @change="setPetMuted(petMuted)" />
             关闭萌宠气泡（隐藏互动文字）
           </label>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 6px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">
             萌宠记录学习状态：每次 AI 回复 +1 积分、错题二刷/三刷 +2，5 积分喂食；成长 🥚→🐣→🐥→🐔→🦉→🐲。右下角萌宠可互动、改名、喂食、拖拽小窗。
           </div>
         </div>
@@ -3343,7 +3346,7 @@ onUnmounted(() => {
     </div>
   </div>
   <button class="btn btn-gh" style="margin-top: 10px" @click="resetUi()">↺ 恢复全部入口</button>
-  <div style="font-size: 11px; color: var(--text3); margin-top: 8px">
+  <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 8px">
     提示：隐藏某个板块后，它从底部导航消失；需要时可点上方「恢复全部入口」一键还原。
   </div>
 </div>
@@ -3364,25 +3367,25 @@ onUnmounted(() => {
     <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
       <input v-model="authOldP" type="password" placeholder="原密码" style="width: 120px" />
       <input v-model="authNewP" type="password" placeholder="新密码(≥4位)" style="width: 140px" @keyup.enter="doChangePass" />
-      <button class="btn btn-gh" style="font-size: 12px" @click="doChangePass">✏️ 修改</button>
+      <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="doChangePass">✏️ 修改</button>
     </div>
   </div>
   <div v-if="authState.ok" class="fld">
     <label>退出 / 删除本机账号</label>
     <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
-      <button class="btn btn-gh" style="font-size: 12px" @click="doLogout">🚪 退出登录</button>
+      <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="doLogout">🚪 退出登录</button>
       <input v-model="authDelP" type="password" placeholder="输入密码删除账号" style="width: 160px" @keyup.enter="doDeleteUser" />
-      <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="doDeleteUser">🗑 删除账号</button>
+      <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--red)" @click="doDeleteUser">🗑 删除账号</button>
     </div>
   </div>
   <div class="fld" style="border-top: 1px dashed rgba(148,163,184,.2); padding-top: 10px; margin-top: 4px">
     <label>🔐 登录方式</label>
-    <div style="font-size: 12px; color: var(--text2); line-height: 1.7">本地账号：<b>用户名 + 密码</b>（仅存本机浏览器，无服务器、不上传、无第三方服务）。勾「记住我」7 天内免登录；忘记密码可「重置本地账号」重新注册。</div>
+    <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); line-height: 1.7">本地账号：<b>用户名 + 密码</b>（仅存本机浏览器，无服务器、不上传、无第三方服务）。勾「记住我」7 天内免登录；忘记密码可「重置本地账号」重新注册。</div>
   </div>
   <div class="fld">
-    <button class="btn btn-gh" style="font-size: 12px" @click="doAuthReset">🔄 重置本地账号（清空本机账号记录）</button>
+    <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="doAuthReset">🔄 重置本地账号（清空本机账号记录）</button>
   </div>
-  <div style="font-size: 11px; color: var(--text3); margin-top: 4px">说明：本登录为「本地保护门」（无后端），防止他人随意使用；清除站点数据或换浏览器会丢失账号。删除账号 / 重置账号不影响对话、错题、笔记等学习数据。</div>
+  <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">说明：本登录为「本地保护门」（无后端），防止他人随意使用；清除站点数据或换浏览器会丢失账号。删除账号 / 重置账号不影响对话、错题、笔记等学习数据。</div>
 </div>
 <button class="set-group-hd" :class="{ on: setGroup === 'help' }" @click="toggleSetGroup('help')"><span class="sg-t">❓ 帮助与关于</span><span class="sg-desc">新手引导 / 使用帮助 / 关于 / 日志</span><span class="sg-arrow">{{ setGroup === 'help' ? '▾' : '▸' }}</span></button>
 <div v-show="setGroup === 'help'" class="set-group-bd">
@@ -3412,7 +3415,7 @@ onUnmounted(() => {
           </div>
           <label style="margin-top: 6px">模糊程度：{{ store.cfg.bgBlur }}px</label>
           <input v-model.number="store.cfg.bgBlur" type="range" min="0" max="30" step="1" style="width: 100%" @change="saveCfg()" />
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">模糊越大越"磨砂"，越大越护眼不刺眼；白天/黑夜均可使用同一壁纸。</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">模糊越大越"磨砂"，越大越护眼不刺眼；白天/黑夜均可使用同一壁纸。</div>
         </div>
         <div class="fld">
           <label>
@@ -3420,9 +3423,9 @@ onUnmounted(() => {
             一键关闭所有引导（板块首次进入不再弹提示）
           </label>
           <div style="display: flex; gap: 6px; margin-top: 6px">
-            <button class="btn btn-gh" style="font-size: 12px" @click="enableAllGuides()">🔄 重开全部引导</button>
+            <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="enableAllGuides()">🔄 重开全部引导</button>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">
             引导 = 每个板块第一次进入时弹出的"功能说明 + 使用技巧"，可单独跳过或一键全关。
           </div>
         </div>
@@ -3484,14 +3487,14 @@ onUnmounted(() => {
           </details>
         </div>
         <div class="sec-t">ℹ️ 模型说明</div>
-        <div style="font-size: 12px; color: var(--text3); line-height: 1.7">
+        <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.7">
           文字题（纯文字）走「文字模型」，默认 DeepSeek
           deepseek-v4-flash（便宜、中文好）；带图/公式题走「视觉模型」，默认 DeepSeek
           deepseek-v4-flash-vision-exp（能看图、识别公式符号），也可在设置里换智谱
           GLM-5V。截图提问需配置并勾选视觉模型。
         </div>
         <div class="sec-t">🛠 最近错误日志（本地调试）</div>
-        <div style="font-size: 12px; color: var(--text3); line-height: 1.7">
+        <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.7">
           运行出错会自动记录到本机（最多保留最近 50 条，仅用于排查，不影响任何数据）。
           <div style="margin-top: 6px">
             <button class="btn btn-gh" @click="refreshErrLog(); errLogShow = !errLogShow">{{ errLogShow ? '隐藏日志' : '查看日志' }}（{{ errLogList.length }}）</button>
@@ -3530,37 +3533,37 @@ onUnmounted(() => {
           <span>🧮 累计 token：输入 <b>{{ fmtTok(costStat.totalInT) }}</b> + 输出 <b>{{ fmtTok(costStat.totalOutT) }}</b><template v-if="costStat.totalReasonT"> + 思考 <b>{{ fmtTok(costStat.totalReasonT) }}</b></template> = <b>{{ fmtTok(costStat.totalT) }}</b></span>
         </div>
         <div class="cost-budget" style="display:flex;align-items:center;gap:8px;margin:6px 2px 8px;flex-wrap:wrap">
-          <span style="font-size:12.5px">🛑 今日预算：</span>
-          <input v-model.number="costBudget" type="number" step="0.5" min="0" placeholder="0=不限制" style="width:96px;padding:5px 8px;border-radius:6px;border:1px solid var(--glass-border);background:var(--surface);color:var(--text);font-size:12.5px" title="今日 AI 花费超过该金额（元）后，每次调用先弹确认才继续；0 表示不限制" />
-          <span style="font-size:11.5px;color:var(--text3)">元/日 · 今日已用 <b style="color:var(--accent)">{{ fmtCost(costStat.today) }}</b><template v-if="costBudget > 0 && costStat.today >= costBudget"> · <b style="color:#fb7185">已超预算，后续调用需确认</b></template></span>
-          <button class="btn btn-pri" style="font-size:12px" @click="costSaveBudget()">💾 保存预算</button>
+          <span style="font-size: calc(12.5px * var(--ui-fs-scale, 1))">🛑 今日预算：</span>
+          <input v-model.number="costBudget" type="number" step="0.5" min="0" placeholder="0=不限制" style="width:96px;padding:5px 8px;border-radius:6px;border:1px solid var(--glass-border);background:var(--surface);color:var(--text);font-size: calc(12.5px * var(--ui-fs-scale, 1))" title="今日 AI 花费超过该金额（元）后，每次调用先弹确认才继续；0 表示不限制" />
+          <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1));color:var(--text3)">元/日 · 今日已用 <b style="color:var(--accent)">{{ fmtCost(costStat.today) }}</b><template v-if="costBudget > 0 && costStat.today >= costBudget"> · <b style="color:#fb7185">已超预算，后续调用需确认</b></template></span>
+          <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costSaveBudget()">💾 保存预算</button>
         </div>
-        <div style="font-size: 11px; color: var(--text3); line-height: 1.6; margin: 6px 2px 8px">
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.6; margin: 6px 2px 8px">
           📌 每次调用 <b>实时记一笔</b>：功能 / 模型 / 图文类型 / 输入·输出·思考 token（接口有 usage 用精确值并标「精确」，否则按文本估算）/ 耗时 / 费用明细。金额按下方计价表估算，仅供心里有底，以服务商账单为准；<b>本地免费服务（Ollama/LM Studio/Jan）计 ¥0</b>。
         </div>
         <div class="cost-cols">
           <div class="cost-col">
-            <div class="sec-t" style="font-size: 13px">📊 按功能</div>
+            <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">📊 按功能</div>
             <div v-for="(v, k) in costStat.byFeat" :key="k" class="cost-row"><span>{{ COST_FEATURES[k] || k }}</span><b>{{ fmtCost(v) }}</b></div>
             <div v-if="!Object.keys(costStat.byFeat).length" class="cost-empty">暂无记录</div>
           </div>
           <div class="cost-col">
-            <div class="sec-t" style="font-size: 13px">🤖 按模型</div>
+            <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🤖 按模型</div>
             <div v-for="(v, k) in costStat.byModel" :key="k" class="cost-row"><span>{{ k }}</span><b>{{ fmtCost(v) }}</b></div>
             <div v-if="!Object.keys(costStat.byModel).length" class="cost-empty">暂无记录</div>
           </div>
           <div class="cost-col">
-            <div class="sec-t" style="font-size: 13px">🖼 按类型</div>
+            <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🖼 按类型</div>
             <div v-for="(v, k) in costStat.byKind" :key="k" class="cost-row"><span>{{ COST_KINDS[k] || k }}</span><b>{{ fmtCost(v) }}</b></div>
             <div v-if="!Object.keys(costStat.byKind).length" class="cost-empty">暂无记录</div>
           </div>
           <div class="cost-col">
-            <div class="sec-t" style="font-size: 13px">🏢 按提供商</div>
+            <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🏢 按提供商</div>
             <div v-for="(v, k) in costStat.byProv" :key="k" class="cost-row"><span>{{ k }}</span><b>{{ fmtCost(v) }}</b></div>
             <div v-if="!Object.keys(costStat.byProv).length" class="cost-empty">暂无记录</div>
           </div>
         </div>
-        <div class="sec-t" style="font-size: 13px">🧾 最近记录（{{ costStat.list.length }}）<span style="font-weight:400;color:var(--text3);font-size:11px">点某条可展开费用明细</span></div>
+        <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🧾 最近记录（{{ costStat.list.length }}）<span style="font-weight:400;color:var(--text3);font-size: calc(11px * var(--ui-fs-scale, 1))">点某条可展开费用明细</span></div>
         <div class="cost-list">
           <div v-for="(r, i) in costStat.list" :key="i" class="cost-it" :class="{ open: costOpen === i }" @click="costOpen = costOpen === i ? null : i">
             <span class="ci-time" :title="fmtTime(r.t)">{{ fmtTime(r.t) }}</span>
@@ -3597,12 +3600,12 @@ onUnmounted(() => {
               <span class="cp-note">{{ pr.note || pr }}</span>
             </div></template>
             <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
-              <button class="btn btn-pri" style="font-size: 12px" @click="costSavePrices()">💾 保存计价表</button>
-              <button class="btn btn-gh" style="font-size: 12px" @click="costResetPrices()">↩️ 恢复默认</button>
-              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('today'); costShow = true">🧹 清今日</button>
-              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('week'); costShow = true">🧹 清本周</button>
-              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('month'); costShow = true">🧹 清本月</button>
-              <button class="btn btn-gh" style="font-size: 12px; color: var(--red)" @click="clearCost('all')">🗑 清全部</button>
+              <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costSavePrices()">💾 保存计价表</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costResetPrices()">↩️ 恢复默认</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--red)" @click="clearCost('today'); costShow = true">🧹 清今日</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--red)" @click="clearCost('week'); costShow = true">🧹 清本周</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--red)" @click="clearCost('month'); costShow = true">🧹 清本月</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--red)" @click="clearCost('all')">🗑 清全部</button>
             </div>
           </div>
         </details>
@@ -3851,11 +3854,11 @@ onUnmounted(() => {
               </span>
             </button>
             <button class="skin-card skin-add" @click="doAddCustom()">
-              <span class="skin-name" style="font-size: 20px">➕</span>
+              <span class="skin-name" style="font-size: calc(20px * var(--ui-fs-scale, 1))">➕</span>
               <span class="skin-name">新增自定义</span>
             </button>
           </div>
-          <div style="font-size: 11px; color: var(--text3); margin-top: 4px">薛神/章若楠/李星云/姬如雪为内置锁定角色（形象+克隆原声不可改）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">薛神/章若楠/李星云/姬如雪为内置锁定角色（形象+克隆原声不可改）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
         </div>
         <div v-if="bubble && !petMuted" class="pet-talk pp-talk">{{ bubble }}</div>
         <div class="pc-list pp-list">
@@ -3868,17 +3871,17 @@ onUnmounted(() => {
         </div>
         <div class="pc-input-row pp-input">
           <input v-model="petAskText" placeholder="问萌宠：这道题怎么解？掉什么坑？今天学什么？" style="flex: 1" @keydown.enter="doPetAsk()" />
-          <button class="btn btn-gh" style="font-size: 12px" title="发送图片（视觉模型识别）" @click="$refs.petImgChatInput.click()">📷</button>
+          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" title="发送图片（视觉模型识别）" @click="$refs.petImgChatInput.click()">📷</button>
           <input ref="petImgChatInput" type="file" accept="image/*" style="display: none" @change="onPetImgChat($event)" />
-          <button class="btn btn-gh" style="font-size: 12px" title="语音输入（说问题转文字）" @click="petMic()">🎤</button>
-          <button class="btn btn-pri" style="font-size: 12px; white-space: nowrap" :disabled="petChatBusy" @click="doPetAsk()">发送</button>
-          <button class="btn btn-gh" style="font-size: 12px" :title="petSpeakReply ? '回复将用真人音色朗读' : '回复已静音'" @click="petSpeakReply = !petSpeakReply">{{ petSpeakReply ? '🔊' : '🔇' }}</button>
+          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" title="语音输入（说问题转文字）" @click="petMic()">🎤</button>
+          <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1)); white-space: nowrap" :disabled="petChatBusy" @click="doPetAsk()">发送</button>
+          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" :title="petSpeakReply ? '回复将用真人音色朗读' : '回复已静音'" @click="petSpeakReply = !petSpeakReply">{{ petSpeakReply ? '🔊' : '🔇' }}</button>
         </div>
         <div class="pp-foot">
-          <button class="btn btn-gh" style="font-size: 11px" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-gh" style="font-size: 11px" @click="doFeed()">🍖 喂食</button>
-          <button class="btn btn-gh" style="font-size: 11px" @click="petRenameToggle = !petRenameToggle">✏️ 改名</button>
-          <button class="btn btn-gh" style="font-size: 11px" @click="petCollapsed = true">▁ 收起</button>
+          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="patPet()">🐾 摸头</button>
+          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doFeed()">🍖 喂食</button>
+          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="petRenameToggle = !petRenameToggle">✏️ 改名</button>
+          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="petCollapsed = true">▁ 收起</button>
         </div>
         <div v-if="petRenameToggle" class="pet-rename pp-rename">
           <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />

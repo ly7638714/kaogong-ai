@@ -154,14 +154,14 @@ function close() {
   color: var(--text1, #eaf2ff);
 }
 .em-head { position: relative; padding-right: 30px; }
-.em-title { font-size: 17px; font-weight: 700; }
-.em-sub { font-size: 12px; color: var(--text3, #8aa0bd); margin-top: 4px; line-height: 1.5; }
+.em-title { font-size: calc(17px * var(--ui-fs-scale, 1)); font-weight: 700; }
+.em-sub { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3, #8aa0bd); margin-top: 4px; line-height: 1.5; }
 .em-x {
   position: absolute; top: -2px; right: -4px;
   width: 28px; height: 28px; border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.05); color: var(--text2, #b9c8de);
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: calc(18px * var(--ui-fs-scale, 1)); line-height: 1; cursor: pointer;
 }
 .em-x:hover { background: rgba(255, 92, 124, 0.18); color: #fff; }
 
@@ -175,16 +175,16 @@ function close() {
 .em-row.on { border-color: rgba(120, 200, 255, 0.5); background: rgba(80, 200, 255, 0.08); }
 .em-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 8px currentColor; }
 .em-info { flex: 1; min-width: 0; }
-.em-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.em-name { font-size: calc(14px * var(--ui-fs-scale, 1)); font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .em-tag {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  font-size: calc(10px * var(--ui-fs-scale, 1)); padding: 1px 6px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.1); color: var(--text3, #8aa0bd);
 }
 .em-tag.act { background: rgba(80, 200, 255, 0.25); color: #bfe9ff; }
-.em-meta { font-size: 11.5px; color: var(--text3, #8aa0bd); margin-top: 2px; }
+.em-meta { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3, #8aa0bd); margin-top: 2px; }
 .em-acts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .em-b {
-  font-size: 11.5px; padding: 4px 9px; border-radius: 8px; cursor: pointer;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1)); padding: 4px 9px; border-radius: 8px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.05); color: var(--text2, #b9c8de);
 }
@@ -192,15 +192,15 @@ function close() {
 .em-set { border-color: rgba(80, 200, 255, 0.4); color: #bfe9ff; }
 .em-del:disabled { opacity: 0.3; cursor: not-allowed; }
 .em-del:not(:disabled):hover { background: rgba(255, 92, 124, 0.2); color: #ffd2dc; }
-.em-empty { font-size: 12.5px; color: var(--text3, #8aa0bd); text-align: center; padding: 14px 0; }
+.em-empty { font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text3, #8aa0bd); text-align: center; padding: 14px 0; }
 
 .em-form { margin-top: 12px; padding: 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px dashed rgba(255, 255, 255, 0.12); }
-.em-form-hd { font-size: 13.5px; font-weight: 700; margin-bottom: 10px; color: var(--hud-cyan, #5cc8ff); }
+.em-form-hd { font-size: calc(13.5px * var(--ui-fs-scale, 1)); font-weight: 700; margin-bottom: 10px; color: var(--hud-cyan, #5cc8ff); }
 .em-grid { display: flex; gap: 12px; flex-wrap: wrap; }
-.em-fld { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text3, #8aa0bd); flex: 1; min-width: 160px; }
+.em-fld { display: flex; flex-direction: column; gap: 5px; font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3, #8aa0bd); flex: 1; min-width: 160px; }
 .em-fld input[type="text"], .em-fld input[type="date"] {
   background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px; padding: 8px 10px; color: var(--text1, #eaf2ff); font-size: 13px;
+  border-radius: 8px; padding: 8px 10px; color: var(--text1, #eaf2ff); font-size: calc(13px * var(--ui-fs-scale, 1));
 }
 .em-fld input:focus { outline: none; border-color: rgba(80, 200, 255, 0.6); }
 .em-colors { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -210,7 +210,7 @@ function close() {
 .em-add-line {
   width: 100%; margin-top: 10px; padding: 10px; border-radius: 10px; cursor: pointer;
   border: 1px dashed rgba(80, 200, 255, 0.4); background: rgba(80, 200, 255, 0.06);
-  color: #bfe9ff; font-size: 13px;
+  color: #bfe9ff; font-size: calc(13px * var(--ui-fs-scale, 1));
 }
 .em-add-line:hover { background: rgba(80, 200, 255, 0.12); }
 </style>

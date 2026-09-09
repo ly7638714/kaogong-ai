@@ -700,7 +700,7 @@ watch(
   backdrop-filter: blur(10px);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   white-space: nowrap;
   pointer-events: none;
 }
@@ -713,7 +713,7 @@ watch(
 .ht-name { font-weight: 800; margin-right: 2px; }
 .ht-item { color: var(--text2); }
 .ht-item b { color: var(--text); font-family: var(--font-hud); margin-left: 2px; }
-.ht-live { color: #34d399; font-size: 10px; }
+.ht-live { color: #34d399; font-size: calc(10px * var(--ui-fs-scale, 1)); }
 /* ===== 板块分析面板 ===== */
 .planet-card {
   position: fixed;
@@ -730,7 +730,7 @@ watch(
   backdrop-filter: blur(12px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
 }
 .pc-head {
   display: flex;
@@ -754,7 +754,7 @@ watch(
   border: none;
   color: var(--text2);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   padding: 2px 4px;
 }
 .pc-mastery-row {
@@ -763,10 +763,10 @@ watch(
   justify-content: space-between;
   margin-bottom: 5px;
 }
-.pc-lbl { color: var(--text3); font-size: 11px; }
+.pc-lbl { color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); }
 .pc-mastery {
   font-family: var(--font-hud);
-  font-size: 18px;
+  font-size: calc(18px * var(--ui-fs-scale, 1));
   background: linear-gradient(135deg, var(--pc, #22d3ee), #818cf8);
   background-clip: text;
   -webkit-background-clip: text;
@@ -801,23 +801,23 @@ watch(
 }
 .pc-cell b {
   display: block;
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-fs-scale, 1));
   font-family: var(--font-hud);
   color: var(--pc, var(--hud-cyan));
 }
-.pc-cell span { font-size: 10px; color: var(--text3); }
+.pc-cell span { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .pc-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text2);
   margin-bottom: 7px;
 }
 .pc-badge { color: #34d399; }
 .pc-dim { opacity: 0.8; }
 .pc-advice {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   line-height: 1.5;
   color: var(--text2);
   padding: 6px 8px;
@@ -826,7 +826,7 @@ watch(
   margin-bottom: 8px;
 }
 .pc-wrong-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text3);
   margin-bottom: 4px;
 }
@@ -836,11 +836,11 @@ watch(
   align-items: baseline;
   padding: 3px 0;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
 }
 .pc-wrong-t { color: var(--text3); font-family: var(--font-hud); white-space: nowrap; }
 .pc-wrong-q { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-empty { font-size: 11px; color: #34d399; padding: 2px 0; }
+.pc-empty { font-size: calc(11px * var(--ui-fs-scale, 1)); color: #34d399; padding: 2px 0; }
 /* ===== 行测局长总览 ===== */
 .earth-panel {
   position: fixed;
@@ -858,7 +858,7 @@ watch(
   backdrop-filter: blur(14px);
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
 }
 .ep-head {
   display: flex;
@@ -866,7 +866,7 @@ watch(
   gap: 7px;
   margin-bottom: 10px;
 }
-.ep-emoji { font-size: 18px; }
+.ep-emoji { font-size: calc(18px * var(--ui-fs-scale, 1)); }
 .ep-title {
   flex: 1;
   font-weight: 800;
@@ -891,13 +891,13 @@ watch(
 }
 .ep-cell b {
   display: block;
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-fs-scale, 1));
   font-family: var(--font-hud);
   color: var(--hud-cyan);
 }
-.ep-cell span { font-size: 10px; color: var(--text3); }
+.ep-cell span { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .ep-sec {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   color: var(--text3);
   margin-bottom: 5px;
 }
@@ -906,7 +906,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
 }
 .ep-rank {
   width: 15px;
@@ -934,11 +934,11 @@ watch(
   border-radius: 999px;
 }
 .ep-m { width: 34px; text-align: right; font-family: var(--font-hud); color: var(--text2); }
-.ep-tag { font-size: 10px; color: var(--text3); width: 40px; text-align: center; }
+.ep-tag { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); width: 40px; text-align: center; }
 .ep-tag.best { color: #fbbf24; font-weight: 800; }
 .ep-tag.weak { color: var(--red, #fb7185); font-weight: 800; }
 .ep-foot {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text2);
   line-height: 1.6;
   padding: 6px 8px;
@@ -956,15 +956,15 @@ watch(
   border: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 8px;
 }
-.ep-pet-emoji { font-size: 20px; }
-.ep-pet-info { flex: 1; font-size: 11px; color: var(--text2); line-height: 1.4; }
+.ep-pet-emoji { font-size: calc(20px * var(--ui-fs-scale, 1)); }
+.ep-pet-info { flex: 1; font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text2); line-height: 1.4; }
 .ep-pet-info b { color: var(--text); }
 .ep-pet-btn {
   border: 1px solid rgba(34, 211, 238, 0.4);
   background: rgba(34, 211, 238, 0.12);
   color: var(--hud-cyan);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   padding: 4px 9px;
   cursor: pointer;
 }
@@ -977,7 +977,7 @@ watch(
   border-radius: 10px;
   padding: 8px 0;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
   transition: all 0.2s;
 }
 .ep-fly:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(251, 191, 36, 0.25); }
@@ -1015,8 +1015,8 @@ watch(
 .fly-rocket:disabled { opacity: 0.85; cursor: default; }
 .fly-rocket.on { animation: rocketShake 0.5s ease-in-out infinite; border-color: #34d399; }
 .fly-rocket.on .fr-ic { display: inline-block; animation: rocketUp 0.6s ease-in-out infinite; }
-.fr-ic { font-size: 20px; }
-.fr-txt { font-size: 10px; color: var(--text2); font-weight: 700; }
+.fr-ic { font-size: calc(20px * var(--ui-fs-scale, 1)); }
+.fr-txt { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text2); font-weight: 700; }
 @keyframes rocketShake {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
@@ -1041,12 +1041,12 @@ watch(
 }
 .fly-pet:hover { transform: scale(1.1); box-shadow: 0 0 18px rgba(34, 211, 238, 0.4); }
 .fly-pet.hot { animation: rocketShake 1s ease-in-out infinite; border-color: #fbbf24; }
-.fp-emoji { font-size: 28px; }
+.fp-emoji { font-size: calc(28px * var(--ui-fs-scale, 1)); }
 .fp-lv {
   position: absolute;
   bottom: -4px;
   right: -4px;
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-fs-scale, 1));
   font-family: var(--font-hud);
   color: #0b1626;
   background: linear-gradient(135deg, #22d3ee, #818cf8);
@@ -1061,7 +1061,7 @@ watch(
   transform: translateX(-50%);
   white-space: nowrap;
   max-width: 180px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text);
   background: rgba(7, 15, 26, 0.92);
   border: 1px solid rgba(34, 211, 238, 0.35);
@@ -1102,7 +1102,7 @@ watch(
   backdrop-filter: blur(12px);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1142,17 +1142,17 @@ watch(
   padding: 11px 13px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-.pc2-emoji { font-size: 26px; animation: bubblePop 0.4s ease; }
+.pc2-emoji { font-size: calc(26px * var(--ui-fs-scale, 1)); animation: bubblePop 0.4s ease; }
 .pc2-t { flex: 1; line-height: 1.35; }
-.pc2-t b { display: block; font-size: 14px; }
-.pc2-t span { font-size: 10.5px; color: var(--text3); }
+.pc2-t b { display: block; font-size: calc(14px * var(--ui-fs-scale, 1)); }
+.pc2-t span { font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .pc2-actions { display: flex; align-items: center; gap: 5px; }
 .pc2-a {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.06);
   color: var(--text2);
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-fs-scale, 1));
   padding: 3px 8px;
   cursor: pointer;
 }
@@ -1162,7 +1162,7 @@ watch(
   border: none;
   color: var(--text2);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
   padding: 2px 5px;
 }
 .pc2-body {
@@ -1177,12 +1177,12 @@ watch(
 }
 .pc2-msg { display: flex; gap: 7px; align-items: flex-start; }
 .pc2-msg.user { flex-direction: row-reverse; }
-.pc2-avatar { font-size: 22px; line-height: 1; flex-shrink: 0; }
+.pc2-avatar { font-size: calc(22px * var(--ui-fs-scale, 1)); line-height: 1; flex-shrink: 0; }
 .pc2-bubble {
   max-width: 78%;
   padding: 7px 11px;
   border-radius: 12px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   line-height: 1.55;
   color: var(--text);
   background: rgba(255, 255, 255, 0.07);
@@ -1199,7 +1199,7 @@ watch(
 .pc2-empty {
   text-align: center;
   color: var(--text3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   line-height: 1.8;
   padding: 20px 0;
 }
@@ -1215,7 +1215,7 @@ watch(
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   padding: 7px 12px;
   outline: none;
 }
@@ -1226,7 +1226,7 @@ watch(
   background: linear-gradient(135deg, #22d3ee, #818cf8);
   color: #04121d;
   font-weight: 800;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   padding: 6px 14px;
   cursor: pointer;
 }
@@ -1236,7 +1236,7 @@ watch(
   background: rgba(248, 113, 113, 0.15);
   color: #fb7185;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   padding: 6px 10px;
   cursor: pointer;
 }
@@ -1267,8 +1267,8 @@ watch(
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-7px); }
 }
-.pf3-emoji { font-size: 30px; line-height: 1; }
-.pf3-mood { font-size: 16px; line-height: 1; }
+.pf3-emoji { font-size: calc(30px * var(--ui-fs-scale, 1)); line-height: 1; }
+.pf3-mood { font-size: calc(16px * var(--ui-fs-scale, 1)); line-height: 1; }
 .pf3-bubble {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -1276,7 +1276,7 @@ watch(
   transform: translateX(-50%);
   width: max-content;
   max-width: 220px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   line-height: 1.5;
   color: var(--text);
   background: rgba(7, 15, 26, 0.94);
@@ -1313,13 +1313,13 @@ watch(
   pointer-events: none;
 }
 .fsp-avatar {
-  font-size: 26px;
+  font-size: calc(26px * var(--ui-fs-scale, 1));
   line-height: 1;
   filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.6));
   animation: bubblePop 0.3s ease;
 }
 .fsp-bubble {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   line-height: 1.6;
   color: var(--text);
   background: rgba(7, 15, 26, 0.92);
@@ -1367,9 +1367,9 @@ watch(
   border-radius: 50%;
   box-shadow: 0 0 8px currentColor;
 }
-.lg-name { font-size: 11px; color: var(--text2); white-space: nowrap; }
+.lg-name { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text2); white-space: nowrap; }
 .lg-m {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-fs-scale, 1));
   font-family: var(--font-hud);
   color: var(--hud-cyan);
   background: rgba(34, 211, 238, 0.12);
@@ -1378,7 +1378,7 @@ watch(
 }
 @media (max-width: 520px) {
   .legend { max-width: 62%; }
-  .lg-name { font-size: 10px; }
+  .lg-name { font-size: calc(10px * var(--ui-fs-scale, 1)); }
   .planet-card, .earth-panel { width: 210px; }
 }
 /* 薄弱板块提醒条（右下角） */
@@ -1397,7 +1397,7 @@ watch(
   backdrop-filter: blur(12px);
   box-shadow: 0 10px 36px rgba(0, 0, 0, 0.5);
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   color: var(--text);
   transition: all 0.2s;
   max-width: 88%;
@@ -1406,7 +1406,7 @@ watch(
   border-color: rgba(251, 191, 36, 0.7);
   transform: translateY(-2px);
 }
-.wk-ic { font-size: 15px; }
+.wk-ic { font-size: calc(15px * var(--ui-fs-scale, 1)); }
 .wk-txt b { font-weight: 800; }
 .wk-wrong { color: var(--text3); font-family: var(--font-hud); }
 .wk-go { color: var(--hud-gold); font-weight: 700; margin-left: 2px; }

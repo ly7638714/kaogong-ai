@@ -191,7 +191,7 @@ function capWrongExplain() {
               @click="viewImg(im)"
             />
           </div>
-                    <div v-if="missingFig" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:rgba(255,180,0,.12);border:1px solid rgba(255,180,0,.5);color:#f5b842;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12.5px">
+                    <div v-if="missingFig" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:rgba(255,180,0,.12);border:1px solid rgba(255,180,0,.5);color:#f5b842;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size: calc(12.5px * var(--ui-fs-scale, 1))">
             ⚠️ 该题入库时未保存图形（只有占位符）。可本地一键重建（图形/选项/答案，确定性零额度）：
             <button class="btn btn-pri" style="padding:4px 12px" @click="repairFig()">🛠 重建本题</button>
             <button class="btn btn-gh" style="padding:4px 12px" @click="gotoChat()">↩ 回原对话看原图</button>
@@ -325,7 +325,7 @@ function capWrongExplain() {
           </div>
 
         <div v-if="cur >= 0 && store.wqs[cur]" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="memorizeRule()">🧠 记下这条规律（入记忆复习）</button>
+          <button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="memorizeRule()">🧠 记下这条规律（入记忆复习）</button>
           <span class="cr-tip">把「秒杀 / 笔记」摘要（≤60字）加入今日记忆复习队列</span>
         </div>
         <!-- R5 关联知识卡（按本题考点检索 437 张方法卡，只读 kb） -->
@@ -335,11 +335,11 @@ function capWrongExplain() {
             <div v-for="c in kbCards" :key="c.id" class="kb-link-card" style="border:1px dashed var(--bg3,#334155);border-radius:8px;padding:6px 8px;margin-bottom:6px">
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                 <b style="flex:1;min-width:140px">{{ c.plate }} · {{ c.type }}</b>
-                <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="标记为已学（点亮知识图谱）" @click="markLearned(c.id)">✓ 已学</button>
-                <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="openKbCard(c.id)">🔍 知识库打开</button>
+                <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="标记为已学（点亮知识图谱）" @click="markLearned(c.id)">✓ 已学</button>
+                <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="openKbCard(c.id)">🔍 知识库打开</button>
               </div>
-              <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px;color:var(--text2)">要点 / 陷阱 / 例题</summary>
-                <div style="font-size:12px;margin-top:4px;line-height:1.7">
+              <details style="margin-top:4px"><summary style="cursor:pointer;font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2)">要点 / 陷阱 / 例题</summary>
+                <div style="font-size: calc(12px * var(--ui-fs-scale, 1));margin-top:4px;line-height:1.7">
                   <div v-if="(c.steps || []).length"><b>步骤：</b><span v-for="(s, i) in c.steps" :key="i">{{ s }}；</span></div>
                   <div v-if="(c.traps || []).length"><b>陷阱：</b><span v-for="(s, i) in c.traps" :key="i">{{ s }}；</span></div>
                   <div v-if="c.tip"><b>提示：</b>{{ c.tip }}</div>

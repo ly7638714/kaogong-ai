@@ -252,7 +252,7 @@ onUnmounted(() => {
   border: 1px solid rgba(80, 200, 255, 0.2);
   border-radius: 999px;
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text2);
   white-space: nowrap;
 }
@@ -286,10 +286,10 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: 4px 16px 16px 4px;
 }
-.cv-emoji { font-size: 46px; margin-bottom: 10px; }
-.cv-title { font-size: 24px; font-weight: 800; margin-bottom: 6px; }
-.cv-type { color: #7dd3fc; font-size: 13px; margin-bottom: 16px; letter-spacing: 2px; }
-.cv-desc { color: #b8d4ea; font-size: 14px; max-width: 360px; line-height: 1.7; }
+.cv-emoji { font-size: calc(46px * var(--ui-fs-scale, 1)); margin-bottom: 10px; }
+.cv-title { font-size: calc(24px * var(--ui-fs-scale, 1)); font-weight: 800; margin-bottom: 6px; }
+.cv-type { color: #7dd3fc; font-size: calc(13px * var(--ui-fs-scale, 1)); margin-bottom: 16px; letter-spacing: 2px; }
+.cv-desc { color: #b8d4ea; font-size: calc(14px * var(--ui-fs-scale, 1)); max-width: 360px; line-height: 1.7; }
 .cv-open {
   margin-top: 22px;
   padding: 11px 26px;
@@ -302,15 +302,15 @@ onUnmounted(() => {
   border: none;
   box-shadow: 0 10px 26px rgba(2, 132, 199, 0.45);
 }
-.pg-num { position: absolute; top: 12px; right: 18px; font-size: 12px; color: #b3a888; }
-.pg-title { font-size: 18px; font-weight: 800; color: #1f3b5c; margin-bottom: 12px; }
-.pg-body { font-family: inherit; font-size: 15px; line-height: 1.8; white-space: pre-wrap; color: #3a342a; }
+.pg-num { position: absolute; top: 12px; right: 18px; font-size: calc(12px * var(--ui-fs-scale, 1)); color: #b3a888; }
+.pg-title { font-size: calc(18px * var(--ui-fs-scale, 1)); font-weight: 800; color: #1f3b5c; margin-bottom: 12px; }
+.pg-body { font-family: inherit; font-size: calc(15px * var(--ui-fs-scale, 1)); line-height: 1.8; white-space: pre-wrap; color: #3a342a; }
 .pg-loading, .cv-loading {
   display: flex;
   align-items: center;
   gap: 8px;
   color: #93b8d6;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
   margin-top: 14px;
 }
 .spin {
@@ -325,7 +325,7 @@ onUnmounted(() => {
 @keyframes spin { to { transform: rotate(360deg); } }
 .cv-fallback {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   color: #fbbf24;
   opacity: 0.8;
 }
@@ -338,7 +338,7 @@ onUnmounted(() => {
   color: #fcd34d;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
 }
 .turn-bar {
   display: flex;
@@ -355,12 +355,12 @@ onUnmounted(() => {
   color: #cbe8ff;
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
 }
 .tbtn:hover:not(:disabled) { background: rgba(34, 211, 238, 0.14); }
 .tbtn:disabled { opacity: 0.4; cursor: default; }
 .tbtn.put { border-color: rgba(251, 191, 36, 0.5); color: #fcd34d; }
-.turn-state { align-self: center; color: var(--text2); font-size: 12px; }
+.turn-state { align-self: center; color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .read-enter-active, .read-leave-active { transition: opacity 0.3s; }
 .read-enter-from, .read-leave-to { opacity: 0; }
 .bk-chat-toggle {

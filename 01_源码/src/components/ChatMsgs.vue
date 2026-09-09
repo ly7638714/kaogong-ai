@@ -57,6 +57,7 @@ const {
   figCfg,
   prevHasImg,
   saveWrong,
+  backLayerOpen,
   sameTypeAgain,
   collectMsg,
   toggleFb,
@@ -126,7 +127,7 @@ const {
               <div class="ans-tag">
                 <span v-if="m.bk" class="at-plate" style="cursor:pointer" title="点击修正板块归属（同时修正统计）" @click.stop="fixPlate(m, $event)">📐 {{ m.bk }} ✏️</span>
                 <div v-if="m.bkEditing" class="bk-fix" style="position:absolute;z-index:30;background:var(--card);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:320px">
-                  <button v-for="bp in BK_OPTIONS" :key="'bk' + bp" class="fp-b" :class="{ on: m.bk === bp }" style="padding:2px 8px;font-size:12px" @click.stop="applyPlate(m, bp)">{{ bp }}</button>
+                  <button v-for="bp in BK_OPTIONS" :key="'bk' + bp" class="fp-b" :class="{ on: m.bk === bp }" style="padding:2px 8px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click.stop="applyPlate(m, bp)">{{ bp }}</button>
                 </div>
                 <span class="at-mark">✍️ AI 批改</span>
                 <span v-if="m.answerTime" class="at-time">{{ m.answerTime }}</span>
@@ -195,7 +196,7 @@ const {
                 </div>
               </template>
               <div v-else>
-                <span v-if="stepTagText(m)" class="step-tag" style="display:inline-block;font-size:11px;color:var(--accent,#22d3ee);border:1px dashed var(--accent,#22d3ee);padding:0 8px;border-radius:10px;margin:2px 0 4px">{{ stepTagText(m) }}</span>
+                <span v-if="stepTagText(m)" class="step-tag" style="display:inline-block;font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--accent,#22d3ee);border:1px dashed var(--accent,#22d3ee);padding:0 8px;border-radius:10px;margin:2px 0 4px">{{ stepTagText(m) }}</span>
           <div v-html="mdCached(m, i)"></div>
                 <button v-if="isLong(textOf(m))" class="fold-btn" @click="toggleExpand(i)">
                   {{ expanded[i] ? '🔼 收起全文' : '🔽 展开全文（' + textOf(m).length + ' 字）' }}
@@ -263,7 +264,7 @@ const {
         </div>
         <!-- 回到最新：全局悬浮按钮（Teleport 到 body，脱离滚动容器），点击回最新、可拖到页面任意位置并记忆 -->
         <Teleport to="body">
-          <button v-if="store.tab === 'chat'" v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
+          <button v-if="store.tab === 'chat' && !backLayerOpen" v-show="!atBottom" class="back-latest" :style="blStyle" @pointerdown="onBlDown">▼ 回到最新</button>
         </Teleport>
       </div>
 </template>

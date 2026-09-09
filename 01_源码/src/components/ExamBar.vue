@@ -186,7 +186,7 @@ onUnmounted(() => {
   backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   color: var(--text2);
 }
 .eb-track {
@@ -213,7 +213,7 @@ onUnmounted(() => {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.eb-ic { font-size: 13px; }
+.eb-ic { font-size: calc(13px * var(--ui-fs-scale, 1)); }
 .eb-lbl { opacity: 0.7; }
 .hud-num {
   font-family: var(--font-hud);
@@ -228,17 +228,17 @@ onUnmounted(() => {
   margin: 0 1px;
   font-family: inherit;
 }
-.eb-count .eb-num { font-size: 15px; }
+.eb-count .eb-num { font-size: calc(15px * var(--ui-fs-scale, 1)); }
 .eb-count { position: relative; }
 /* 考试切换按钮 */
 .eb-exam-btn {
   display: flex; align-items: center; gap: 5px; cursor: pointer;
   background: transparent; border: none; padding: 2px 4px; border-radius: 8px;
-  color: var(--text2); font: inherit; font-size: 12px;
+  color: var(--text2); font: inherit; font-size: calc(12px * var(--ui-fs-scale, 1));
 }
 .eb-exam-btn:hover { background: rgba(255, 255, 255, 0.06); }
 .eb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px currentColor; }
-.eb-caret { font-size: 9px; opacity: 0.6; transition: transform 0.15s; }
+.eb-caret { font-size: calc(9px * var(--ui-fs-scale, 1)); opacity: 0.6; transition: transform 0.15s; }
 .eb-caret.up { transform: rotate(180deg); }
 /* 下拉面板（已 Teleport 到 body，用 fixed + 内联 top/left 定位） */
 .eb-exam-pop {
@@ -248,21 +248,21 @@ onUnmounted(() => {
   border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
   padding: 8px; display: flex; flex-direction: column; gap: 4px;
 }
-.eb-pop-hd { font-size: 11px; color: var(--text3); padding: 2px 6px 4px; }
+.eb-pop-hd { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); padding: 2px 6px 4px; }
 .eb-pop-it {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
   background: rgba(255, 255, 255, 0.03); border: 1px solid transparent;
-  border-radius: 8px; padding: 7px 8px; color: var(--text2); font-size: 12.5px; text-align: left;
+  border-radius: 8px; padding: 7px 8px; color: var(--text2); font-size: calc(12.5px * var(--ui-fs-scale, 1)); text-align: left;
 }
 .eb-pop-it:hover { background: rgba(255, 255, 255, 0.08); }
 .eb-pop-it.on { border-color: rgba(80, 200, 255, 0.5); background: rgba(80, 200, 255, 0.1); }
 .eb-pop-name { flex: 1; font-weight: 600; color: var(--text1); }
-.eb-pop-d { font-size: 11px; color: var(--text3); }
+.eb-pop-d { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .eb-pop-check { color: var(--hud-cyan); font-weight: 700; }
 .eb-pop-mgr {
   margin-top: 2px; cursor: pointer; border: 1px dashed rgba(80, 200, 255, 0.4);
   background: rgba(80, 200, 255, 0.06); color: #bfe9ff; border-radius: 8px;
-  padding: 8px; font-size: 12px;
+  padding: 8px; font-size: calc(12px * var(--ui-fs-scale, 1));
 }
 .eb-pop-mgr:hover { background: rgba(80, 200, 255, 0.14); }
 .eb-pop-mask { position: fixed; inset: 0; z-index: 1100; }

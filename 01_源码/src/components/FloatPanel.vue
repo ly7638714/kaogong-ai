@@ -764,7 +764,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
     <div class="acc-notes">
       <div class="sec-t">
         📝 我的导入笔记
-        <span style="font-size: 11px; color: var(--text3)">（Obsidian/Markdown）</span>
+        <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">（Obsidian/Markdown）</span>
       </div>
       <div v-if="!store.notes.length" class="acc-notes-empty">
         还没有导入笔记，去 ⚙️设置 → 数据管理 → 📥 导入笔记(.md)
@@ -809,13 +809,13 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   padding: 9px 12px;
   margin-bottom: 10px;
 }
-.acc-guide-hd { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--hud-cyan); margin-bottom: 6px; }
-.acc-guide-x { background: none; border: none; color: var(--text3); font-size: 11px; cursor: pointer; font-family: inherit; }
-.acc-guide-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.acc-guide-hd { display: flex; justify-content: space-between; align-items: center; font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); margin-bottom: 6px; }
+.acc-guide-x { background: none; border: none; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); cursor: pointer; font-family: inherit; }
+.acc-guide-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); margin-bottom: 6px; }
 .ags { display: inline-flex; align-items: center; gap: 4px; }
-.ags b { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #fff; font-size: 10.5px; padding: 0 4px; }
+.ags b { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #fff; font-size: calc(10.5px * var(--ui-fs-scale, 1)); padding: 0 4px; }
 .acc-guide-steps i { color: var(--text3); font-style: normal; }
-.acc-guide-tip { font-size: 11px; color: var(--text2); line-height: 1.6; border-top: 1px dashed var(--glass-border); padding-top: 6px; }
+.acc-guide-tip { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text2); line-height: 1.6; border-top: 1px dashed var(--glass-border); padding-top: 6px; }
 .acc-ov {
   border: 1px solid var(--glass-border);
   border-radius: 14px;
@@ -841,29 +841,29 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   font-family: inherit;
 }
 .acc-ov-big:active { transform: scale(0.97); }
-.aob-n { font-size: 24px; font-weight: 900; color: var(--hud-cyan); line-height: 1; }
-.aob-t { font-size: 10.5px; color: var(--text2); }
-.aob-go { font-size: 10px; color: var(--text3); }
+.aob-n { font-size: calc(24px * var(--ui-fs-scale, 1)); font-weight: 900; color: var(--hud-cyan); line-height: 1; }
+.aob-t { font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text2); }
+.aob-go { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .acc-ov-cols { flex: 1; display: flex; gap: 4px; }
 .aoc { flex: 1; text-align: center; border-left: 1px solid var(--glass-border); }
 .aoc:first-child { border-left: none; }
-.aoc b { display: block; font-size: 17px; color: var(--text); }
-.aoc span { font-size: 10.5px; color: var(--text3); }
+.aoc b { display: block; font-size: calc(17px * var(--ui-fs-scale, 1)); color: var(--text); }
+.aoc span { font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .acc-ov-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); margin: 8px 0 6px; overflow: hidden; }
 .aob-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #22d3ee, #3b82f6); transition: width 0.4s; }
-.acc-ov-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text3); flex-wrap: wrap; }
+.acc-ov-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3); flex-wrap: wrap; }
 .acc-ov-stages { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .acc-ov-stages i { font-style: normal; color: var(--text3); }
 .acc-ov-stages b { color: var(--text2); font-weight: 700; margin-right: 2px; }
 .acc-ov-stages em { font-style: normal; color: var(--glass-border); }
 .aos-tip { opacity: 0.7; margin-left: 4px; }
-.fc-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; border-radius: 8px; background: var(--hud-cyan); color: #fff; font-size: 9.5px; font-weight: 800; padding: 0 4px; margin-left: 4px; vertical-align: middle; }
-.fp-modebar { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--hud-cyan); background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.25); border-radius: 10px; padding: 5px 10px; margin-bottom: 8px; }
-.fp-modebar-x { background: none; border: none; color: var(--text3); font-size: 11px; cursor: pointer; font-family: inherit; }
+.fc-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; border-radius: 8px; background: var(--hud-cyan); color: #fff; font-size: calc(9.5px * var(--ui-fs-scale, 1)); font-weight: 800; padding: 0 4px; margin-left: 4px; vertical-align: middle; }
+.fp-modebar { display: flex; align-items: center; justify-content: space-between; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.25); border-radius: 10px; padding: 5px 10px; margin-bottom: 8px; }
+.fp-modebar-x { background: none; border: none; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); cursor: pointer; font-family: inherit; }
 .fp-more { margin-bottom: 8px; }
-.fp-more-btn { width: 100%; padding: 5px 10px; border-radius: 10px; border: 1px dashed var(--glass-border); background: transparent; color: var(--text3); font-size: 11.5px; cursor: pointer; font-family: inherit; }
+.fp-more-btn { width: 100%; padding: 5px 10px; border-radius: 10px; border: 1px dashed var(--glass-border); background: transparent; color: var(--text3); font-size: calc(11.5px * var(--ui-fs-scale, 1)); cursor: pointer; font-family: inherit; }
 .fp-more-body { margin-top: 6px; border: 1px solid var(--glass-border); border-radius: 12px; padding: 8px 10px; background: var(--glass-bg); }
-.fp-foot .fp-b.ok.big, .fp-foot .fp-b.no.big { flex: 1; padding: 10px 12px; font-size: 13px; }
+.fp-foot .fp-b.ok.big, .fp-foot .fp-b.no.big { flex: 1; padding: 10px 12px; font-size: calc(13px * var(--ui-fs-scale, 1)); }
 /* 词条详解：易混辨析区块（多组词相互辨析）高亮 */
 .id-row.bi { background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
 .id-row.bi b { color: var(--hud-cyan); }
@@ -872,7 +872,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   margin-bottom: 10px;
 }
 .acc-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-fs-scale, 1));
   font-weight: 800;
   background: var(--grad-primary);
   background-clip: text;
@@ -882,7 +882,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 }
 .acc-sub {
   display: block;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text3);
   margin-top: 2px;
 }
@@ -908,7 +908,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   background: rgba(255, 255, 255, 0.08);
   color: var(--text2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   line-height: 1;
 }
 .fp-o:hover {
@@ -931,12 +931,12 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: transparent;
   color: var(--text2);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   cursor: pointer;
 }
 .fp-c.s {
   padding: 2px 8px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-fs-scale, 1));
 }
 .fp-c.on {
   background: var(--accent2);
@@ -945,7 +945,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 }
 .fp-body {
   padding: 12px 12px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   line-height: 1.65;
   color: var(--text);
   min-height: 64px;
@@ -953,11 +953,11 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 .fp-body.exp {
   border-top: 1px dashed rgba(255, 255, 255, 0.14);
   color: var(--text2);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   min-height: 0;
 }
 .fp-card.sm .fp-body {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
 }
 .fp-foot {
   display: flex;
@@ -971,7 +971,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   border-radius: 12px;
   background: var(--accent2);
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   cursor: pointer;
   font-family: inherit;
 }
@@ -994,7 +994,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   padding: 10px;
 }
 .q-hd {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   line-height: 1.55;
   color: var(--text);
   margin-bottom: 8px;
@@ -1002,7 +1002,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 .q-kd {
   display: inline-block;
   margin-left: 6px;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-fs-scale, 1));
   color: var(--accent);
 }
 .q-opts {
@@ -1016,7 +1016,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -1039,7 +1039,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 }
 .q-mark {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   font-weight: 700;
 }
 .q-mark.ok {
@@ -1060,7 +1060,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: var(--surface);
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   font-family: inherit;
   outline: none;
 }
@@ -1069,7 +1069,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   line-height: 1.5;
   color: var(--text2);
   background: rgba(56, 189, 248, 0.08);
@@ -1084,7 +1084,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   background: transparent;
   color: var(--text3);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
   line-height: 1;
 }
 .st-b { font-weight: 700; }
@@ -1093,7 +1093,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
 /* 来源角标（词条旁 / 详情标题旁） */
 .src-badge {
   display: inline-block;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-fs-scale, 1));
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 6px;
@@ -1114,14 +1114,14 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   padding: 14px 16px;
 }
 .lg-card .lg-h {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-fs-scale, 1));
   font-weight: 800;
   color: var(--text);
   margin-bottom: 8px;
 }
-.lg-card p { font-size: 12px; line-height: 1.6; color: var(--text2); margin: 6px 0; }
+.lg-card p { font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.6; color: var(--text2); margin: 6px 0; }
 .lg-card ul { margin: 6px 0; padding-left: 18px; }
-.lg-card li { font-size: 12px; line-height: 1.7; color: var(--text2); }
+.lg-card li { font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.7; color: var(--text2); }
 .lg-card .lg-how { color: var(--text); }
 .lg-btns { display: flex; gap: 8px; margin-top: 12px; }
 .lg-btns .btn { flex: 1; }

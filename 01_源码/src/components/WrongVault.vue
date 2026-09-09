@@ -33,7 +33,7 @@ const {
           <div v-else class="ep-list-scroll">
             <div v-for="(p, i) in qcPapers" :key="p.id" class="ep-paper">
               <button class="ep-paper-btn" :title="p.name + ' · ' + (p.questions||[]).length + ' 题'" @click="redoPaper(p)">{{ p.name }} · {{ (p.questions||[]).length }} 题 · {{ new Date(p.ts).toLocaleString() }}</button>
-              <button class="btn btn-gh" style="padding: 2px 8px; font-size: 11px" @click="exportPaperMd(p)">⬇ 导出</button>
+              <button class="btn btn-gh" style="padding: 2px 8px; font-size: calc(11px * var(--ui-fs-scale, 1))" @click="exportPaperMd(p)">⬇ 导出</button>
               <button class="ep-x" @click="delVaultPaper(i)">×</button>
             </div>
           </div>

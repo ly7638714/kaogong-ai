@@ -304,22 +304,22 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
       </div>
       <div v-if="!ready && !examReady" class="yt-guide">
         <div class="yt-card yt-guide-card">
-          <div style="font-weight:800;font-size:16px;color:var(--accent)">🧰 片段阅读 · 四步拆解训练</div>
-          <div style="font-size:13px;color:var(--text2);line-height:1.9;margin-top:8px">
+          <div style="font-weight:800;font-size: calc(16px * var(--ui-fs-scale, 1));color:var(--accent)">🧰 片段阅读 · 四步拆解训练</div>
+          <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);line-height:1.9;margin-top:8px">
             和资料速算一样采用“能力拆层”：每次生成一篇完整文段，同一篇文段依次训练 <b>① 主题词/关键词 → ② 句子功能 → ③ 行文结构 → ④ 主旨意图</b>。
             不再靠逐字精读，先学会把文段骨架拆出来再做题。
           </div>
-          <div style="font-size:12px;color:var(--text3);margin-top:6px">内置 30 篇完整教学文段与 28 个领域/交叉话题，覆盖治理、科技、经济、生态、教育、文化、民生、文学艺术等真实命题方向。</div>
+          <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:6px">内置 30 篇完整教学文段与 28 个领域/交叉话题，覆盖治理、科技、经济、生态、教育、文化、民生、文学艺术等真实命题方向。</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="yt-chip">领域：</span>
-          <button v-for="d in YAN_DOMAINS" :key="d" class="btn" :class="domain === d ? 'btn-pri' : 'btn-gh'" style="padding:2px 9px;font-size:12px" @click="domain = d">{{ d }}</button>
+          <button v-for="d in YAN_DOMAINS" :key="d" class="btn" :class="domain === d ? 'btn-pri' : 'btn-gh'" style="padding:2px 9px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="domain = d">{{ d }}</button>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="yt-chip">难度 / 长度：</span>
-          <button v-for="l in YAN_LEVELS" :key="l.k" class="btn" :class="level === l.k ? 'btn-pri' : 'btn-gh'" style="padding:5px 10px;font-size:12px" :title="l.d" @click="level = l.k">{{ l.t }} · {{ l.sent }} / {{ l.chars }}</button>
+          <button v-for="l in YAN_LEVELS" :key="l.k" class="btn" :class="level === l.k ? 'btn-pri' : 'btn-gh'" style="padding:5px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" :title="l.d" @click="level = l.k">{{ l.t }} · {{ l.sent }} / {{ l.chars }}</button>
         </div>
-        <div class="yt-card" style="font-size:13px;line-height:1.9;color:var(--text2)">
+        <div class="yt-card" style="font-size: calc(13px * var(--ui-fs-scale, 1));line-height:1.9;color:var(--text2)">
           <div style="font-weight:700;color:var(--text)">训练前先背这张结构表</div>
           <div v-for="m in YAN_MODES" :key="m.k" style="margin:3px 0"><b>{{ m.t }}</b>：{{ m.d }}</div>
           <div style="color:var(--text3);margin-top:6px">答错会自动定位到错误能力层；每篇完成四步后建议点「📌 存错题」把不会的句子收进错题本。</div>
@@ -327,7 +327,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
         <button class="btn btn-pri yt-start" @click="startTrain()">🤖 开始四步拆解 · 随机一篇文段</button>
         <div class="yt-card" style="border:1px dashed var(--glass-border)">
           <div style="font-weight:800;color:var(--text)">📝 完整 5 问真题卷 {{ examUnlocked ? '（已解锁）' : '（🔒 建议先完成一轮拆分）' }}</div>
-          <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-top:5px">同一篇文段连做 5 问：主题词 → 句子功能 → 行文结构 → 主旨意图 → 标题选择，模拟真实片段阅读做题节奏。</div>
+          <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);line-height:1.8;margin-top:5px">同一篇文段连做 5 问：主题词 → 句子功能 → 行文结构 → 主旨意图 → 标题选择，模拟真实片段阅读做题节奏。</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
             <button class="btn btn-pri" :class="{ pulse: examUnlocked }" @click="launchExam(false, false)">{{ examUnlocked ? '📝 开始完整 5 问' : '🗂 先完成一轮四步拆分' }}</button>
             <button v-if="!examUnlocked" class="btn btn-gh" title="仍想先感受完整卷？可以跳过建议" @click="launchExam(true, false)">⚡ 跳过建议直接进入</button>
@@ -385,7 +385,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
             </div>
             <template v-if="q">
               <div class="yt-qcard">
-                <div class="yt-qmode">{{ curMode.t }}<span v-if="q && q._qcPass" style="margin-left:8px;color:#34d399;font-size:11px">✅ 本地质检通过</span></div>
+                <div class="yt-qmode">{{ curMode.t }}<span v-if="q && q._qcPass" style="margin-left:8px;color:#34d399;font-size: calc(11px * var(--ui-fs-scale, 1))">✅ 本地质检通过</span></div>
                 <div class="yt-q" v-html="md(q.q)"></div>
                 <div class="yt-opts">
                   <button v-for="o in q.options" :key="o.k" class="yt-opt" :class="{ picked: picked === o.k, right: picked && o.k === q.answer, wrong: picked && o.k === picked && o.k !== q.answer }" :disabled="!!picked || !runStarted" @click="pick(o.k)">
@@ -419,9 +419,9 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
       <template v-else-if="examReady">
         <div v-if="examFinished" style="overflow:auto;padding:4px 2px">
           <div class="yt-card" style="border:1px solid rgba(52,211,153,.35)">
-            <div style="font-weight:800;font-size:17px;color:#34d399">📝 完整 5 问成绩单</div>
-            <div style="font-size:14px;color:var(--text2);margin-top:8px;line-height:2">✅ 答对 <b>{{ examScore.ok }}</b> / {{ examScore.total }} · 正确率 <b>{{ examScore.pct }}%</b> · 用时 <b>{{ examElapsed }}s</b></div>
-            <div style="font-size:12px;color:var(--text3);margin-top:4px">逐题状态：<span v-for="(h,i) in examHist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.ok ? '✓' : '✗' }}（{{ h.sec }}s） </span></div>
+            <div style="font-weight:800;font-size: calc(17px * var(--ui-fs-scale, 1));color:#34d399">📝 完整 5 问成绩单</div>
+            <div style="font-size: calc(14px * var(--ui-fs-scale, 1));color:var(--text2);margin-top:8px;line-height:2">✅ 答对 <b>{{ examScore.ok }}</b> / {{ examScore.total }} · 正确率 <b>{{ examScore.pct }}%</b> · 用时 <b>{{ examElapsed }}s</b></div>
+            <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:4px">逐题状态：<span v-for="(h,i) in examHist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.ok ? '✓' : '✗' }}（{{ h.sec }}s） </span></div>
             <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-pri" @click="redoExam()">🔄 同篇重做</button>
               <button class="btn btn-gh" @click="launchExam(true, false)">🎲 换篇再来一套</button>
@@ -466,7 +466,7 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
             </div>
             <template v-if="examCurrent">
               <div class="yt-qcard">
-                <div class="yt-qmode">第 {{ examQIdx + 1 }} / 5 题 · {{ examCurrent.modeT }}<span v-if="exam && exam.qc && exam.qc.ok" style="margin-left:8px;color:#34d399;font-size:11px">✅ 本地质检通过</span></div>
+                <div class="yt-qmode">第 {{ examQIdx + 1 }} / 5 题 · {{ examCurrent.modeT }}<span v-if="exam && exam.qc && exam.qc.ok" style="margin-left:8px;color:#34d399;font-size: calc(11px * var(--ui-fs-scale, 1))">✅ 本地质检通过</span></div>
                 <div class="yt-q" v-html="md(examCurrent.q)"></div>
                 <div class="yt-opts">
                   <button v-for="o in examCurrent.options" :key="o.k" class="yt-opt" :class="{ picked: examPick === o.k, right: examPick && o.k === examCurrent.answer, wrong: examPick && o.k === examPick && o.k !== examCurrent.answer }" :disabled="!!examPick || !examRun" @click="examAnswer(o.k)">
@@ -499,39 +499,39 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
 .yt-ov { z-index: 432; }
 .yt-pnl { width: min(1180px, 97vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; }
 .yt-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.yt-title { font-size: 16px; font-weight: 800; color: var(--accent); }
+.yt-title { font-size: calc(16px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--accent); }
 .yt-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .yt-body { display: flex; gap: 14px; flex: 1; min-height: 0; }
 .yt-side { flex: 0 0 250px; min-width: 220px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .yt-train { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 2px; }
 .yt-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; }
-.yt-card-t { font-size: 12px; font-weight: 700; color: var(--text3); margin-bottom: 8px; }
+.yt-card-t { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--text3); margin-bottom: 8px; }
 .yt-py-row { display: block; padding: 6px 9px; border-radius: 8px; background: var(--surface); border: 1px solid transparent; margin-bottom: 6px; cursor: pointer; }
 .yt-py-row.on { border-color: var(--accent); }
-.yt-py-l { display: flex; justify-content: space-between; font-size: 12px; color: var(--text); margin-bottom: 4px; }
+.yt-py-l { display: flex; justify-content: space-between; font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text); margin-bottom: 4px; }
 .yt-py-row.on .yt-py-l b { color: var(--accent); }
 .yt-py-bar { height: 5px; border-radius: 3px; background: rgba(128,128,128,.2); overflow: hidden; }
 .yt-py-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
-.yt-tip, .yt-st { font-size: 11.5px; color: var(--text3); line-height: 1.65; margin-top: 5px; }
+.yt-tip, .yt-st { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.65; margin-top: 5px; }
 .yt-domain { font-weight: 700; color: var(--accent); margin: 4px 0; }
-.yt-theme, .yt-kw { font-size: 12px; color: var(--text2); margin: 3px 0; line-height: 1.6; }
+.yt-theme, .yt-kw { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); margin: 3px 0; line-height: 1.6; }
 .yt-guide { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; overflow-y: auto; }
-.yt-start { align-self: flex-start; padding: 9px 18px; font-size: 13px; }
+.yt-start { align-self: flex-start; padding: 9px 18px; font-size: calc(13px * var(--ui-fs-scale, 1)); }
 .yt-mat { border: 1px solid var(--glass-border); border-radius: 10px; background: var(--glass-bg); padding: 12px; }
 .yt-mat-title { font-weight: 800; margin-bottom: 8px; }
-.yt-sentence { display: flex; gap: 8px; padding: 5px 6px; border-radius: 8px; line-height: 1.75; font-size: 14px; }
+.yt-sentence { display: flex; gap: 8px; padding: 5px 6px; border-radius: 8px; line-height: 1.75; font-size: calc(14px * var(--ui-fs-scale, 1)); }
 .yt-sentence.cur { background: rgba(34,211,238,.1); }
-.yt-sn { flex: 0 0 22px; height: 22px; border-radius: 11px; background: var(--surface); color: var(--text3); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; margin-top: 2px; }
-.yt-role-tag { flex-basis: 100%; font-size: 11.5px; color: #34d399; padding-left: 30px; }
+.yt-sn { flex: 0 0 22px; height: 22px; border-radius: 11px; background: var(--surface); color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); display: inline-flex; align-items: center; justify-content: center; margin-top: 2px; }
+.yt-role-tag { flex-basis: 100%; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: #34d399; padding-left: 30px; }
 .yt-ann { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px dashed var(--glass-border); margin-top: 8px; padding-top: 8px; }
-.yt-ann-row { font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 12px; padding: 3px 9px; }
-.yt-mat-note { font-size: 11px; color: var(--text3); margin-top: 8px; }
+.yt-ann-row { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); background: var(--surface); border-radius: 12px; padding: 3px 9px; }
+.yt-mat-note { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 8px; }
 .yt-modes { display: flex; gap: 6px; flex-wrap: wrap; }
 .yt-qcard, .yt-explain, .yt-help, .yt-ai { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; }
-.yt-qmode { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
-.yt-q { font-size: 14px; line-height: 1.8; color: var(--text); overflow-wrap: break-word; word-break: break-word; }
+.yt-qmode { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.yt-q { font-size: calc(14px * var(--ui-fs-scale, 1)); line-height: 1.8; color: var(--text); overflow-wrap: break-word; word-break: break-word; }
 .yt-opts { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 8px; margin-top: 10px; }
-.yt-opt { display: flex; gap: 8px; align-items: flex-start; text-align: left; padding: 10px; border: 1px solid var(--glass-border); border-radius: 8px; background: var(--surface); font-size: 13px; line-height: 1.6; }
+.yt-opt { display: flex; gap: 8px; align-items: flex-start; text-align: left; padding: 10px; border: 1px solid var(--glass-border); border-radius: 8px; background: var(--surface); font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.6; }
 .yt-opt.right { border-color: #34d399; color: #34d399; }
 .yt-opt.wrong { border-color: #fb7185; color: #fb7185; }
 .yt-opt:disabled { cursor: default; }
@@ -539,20 +539,20 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
 .yt-ex-t { font-weight: 800; }
 .yt-ex-t.ok { color: #34d399; }
 .yt-ex-t.bad { color: #fb7185; }
-.yt-ex-b { font-size: 13px; line-height: 1.8; margin-top: 6px; }
-.yt-help { font-size: 13px; line-height: 1.8; }
+.yt-ex-b { font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.8; margin-top: 6px; }
+.yt-help { font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.8; }
 /* 手机端“最大做题区”：桌面保留原布局，窄屏把顶部工具/侧栏折叠 */
 .yt-ui-toggle, .yt-side-toggle { display: none; }
 @media (max-width: 760px) {
   .yt-body { flex-direction: column; }
   .yt-side { flex: none; max-height: 35vh; }
-  .yt-title { font-size: 13.5px; }
+  .yt-title { font-size: calc(13.5px * var(--ui-fs-scale, 1)); }
   .yt-opts { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .yt-ui-toggle, .yt-side-toggle {
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 12px; min-height: 34px; padding: 5px 10px; border-radius: 20px;
+    font-size: calc(12px * var(--ui-fs-scale, 1)); min-height: 34px; padding: 5px 10px; border-radius: 20px;
   }
   .yt-side-toggle { align-self: flex-start; margin-bottom: 2px; }
   .yt-acts.off, .yt-side.off { display: none !important; }
@@ -570,12 +570,12 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
 .yt-ov .yt-chip {
   display: inline-flex; align-items: center; gap: 3px; background: var(--glass-bg);
   border: 1px solid var(--glass-border); border-radius: 20px; padding: 3px 10px;
-  font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.5;
+  font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--text); line-height: 1.5;
   white-space: nowrap; min-width: 0;
 }
 .yt-ov .yt-k {
   flex: 0 0 22px; height: 22px; border-radius: 11px; background: var(--surface);
-  color: var(--accent); font-size: 12px; font-weight: 800; display: inline-flex;
+  color: var(--accent); font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 800; display: inline-flex;
   align-items: center; justify-content: center;
 }
 .yt-ov .yt-acts { min-height: 0; }
@@ -593,37 +593,37 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
   .yt-ov .yt-pnl { padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
   .yt-ov .yt-head { margin-bottom: 8px; row-gap: 8px; }
   .yt-ov .yt-acts { flex: 1 1 100%; }
-  .yt-ov .yt-title { font-size: 15px; line-height: 1.35; flex: 1 1 60%; }
+  .yt-ov .yt-title { font-size: calc(15px * var(--ui-fs-scale, 1)); line-height: 1.35; flex: 1 1 60%; }
   .yt-ov .yt-side { flex: none; max-height: none; gap: 8px; }
   .yt-ov .yt-side .yt-card { width: 100%; padding: 10px; }
-  .yt-ov .yt-card-t { font-size: 12.5px; }
+  .yt-ov .yt-card-t { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
   .yt-ov .yt-card, .yt-ov .yt-guide-card, .yt-ov .yt-qcard,
   .yt-ov .yt-explain, .yt-ov .yt-mat, .yt-ov .yt-help, .yt-ov .yt-ai { border-radius: 10px; }
   .yt-ov .yt-guide { padding: 0 0 10px; }
   .yt-ov .yt-domain, .yt-ov .yt-theme, .yt-ov .yt-kw, .yt-ov .yt-tip,
-  .yt-ov .yt-st, .yt-ov .yt-mat-note, .yt-ov .yt-ann-row { font-size: 12px; }
-  .yt-ov .yt-py-l { font-size: 13px; }
-  .yt-ov .yt-sentence { font-size: 15px; line-height: 1.85; padding: 7px 2px; gap: 9px; }
-  .yt-ov .yt-sn { flex: 0 0 24px; height: 24px; font-size: 12px; }
-  .yt-ov .yt-role-tag { padding-left: 33px; font-size: 12px; }
+  .yt-ov .yt-st, .yt-ov .yt-mat-note, .yt-ov .yt-ann-row { font-size: calc(12px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-py-l { font-size: calc(13px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-sentence { font-size: calc(15px * var(--ui-fs-scale, 1)); line-height: 1.85; padding: 7px 2px; gap: 9px; }
+  .yt-ov .yt-sn { flex: 0 0 24px; height: 24px; font-size: calc(12px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-role-tag { padding-left: 33px; font-size: calc(12px * var(--ui-fs-scale, 1)); }
   .yt-ov .yt-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .yt-ov .yt-modes .btn { padding: 7px 8px; min-height: 42px; }
-  .yt-ov .yt-q { font-size: 15px; line-height: 1.85; }
-  .yt-ov .yt-qmode { font-size: 13px; }
-  .yt-ov .yt-opt { font-size: 14px; padding: 11px 10px; min-height: 48px; }
-  .yt-ov .yt-ex-b, .yt-ov .yt-help, .yt-ov .yt-ai { font-size: 13.5px; line-height: 1.9; }
-  .yt-ov .yt-mat-title { font-size: 15px; }
+  .yt-ov .yt-q { font-size: calc(15px * var(--ui-fs-scale, 1)); line-height: 1.85; }
+  .yt-ov .yt-qmode { font-size: calc(13px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-opt { font-size: calc(14px * var(--ui-fs-scale, 1)); padding: 11px 10px; min-height: 48px; }
+  .yt-ov .yt-ex-b, .yt-ov .yt-help, .yt-ov .yt-ai { font-size: calc(13.5px * var(--ui-fs-scale, 1)); line-height: 1.9; }
+  .yt-ov .yt-mat-title { font-size: calc(15px * var(--ui-fs-scale, 1)); }
 }
 @media (max-width: 480px) {
   .yt-ov .yt-pnl { padding-left: 10px; padding-right: 10px; }
-  .yt-ov .yt-title { font-size: 14px; }
-  .yt-ov .yt-chip { font-size: 11px; padding: 2px 7px; }
+  .yt-ov .yt-title { font-size: calc(14px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-chip { font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 2px 7px; }
   .yt-ov .yt-modes { grid-template-columns: 1fr; }
   .yt-ov .yt-acts .btn { min-height: 40px; }
   .yt-ov .yt-guide-card { padding: 10px 11px; }
-  .yt-ov .yt-guide-card div { font-size: 13px !important; line-height: 1.85 !important; }
-  .yt-ov .yt-sentence { font-size: 14px; }
-  .yt-ov .yt-q { font-size: 14.5px; }
+  .yt-ov .yt-guide-card div { font-size: calc(13px * var(--ui-fs-scale, 1)) !important; line-height: 1.85 !important; }
+  .yt-ov .yt-sentence { font-size: calc(14px * var(--ui-fs-scale, 1)); }
+  .yt-ov .yt-q { font-size: calc(14.5px * var(--ui-fs-scale, 1)); }
 }
 @supports (padding-top: env(safe-area-inset-top)) {
   @media (max-width: 760px) {

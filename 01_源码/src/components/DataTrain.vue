@@ -1170,33 +1170,33 @@ onUnmounted(() => {
       <div v-if="!splitReady" class="dt-body dt-guide">
         <div class="dt-guide-in" style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px">
           <div style="background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:10px;padding:12px 14px">
-            <div style="font-weight:800;font-size:15px;color:var(--accent)">🤖 先选配置，再开始单题四层训练</div>
-            <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-top:6px">
+            <div style="font-weight:800;font-size: calc(15px * var(--ui-fs-scale, 1));color:var(--accent)">🤖 先选配置，再开始单题四层训练</div>
+            <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);line-height:1.8;margin-top:6px">
               每轮只练 <b>1 道题</b>，但会完整展开材料：文字 / 表格 / 图表 / 混合任选，AI 按你选的口径生成同一篇材料。
               从「① 判题型」开始，答完可切换 ②找数据、③公式、④速算，材料保持同一篇，只换当前训练的能力层。
             </div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="dt-chip">来源：</span>
-            <select :value="dtSrc.src" style="font-size:11px;max-width:190px" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
+            <select :value="dtSrc.src" style="font-size: calc(11px * var(--ui-fs-scale, 1));max-width:190px" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
             <span class="dt-chip">领域：</span>
-            <select :value="dtSrc.field" style="font-size:11px;max-width:190px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
-            <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:130px;font-size:11px" @change="setCustomField($event.target.value)" />
+            <select :value="dtSrc.field" style="font-size: calc(11px * var(--ui-fs-scale, 1));max-width:190px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
+            <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:130px;font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setCustomField($event.target.value)" />
             <span class="dt-chip">统计口径：</span>
-            <button v-for="x in TIME_OPTIONS" :key="x.k" class="btn" :class="dtTime === x.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setDtTime(x.k)">{{ x.t }}</button>
+            <button v-for="x in TIME_OPTIONS" :key="x.k" class="btn" :class="dtTime === x.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="setDtTime(x.k)">{{ x.t }}</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="dt-chip">材料排版：</span>
-            <button v-for="x in FORM_OPTIONS" :key="x.k" class="btn" :class="dtForm === x.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setDtForm(x.k)">{{ x.t }}</button>
+            <button v-for="x in FORM_OPTIONS" :key="x.k" class="btn" :class="dtForm === x.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="setDtForm(x.k)">{{ x.t }}</button>
             <template v-if="dtForm === 'auto' || dtForm === 'textChart' || dtForm === 'tableChart' || dtForm === 'all'">
               <span class="dt-chip">图型：</span>
-              <button v-for="ck in [{ k: 'auto', t: '自动平衡' }, { k: 'bar', t: '柱形' }, { k: 'line', t: '折线' }, { k: 'combo', t: '柱线组合' }, { k: 'pie', t: '饼形' }]" :key="ck.k" class="btn" :class="dtChart === ck.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="dtChart = ck.k">{{ ck.t }}</button>
+              <button v-for="ck in [{ k: 'auto', t: '自动平衡' }, { k: 'bar', t: '柱形' }, { k: 'line', t: '折线' }, { k: 'combo', t: '柱线组合' }, { k: 'pie', t: '饼形' }]" :key="ck.k" class="btn" :class="dtChart === ck.k ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="dtChart = ck.k">{{ ck.t }}</button>
             </template>
           </div>
-          <div style="border:1px dashed var(--glass-border);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text3);line-height:1.8">
+          <div style="border:1px dashed var(--glass-border);border-radius:10px;padding:10px 12px;font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3);line-height:1.8">
             💡 首次进来建议：先选「热门领域 + 年度 + 三者混合」，完成 10 道以上拆分训练形成四层画像后，再点右上「📝 完整真题卷」做 5/10/15/20 题整卷计时。材料一律为本地模拟可验算数据，联网“真实材料”只作口径核对。
           </div>
-          <button class="btn btn-pri" style="padding:9px 18px;font-size:13px;align-self:flex-start" @click="startSplitSession()">🤖 AI 智能出题 · 生成拆分单题</button>
+          <button class="btn btn-pri" style="padding:9px 18px;font-size: calc(13px * var(--ui-fs-scale, 1));align-self:flex-start" @click="startSplitSession()">🤖 AI 智能出题 · 生成拆分单题</button>
         </div>
       </div>
       <div v-else class="dt-body">
@@ -1312,36 +1312,36 @@ onUnmounted(() => {
       <template v-else-if="q">
 
   <button class="btn btn-gh dt-set-toggle" :class="{ on: dtCfgOpen }" @click="dtCfgOpen = !dtCfgOpen">{{ dtCfgOpen ? '▲ 收起 材料/题组设置' : '⚙️ 材料/题组设置 · 计时 ▾' }}</button>
-  <div class="dt-set" :class="{ off: !dtCfgOpen }" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size:11px">
+  <div class="dt-set" :class="{ off: !dtCfgOpen }" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;font-size: calc(11px * var(--ui-fs-scale, 1))">
   <span v-if="mode === 'locate' || mode === 'formula'" class="dt-chip" style="cursor:pointer" :title="'三锁定高亮'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 三锁定高亮开' : '🔍 三锁定高亮关' }}</span>
-        <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一篇文字+表格+统计图材料连续出 5 问" @click="startChain()">🔁 同材料连问(5问·混合)</button>
+        <button v-if="mode === 'locate'" class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="同一篇文字+表格+统计图材料连续出 5 问" @click="startChain()">🔁 同材料连问(5问·混合)</button>
         <span v-if="chain" class="dt-chip" style="color:#34d399">📋 同材料 {{ chainIdx + 1 }}/{{ chain.qs.length }}</span>
-        <button v-if="chain && picked && chainIdx < chain.qs.length - 1" class="btn btn-pri" style="padding:1px 8px;font-size:11px" @click="chainNext()">➡️ 下一问(同材料)</button>
+        <button v-if="chain && picked && chainIdx < chain.qs.length - 1" class="btn btn-pri" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="chainNext()">➡️ 下一问(同材料)</button>
         <span class="dt-chip">组量：</span>
-  <button v-for="n in [0, 1, 5, 10, 15, 20]" :key="n" class="btn" :class="groupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setGroup(n)">{{ n === 0 ? '🎲 随机' : n + '题' }}</button>
-  <button v-if="!runStarted" class="btn btn-pri" style="padding:1px 10px;font-size:11px" @click="startRun()">▶ 开始本组计时</button>
-  <button v-else class="btn btn-gh" style="padding:1px 10px;font-size:11px" @click="settleRun()">🏁 结算本轮成绩</button>
+  <button v-for="n in [0, 1, 5, 10, 15, 20]" :key="n" class="btn" :class="groupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="setGroup(n)">{{ n === 0 ? '🎲 随机' : n + '题' }}</button>
+  <button v-if="!runStarted" class="btn btn-pri" style="padding:1px 10px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="startRun()">▶ 开始本组计时</button>
+  <button v-else class="btn btn-gh" style="padding:1px 10px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="settleRun()">🏁 结算本轮成绩</button>
   <span class="dt-chip">来源：</span>
-  <select :value="dtSrc.src" style="font-size:11px" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
+  <select :value="dtSrc.src" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setSrc($event.target.value)"><option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option></select>
   <span class="dt-chip">领域：</span>
-  <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
-  <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:110px;font-size:11px" @change="setCustomField($event.target.value)" />
-  <button class="btn" :class="srcMode === 'sim' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setSrcMode('sim')">🧪 模拟材料</button>
-  <button class="btn" :class="srcMode === 'real' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" @click="setSrcMode('real')">📡 真实材料(联网)</button>
-  <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新模拟材料" @click="refreshPaper()">🎲 换一篇</button>
-  <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="padding:1px 8px;font-size:11px;text-decoration:none" title="打开官方/必应搜索，核对真实统计公报与单位">🌐 查官网</a>
-  <button class="btn btn-gh" :disabled="srcCheckBusy" style="padding:1px 8px;font-size:11px" @click="checkSourceOnline()">{{ srcCheckBusy ? '⏳ 联网中…' : '📡 联网核实' }}</button>
+  <select :value="dtSrc.field" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setField($event.target.value)"><optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup><optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup></select>
+  <input :value="dtSrc.customField" placeholder="自定义领域(回车)" style="width:110px;font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setCustomField($event.target.value)" />
+  <button class="btn" :class="srcMode === 'sim' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="setSrcMode('sim')">🧪 模拟材料</button>
+  <button class="btn" :class="srcMode === 'real' ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="setSrcMode('real')">📡 真实材料(联网)</button>
+  <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="同一领域换一篇新模拟材料" @click="refreshPaper()">🎲 换一篇</button>
+  <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1));text-decoration:none" title="打开官方/必应搜索，核对真实统计公报与单位">🌐 查官网</a>
+  <button class="btn btn-gh" :disabled="srcCheckBusy" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="checkSourceOnline()">{{ srcCheckBusy ? '⏳ 联网中…' : '📡 联网核实' }}</button>
   </div>
-  <div style="font-size:11px;color:var(--text3);border:1px dashed var(--glass-border);border-radius:8px;padding:4px 8px;margin:2px 0 6px">当前同一篇材料将贯穿 ①判题型 → ②找数据 → ③公式 → ④速算；切换四层只换题型，不换材料。</div>
+  <div style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);border:1px dashed var(--glass-border);border-radius:8px;padding:4px 8px;margin:2px 0 6px">当前同一篇材料将贯穿 ①判题型 → ②找数据 → ③公式 → ④速算；切换四层只换题型，不换材料。</div>
   <div v-if="srcMode === 'real'" class="dt-mat-note" style="color:#fbbf24;border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:6px 10px;margin:2px 0 8px">📡 真实材料模式：请查看「联网核实」弹窗中的官方口径/真实资料卡；当前选择题仍为同领域模拟数据，因为联网返回的官方数字尚未开放稳定接口，不能用来自动判题。</div>
   
       <div v-if="groupDone && groupSize > 0" class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:10px 12px;margin:4px 0;background:var(--bg2,transparent)">
         <div style="font-weight:700">🏁 本组完成</div>
-        <div style="font-size:12px;color:var(--text2);margin-top:4px">共 {{ grpStats.total }} 题 · ✅对 {{ grpStats.ok }} · ❌错 {{ grpStats.bad }} · 正确率 <b>{{ grpStats.rate }}%</b> · 总用时 <b>{{ grpStats.secs }}s</b>（平均每题 {{ grpStats.avg }}s）</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">本题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">{{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-pri" style="padding:2px 10px;font-size:12px" @click="reset()">🔄 再来一组</button><button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="setGroup(0)">🎲 换随机</button></div>
+        <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);margin-top:4px">共 {{ grpStats.total }} 题 · ✅对 {{ grpStats.ok }} · ❌错 {{ grpStats.bad }} · 正确率 <b>{{ grpStats.rate }}%</b> · 总用时 <b>{{ grpStats.secs }}s</b>（平均每题 {{ grpStats.avg }}s）</div>
+        <div style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:2px">本题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">{{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-pri" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="reset()">🔄 再来一组</button><button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="setGroup(0)">🎲 换随机</button></div>
       </div>
-      <div v-if="mode === 'locate' && picked && (lockWords.time.length || lockWords.ind.length || lockWords.unit.length)" class="dt-lock-fb" style="border-left:3px solid var(--accent,#22d3ee);background:rgba(34,211,238,.08);border-radius:8px;padding:8px 10px;margin:4px 0;font-size:12px">
+      <div v-if="mode === 'locate' && picked && (lockWords.time.length || lockWords.ind.length || lockWords.unit.length)" class="dt-lock-fb" style="border-left:3px solid var(--accent,#22d3ee);background:rgba(34,211,238,.08);border-radius:8px;padding:8px 10px;margin:4px 0;font-size: calc(12px * var(--ui-fs-scale, 1))">
         <b>🔍 判题后三锁定复盘</b>：⏱ 时间【<span v-for="(w,i) in lockWords.time" :key="'t'+i">{{ w }} </span>】 📐 指标【<span v-for="(w,i) in lockWords.ind" :key="'i'+i">{{ w }} </span>】 📏 单位【<span v-for="(w,i) in lockWords.unit" :key="'u'+i">{{ w }} </span>】——再看一遍题干要的是哪个，答错常因时间/指标/单位三锁定之一漏锁。
       </div>
             <div class="dt-qcard">
@@ -1389,15 +1389,15 @@ onUnmounted(() => {
             <span class="dt-title">📡 联网核实 · {{ srcLabel }}</span>
             <button class="pc-close" @click="srcCheckShow = false">✕</button>
           </div>
-          <div style="overflow:auto;min-height:0;padding:2px 2px 12px;font-size:13px;line-height:1.8;color:var(--text)">
-            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">先自动抓取维基/公开检索摘要；若配置了文字大模型，再让 AI 基于摘要核对「哪些是真实官方口径、哪些仍需去官网确认」。</div>
-            <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="margin:0 6px 6px 0;padding:3px 10px;font-size:12px;text-decoration:none">🌐 打开必应搜索「{{ srcSearchTerm }}」</a>
+          <div style="overflow:auto;min-height:0;padding:2px 2px 12px;font-size: calc(13px * var(--ui-fs-scale, 1));line-height:1.8;color:var(--text)">
+            <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);margin-bottom:8px">先自动抓取维基/公开检索摘要；若配置了文字大模型，再让 AI 基于摘要核对「哪些是真实官方口径、哪些仍需去官网确认」。</div>
+            <a class="btn btn-gh" :href="srcSearchHref" target="_blank" rel="noopener" style="margin:0 6px 6px 0;padding:3px 10px;font-size: calc(12px * var(--ui-fs-scale, 1));text-decoration:none">🌐 打开必应搜索「{{ srcSearchTerm }}」</a>
             <div v-if="srcCheckBusy" class="sim-loading"><span class="spin"></span> 联网检索 + AI 核对中…</div>
             <template v-else>
               <div style="font-weight:700;margin:6px 0 4px">🔎 联网摘要</div>
               <div v-for="(it,i) in srcCheckItems" :key="i" class="dt-mat-row" style="margin:4px 0;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px">
                 <div>{{ it.text || '（无摘要）' }}</div>
-                <a v-if="it.url" :href="it.url" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">来源 ↗</a>
+                <a v-if="it.url" :href="it.url" target="_blank" rel="noopener" style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--accent)">来源 ↗</a>
               </div>
               <div style="font-weight:700;margin:10px 0 4px">🤖 AI 口径核对</div>
               <div class="dt-ai" v-html="md(srcCheckAi || '（暂无 AI 结果）')"></div>
@@ -1413,12 +1413,12 @@ onUnmounted(() => {
           </div>
           <div style="overflow:auto;padding:2px 2px 12px">
             <div class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:12px;background:var(--bg2,transparent)">
-              <div style="font-weight:800;font-size:15px">共 {{ grpStats.total }} 题</div>
-              <div style="font-size:13px;color:var(--text2);margin-top:6px;line-height:2">
+              <div style="font-weight:800;font-size: calc(15px * var(--ui-fs-scale, 1))">共 {{ grpStats.total }} 题</div>
+              <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);margin-top:6px;line-height:2">
                 ✅ 答对 <b style="color:#34d399">{{ grpStats.ok }}</b> · ❌ 答错 <b style="color:#fb7185">{{ grpStats.bad }}</b> · 正确率 <b>{{ grpStats.rate }}%</b><br/>
                 本场计时 <b>{{ grpStats.secs }}s</b> · 平均每题 <b>{{ grpStats.avg }}s</b>
               </div>
-              <div v-if="hist.length" style="font-size:12px;color:var(--text3);margin-top:6px">每道题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
+              <div v-if="hist.length" style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:6px">每道题用时：<span v-for="(h,i) in hist" :key="i" :style="{ color: h.ok ? '#34d399' : '#fb7185' }">第{{ i + 1 }}题 {{ h.t }}s{{ h.ok ? '✓' : '✗' }} </span></div>
             </div>
             <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-pri" @click="reset()">🔄 再来一组</button>
@@ -1437,48 +1437,48 @@ onUnmounted(() => {
         <span class="dt-title">📊 资料分析 · AI 智能出题 · 完整真题卷</span>
         <button class="btn btn-gh dt-ui-toggle" @click="dtUiOpen = !dtUiOpen">{{ dtUiOpen ? '▲ 收起工具' : '⚙️ 工具' }}</button>
         <div class="dt-acts" :class="{ off: !dtUiOpen }">
-          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="四层拆分训练，同一篇材料共用" @click="setView('classic')">🗂 真题拆分训练</button>
-          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="查看练习/考试记录并二刷" @click="showRecords()">📜 练习记录</button>
-          <button class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="emit('close')">✕</button>
+          <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="四层拆分训练，同一篇材料共用" @click="setView('classic')">🗂 真题拆分训练</button>
+          <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="查看练习/考试记录并二刷" @click="showRecords()">📜 练习记录</button>
+          <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="emit('close')">✕</button>
         </div>
       </div>
 
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:8px;padding:5px 8px;margin-bottom:8px">
         <span class="dt-chip">来源：</span>
-        <select :value="dtSrc.src" style="font-size:11px;max-width:170px" @change="setSrc($event.target.value)">
+        <select :value="dtSrc.src" style="font-size: calc(11px * var(--ui-fs-scale, 1));max-width:170px" @change="setSrc($event.target.value)">
           <option v-for="x in SRC_OPTIONS" :key="x" :value="x">{{ x }}</option>
         </select>
         <span class="dt-chip">领域：</span>
-        <select :value="dtSrc.field" style="font-size:11px" @change="setField($event.target.value)">
+        <select :value="dtSrc.field" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setField($event.target.value)">
           <optgroup label="🔥 热门领域"><option v-for="x in FIELD_HOT" :key="x" :value="x">{{ x }}</option></optgroup>
           <optgroup label="🧊 冷门 / 专项领域"><option v-for="x in FIELD_COLD" :key="x" :value="x">{{ x }}</option></optgroup>
         </select>
-        <input :value="dtSrc.customField" placeholder="自定义领域" style="width:120px;font-size:11px" @change="setCustomField($event.target.value)" />
+        <input :value="dtSrc.customField" placeholder="自定义领域" style="width:120px;font-size: calc(11px * var(--ui-fs-scale, 1))" @change="setCustomField($event.target.value)" />
         <span class="dt-chip">排版：</span>
-        <select :value="dtForm" style="font-size:11px;max-width:150px" @change="setDtForm($event.target.value)">
+        <select :value="dtForm" style="font-size: calc(11px * var(--ui-fs-scale, 1));max-width:150px" @change="setDtForm($event.target.value)">
           <option v-for="x in FORM_OPTIONS" :key="x.k" :value="x.k">{{ x.t.replace('🤖 ', '') }}</option>
         </select>
         <span class="dt-chip">口径：</span>
-        <select :value="dtTime" style="font-size:11px;max-width:150px" @change="setDtTime($event.target.value)">
+        <select :value="dtTime" style="font-size: calc(11px * var(--ui-fs-scale, 1));max-width:150px" @change="setDtTime($event.target.value)">
           <option v-for="x in TIME_OPTIONS" :key="x.k" :value="x.k">{{ x.t.replace('🕒 ', '') }}</option>
         </select>
         <span class="dt-chip">题量：</span>
-        <button v-for="n in [5, 10, 15, 20]" :key="n" class="btn" :class="examGroupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size:11px" :disabled="examRun" @click="setExamGroup(n)">{{ n }}题/组</button>
-        <button v-if="!examReady && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="initExam()">🤖 AI 智能出题</button>
-        <button v-if="examReady" class="btn btn-gh" style="padding:1px 8px;font-size:11px" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
-        <button v-if="examReady && !examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size:11px" @click="startExamRun()">▶ 开始本组作答</button>
-        <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size:11px">⏱ 本层 {{ examLayerRemain }}s · 考试 {{ examElapsed }}s / 剩 {{ examTotalRemain }}s</button>
+        <button v-for="n in [5, 10, 15, 20]" :key="n" class="btn" :class="examGroupSize === n ? 'btn-pri' : 'btn-gh'" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="examRun" @click="setExamGroup(n)">{{ n }}题/组</button>
+        <button v-if="!examReady && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="initExam()">🤖 AI 智能出题</button>
+        <button v-if="examReady" class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="同一领域换一篇新材料" @click="initExam()">🎲 换一套</button>
+        <button v-if="examReady && !examRun && !examFinished" class="btn btn-pri" style="padding:2px 10px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="startExamRun()">▶ 开始本组作答</button>
+        <button v-else-if="examRun" class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))">⏱ 本层 {{ examLayerRemain }}s · 考试 {{ examElapsed }}s / 剩 {{ examTotalRemain }}s</button>
       </div>
 
       <div v-if="!examReady && !examFinished" style="min-height:52vh;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;text-align:center;padding:18px">
-        <div style="font-size:20px">🤖 AI 智能出题</div>
-        <div style="max-width:620px;font-size:14px;line-height:1.9;color:var(--text2)">
+        <div style="font-size: calc(20px * var(--ui-fs-scale, 1))">🤖 AI 智能出题</div>
+        <div style="max-width:620px;font-size: calc(14px * var(--ui-fs-scale, 1));line-height:1.9;color:var(--text2)">
           进入完整真题卷前，请先完成三个选择：材料来源、训练领域、每组题量（5/10/15/20）。确认后点击「🤖 AI 智能出题」，本组题目会自动生成。
         </div>
-        <div style="max-width:620px;border:1px dashed var(--glass-border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text3)">
+        <div style="max-width:620px;border:1px dashed var(--glass-border);border-radius:8px;padding:8px 12px;font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">
           💡 学习建议：先在「🗂 真题拆分训练」把判题型、找数据、选公式、速算分别练熟，再回到这里做完整真题卷，四层闭环更有效。
         </div>
-        <button class="btn btn-pri" style="padding:8px 18px;font-size:13px" @click="initExam()">🤖 AI 智能出题</button>
+        <button class="btn btn-pri" style="padding:8px 18px;font-size: calc(13px * var(--ui-fs-scale, 1))" @click="initExam()">🤖 AI 智能出题</button>
       </div>
       <div v-else-if="exam && !examFinished" class="dt-body">
         <button class="btn btn-gh dt-side-toggle" :class="{ on: dtSideOpen }" @click="dtSideOpen = !dtSideOpen">{{ dtSideOpen ? '▲ 收起 进度/统计' : '🧭 本套进度 · 统计 ▾' }}</button>
@@ -1501,14 +1501,14 @@ onUnmounted(() => {
               <span>{{ lp.t }} <b>{{ lp.pct }}%</b>（{{ lp.ok }}/{{ lp.done }}）</span>
               <div style="height:6px;border-radius:3px;background:var(--surface);overflow:hidden;margin-top:4px"><div :style="{ width: lp.pct + '%', height: '100%', background: lp.pct >= 80 ? '#34d399' : lp.pct >= 50 ? '#fbbf24' : '#fb7185' }"></div></div>
             </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:6px">未开始时不计分；每层答完立即判正误并归因到能力层。</div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:6px">未开始时不计分；每层答完立即判正误并归因到能力层。</div>
           </div>
         </div>
 
         <div class="dt-train">
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-            <button class="btn btn-gh" style="padding:2px 8px;font-size:11px" :disabled="examAiBusy" @click="aiOrganizeExam()">{{ examAiBusy ? '🤖 AI 整理中…' : '🤖 AI 整理公报正文' }}</button>
-            <button class="btn btn-gh" style="padding:2px 8px;font-size:11px" :title="'只高亮当前本题所需的时间/指标/数值'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 当前题数据高亮开' : '🔍 当前题数据高亮关' }}</button>
+            <button class="btn btn-gh" style="padding:2px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="examAiBusy" @click="aiOrganizeExam()">{{ examAiBusy ? '🤖 AI 整理中…' : '🤖 AI 整理公报正文' }}</button>
+            <button class="btn btn-gh" style="padding:2px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" :title="'只高亮当前本题所需的时间/指标/数值'" @click="lockShow = !lockShow">{{ lockShow ? '🔍 当前题数据高亮开' : '🔍 当前题数据高亮关' }}</button>
             <span class="dt-mat-note" style="color:var(--text3)">AI 只改写表达，不改变本地表格数值，保证 5 问仍可自动判题。</span>
           </div>
           <div v-if="examCurrent" class="dt-mat-scroll" style="border:1px solid var(--glass-border);border-radius:8px;padding:8px 10px;background:var(--glass-bg)">
@@ -1545,8 +1545,8 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 
       <div v-else-if="exam && examFinished" style="overflow:auto;padding:4px 2px">
         <div class="dt-grp-sum" style="border:1px solid var(--glass-border);border-radius:12px;padding:14px;background:var(--glass-bg)">
-          <div style="font-weight:800;font-size:16px">📊 本套真题 · 四层成绩单</div>
-          <div style="font-size:13px;color:var(--text2);margin-top:8px;line-height:1.9">
+          <div style="font-weight:800;font-size: calc(16px * var(--ui-fs-scale, 1))">📊 本套真题 · 四层成绩单</div>
+          <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);margin-top:8px;line-height:1.9">
             ✅ 正确 {{ examHist.filter((h) => h.ok).length }} / {{ examHist.length }} · 本场计时 <b>{{ examElapsed }}s</b> · 平均每题 <b>{{ examHist.length ? Math.round(examElapsed / (examHist.length / 4)) : 0 }}s/层</b>
           </div>
           <div style="margin-top:10px;display:grid;gap:8px">
@@ -1557,10 +1557,10 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
           </div>
           <div style="margin-top:14px;border-top:1px solid var(--glass-border);padding-top:10px">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <b style="font-size:14px">🤖 AI 深度评估</b>
-              <button v-if="!examEvalBusy" class="btn btn-gh" style="padding:1px 8px;font-size:11px" @click="deepEvalExam()">↻ 重新评估</button>
+              <b style="font-size: calc(14px * var(--ui-fs-scale, 1))">🤖 AI 深度评估</b>
+              <button v-if="!examEvalBusy" class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="deepEvalExam()">↻ 重新评估</button>
             </div>
-            <div v-if="examEvalBusy" style="color:var(--text3);font-size:12px;margin-top:6px">⏳ AI 正在分析本场四层作答记录…</div>
+            <div v-if="examEvalBusy" style="color:var(--text3);font-size: calc(12px * var(--ui-fs-scale, 1));margin-top:6px">⏳ AI 正在分析本场四层作答记录…</div>
             <div v-if="examEvalText" class="dt-ai" style="margin-top:8px" v-html="md(examEvalText)"></div>
           </div>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
@@ -1579,12 +1579,12 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
         <span class="dt-title">📜 资料分析 · 练习/考试记录</span>
         <div class="dt-acts">
           <span v-if="records.length" class="dt-chip">共 {{ records.length }} 条</span>
-          <button class="btn btn-gh" style="padding:2px 10px;font-size:12px" @click="closeRecords()">关闭</button>
+          <button class="btn btn-gh" style="padding:2px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="closeRecords()">关闭</button>
           <button class="pc-close" @click="closeRecords()">✕</button>
         </div>
       </div>
       <div style="overflow:auto;min-height:0;padding:2px 2px 14px">
-        <div v-if="!records.length" style="text-align:center;padding:46px 12px;color:var(--text3);font-size:13px">
+        <div v-if="!records.length" style="text-align:center;padding:46px 12px;color:var(--text3);font-size: calc(13px * var(--ui-fs-scale, 1))">
           还没有练习记录。先在「拆分训练」完成任意 1 题，或到「完整真题卷」做完一套 5 题以上，成绩会自动存在这里。
         </div>
         <div v-for="rec in records" :key="rec.id" class="dt-mat-row" style="margin:6px 0;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:10px;padding:9px 12px">
@@ -1596,14 +1596,14 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
             <span class="dt-chip">{{ rec.secs }}s</span>
             <span class="dt-chip" :style="{ color: (rec.wrong || []).length ? '#fb7185' : '#34d399' }">{{ (rec.wrong || []).length ? '错 ' + (rec.wrong || []).length + ' 题' : '✅ 无错题' }}</span>
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:5px">{{ recLayerLine(rec) }}</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:5px">{{ recLayerLine(rec) }}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
-            <button class="btn btn-pri" style="padding:1px 9px;font-size:11px" @click="redoRecord(rec)">↻ 二刷</button>
-            <button class="btn btn-gh" style="padding:1px 9px;font-size:11px" :disabled="!(rec.wrong || []).length" @click="addRecordWrongs(rec)">📌 错题入库</button>
-            <button class="btn btn-gh" style="padding:1px 9px;font-size:11px" @click="toggleRecDetail(rec.id)">{{ recDetail && recDetail.id === rec.id ? '▾ 收起明细' : '▸ 查看明细' }}</button>
-            <button class="btn btn-gh" style="padding:1px 9px;font-size:11px;color:#fb7185" @click="delRecord(rec.id)">🗑 删除</button>
+            <button class="btn btn-pri" style="padding:1px 9px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="redoRecord(rec)">↻ 二刷</button>
+            <button class="btn btn-gh" style="padding:1px 9px;font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="!(rec.wrong || []).length" @click="addRecordWrongs(rec)">📌 错题入库</button>
+            <button class="btn btn-gh" style="padding:1px 9px;font-size: calc(11px * var(--ui-fs-scale, 1))" @click="toggleRecDetail(rec.id)">{{ recDetail && recDetail.id === rec.id ? '▾ 收起明细' : '▸ 查看明细' }}</button>
+            <button class="btn btn-gh" style="padding:1px 9px;font-size: calc(11px * var(--ui-fs-scale, 1));color:#fb7185" @click="delRecord(rec.id)">🗑 删除</button>
           </div>
-          <div v-if="recDetail && recDetail.id === rec.id" style="margin-top:8px;border-top:1px dashed var(--glass-border);padding-top:8px;font-size:12px;line-height:1.7;color:var(--text2)">
+          <div v-if="recDetail && recDetail.id === rec.id" style="margin-top:8px;border-top:1px dashed var(--glass-border);padding-top:8px;font-size: calc(12px * var(--ui-fs-scale, 1));line-height:1.7;color:var(--text2)">
             <div v-if="rec.kind === 'exam'">组卷 {{ rec.groupSize }} 题 · 四层共 {{ rec.total }} 次作答，其中正确 {{ rec.ok }} 次。</div>
             <div v-else>本组 {{ rec.groupSize || 1 }} 题 · 答对 {{ rec.ok }} / {{ rec.total }}，覆盖模式：{{ rec.mode || 'type' }}。</div>
             <div v-if="rec.form || rec.timeKind">材料排版：{{ (FORM_OPTIONS.find((x) => x.k === rec.form) || {}).t || rec.form }} · 口径：{{ (TIME_OPTIONS.find((x) => x.k === rec.timeKind) || {}).t || rec.timeKind }}</div>
@@ -1611,8 +1611,8 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
               <div style="font-weight:700;margin:7px 0 4px;color:#fb7185">❌ 本场答错项</div>
               <div v-for="(w,i) in rec.wrong" :key="i" style="border:1px solid rgba(251,113,133,.3);border-radius:8px;padding:7px 9px;margin:5px 0;background:rgba(251,113,133,.06)">
                 <div>{{ w.stem }}</div>
-                <div v-if="w.wrongLayers && w.wrongLayers.length" style="margin-top:3px;color:#fb7185;font-size:11px">答错层：{{ w.wrongLayers.join('、') }}</div>
-                <div v-else-if="w.layerName" style="margin-top:3px;color:#fb7185;font-size:11px">答错层：{{ w.layerName }}</div>
+                <div v-if="w.wrongLayers && w.wrongLayers.length" style="margin-top:3px;color:#fb7185;font-size: calc(11px * var(--ui-fs-scale, 1))">答错层：{{ w.wrongLayers.join('、') }}</div>
+                <div v-else-if="w.layerName" style="margin-top:3px;color:#fb7185;font-size: calc(11px * var(--ui-fs-scale, 1))">答错层：{{ w.layerName }}</div>
                 <div v-if="w.answer" style="margin-top:2px">正确答案：{{ w.answer }}{{ w.pick ? '（本场选' + w.pick + '）' : '' }}</div>
               </div>
             </template>
@@ -1632,58 +1632,58 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 .dt-q, .dt-ex-b, .dt-method-b, .dt-md-row, .dt-kb-row { overflow-wrap: break-word; word-break: break-word; }
 .dt-t { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
 .dt-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.dt-title { font-size: 16px; font-weight: 800; color: var(--accent); }
+.dt-title { font-size: calc(16px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--accent); }
 .dt-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.dt-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 700; color: var(--text); }
+.dt-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 20px; padding: 3px 10px; font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--text); }
 .dt-chip.hot { border-color: #fb923c; color: #fb923c; }
-.dt-chip-sub { font-size: 10px; color: var(--text3); font-weight: 400; }
+.dt-chip-sub { font-size: calc(10px * var(--ui-fs-scale, 1)); color: var(--text3); font-weight: 400; }
 .dt-body { display: flex; gap: 14px; flex: 1; min-height: 0; flex-wrap: nowrap; overflow: hidden; }
 .dt-side { flex: 0 0 256px; min-width: 220px; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .dt-train { flex: 1 1 520px; min-width: 320px; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 2px; }
 .dt-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; }
-.dt-card-t { font-size: 12px; font-weight: 700; color: var(--text3); margin-bottom: 8px; }
+.dt-card-t { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--text3); margin-bottom: 8px; }
 .dt-py-row { display: block; padding: 6px 9px; border-radius: 8px; background: var(--surface); border: 1px solid transparent; margin-bottom: 6px; cursor: pointer; }
 .dt-py-row.on { border-color: var(--accent); }
-.dt-py-l { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--text); margin-bottom: 4px; }
+.dt-py-l { display: flex; justify-content: space-between; align-items: center; font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text); margin-bottom: 4px; }
 .dt-py-row.on .dt-py-l b { color: var(--accent); }
-.dt-py-cnt { font-size: 11px; color: var(--text3); }
+.dt-py-cnt { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .dt-py-bar { height: 5px; border-radius: 3px; background: rgba(128, 128, 128, 0.2); overflow: hidden; }
 .dt-py-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.3s; }
-.dt-py-tip { font-size: 11.5px; color: var(--text3); line-height: 1.65; margin-top: 6px; }
-.dt-method-b { font-size: 12.5px; line-height: 1.7; color: var(--text); }
+.dt-py-tip { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.65; margin-top: 6px; }
+.dt-method-b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); line-height: 1.7; color: var(--text); }
 .dt-method-detail { margin-top: 8px; border-top: 1px dashed var(--glass-border); padding-top: 8px; }
-.dt-md-row { font-size: 12px; line-height: 1.7; color: var(--text); margin-bottom: 5px; }
+.dt-md-row { font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.7; color: var(--text); margin-bottom: 5px; }
 .dt-md-row b { color: var(--accent); }
 .dt-md-steps { margin: 2px 0 0 18px; padding: 0; }
 .dt-md-steps li { margin-bottom: 2px; }
-.dt-st-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: var(--text); }
+.dt-st-row { display: flex; justify-content: space-between; font-size: calc(13px * var(--ui-fs-scale, 1)); padding: 4px 0; color: var(--text); }
 .dt-st-row b { color: var(--accent); }
-.dt-st-tip { font-size: 11.5px; color: var(--text3); line-height: 1.6; margin-top: 6px; border-top: 1px dashed var(--glass-border); padding-top: 6px; }
-.dt-keys-b { font-size: 12px; color: var(--text3); line-height: 1.7; }
+.dt-st-tip { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.6; margin-top: 6px; border-top: 1px dashed var(--glass-border); padding-top: 6px; }
+.dt-keys-b { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.7; }
 .dt-keys-b b { color: var(--accent); }
 .dt-modes { display: flex; gap: 6px; flex-wrap: wrap; }
 .dt-diff { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.dt-diff-lb { font-size: 12px; color: var(--text3); }
+.dt-diff-lb { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); }
 .dt-diff-sep { color: var(--glass-border); }
-.dt-help { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.75; color: var(--text); }
-.dt-help :deep(h1), .dt-help :deep(h2), .dt-help :deep(h3) { font-size: 14px; margin: 8px 0 6px; color: var(--accent); }
+.dt-help { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 14px; font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.75; color: var(--text); }
+.dt-help :deep(h1), .dt-help :deep(h2), .dt-help :deep(h3) { font-size: calc(14px * var(--ui-fs-scale, 1)); margin: 8px 0 6px; color: var(--accent); }
 .dt-help :deep(strong) { color: var(--accent); }
 .dt-qcard { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 12px 14px; }
 .dt-qhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.dt-qtag { background: var(--accent); color: #04121a; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 20px; }
-.dt-qmode { font-size: 12px; color: var(--text3); }
-.dt-qidx { font-size: 12px; color: var(--text3); margin-left: auto; }
-.dt-mat { font-size: 13px; line-height: 1.75; color: var(--text); margin-bottom: 8px; }
+.dt-qtag { background: var(--accent); color: #04121a; font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; padding: 2px 8px; border-radius: 20px; }
+.dt-qmode { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); }
+.dt-qidx { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); margin-left: auto; }
+.dt-mat { font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.75; color: var(--text); margin-bottom: 8px; }
 .dt-mat :deep(table) { border-collapse: collapse; margin: 6px 0; max-width: 100%; }
-.dt-mat :deep(th), .dt-mat :deep(td) { border: 1px solid var(--glass-border); padding: 4px 9px; text-align: center; font-size: 12px; }
+.dt-mat :deep(th), .dt-mat :deep(td) { border: 1px solid var(--glass-border); padding: 4px 9px; text-align: center; font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .dt-mat :deep(th) { background: rgba(34, 211, 238, 0.12); color: var(--accent); }
 .dt-mat-svg svg { max-width: 100%; height: auto; border: 1px solid var(--glass-border); border-radius: 8px; background: #fff; }
-.dt-mat-note { font-size: 11.5px; color: var(--text3); border: 1px dashed var(--glass-border); border-radius: 8px; padding: 5px 9px; margin-bottom: 8px; background: rgba(251, 191, 36, 0.06); }
-.dt-q { font-size: 14px; line-height: 1.8; color: var(--text); }
+.dt-mat-note { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); border: 1px dashed var(--glass-border); border-radius: 8px; padding: 5px 9px; margin-bottom: 8px; background: rgba(251, 191, 36, 0.06); }
+.dt-q { font-size: calc(14px * var(--ui-fs-scale, 1)); line-height: 1.8; color: var(--text); }
 .dt-q :deep(strong) { color: var(--accent); }
 .dt-opts { display: grid; grid-template-columns: 1fr; gap: 7px; }
 .dt-opts.wide { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
-.dt-opt { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); cursor: pointer; font-family: inherit; font-size: 13.5px; transition: all 0.15s; text-align: left; }
+.dt-opt { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); cursor: pointer; font-family: inherit; font-size: calc(13.5px * var(--ui-fs-scale, 1)); transition: all 0.15s; text-align: left; }
 .dt-opt:hover:not(:disabled) { border-color: var(--accent); }
 .dt-opt.picked.right { border-color: #34d399; background: rgba(52, 211, 153, 0.15); }
 .dt-opt.picked.wrong { border-color: #fb7185; background: rgba(251, 113, 133, 0.15); }
@@ -1691,15 +1691,15 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 .dt-k { font-weight: 800; color: var(--accent); min-width: 20px; }
 .dt-t { flex: 1; }
 .dt-explain { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 12px 14px; }
-.dt-ex-t { font-size: 14px; font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dt-ex-t { font-size: calc(14px * var(--ui-fs-scale, 1)); font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dt-ex-t.ok { color: #34d399; }
 .dt-ex-t.bad { color: #fb7185; }
-.dt-ex-gain { font-size: 11px; font-weight: 700; background: rgba(52, 211, 153, 0.15); border: 1px solid #34d399; color: #34d399; border-radius: 20px; padding: 1px 8px; }
-.dt-ex-b { font-size: 13.5px; line-height: 1.85; color: var(--text); }
+.dt-ex-gain { font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 700; background: rgba(52, 211, 153, 0.15); border: 1px solid #34d399; color: #34d399; border-radius: 20px; padding: 1px 8px; }
+.dt-ex-b { font-size: calc(13.5px * var(--ui-fs-scale, 1)); line-height: 1.85; color: var(--text); }
 .dt-ex-b :deep(strong) { color: var(--accent); }
 .dt-ex-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .dt-ex-acts .busy { opacity: 0.7; }
-.dt-ai { margin-top: 10px; border-top: 1px dashed var(--glass-border); padding-top: 10px; font-size: 13px; line-height: 1.8; color: var(--text); background: rgba(34, 211, 238, 0.06); border-radius: 8px; padding: 10px 12px; }
+.dt-ai { margin-top: 10px; border-top: 1px dashed var(--glass-border); padding-top: 10px; font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.8; color: var(--text); background: rgba(34, 211, 238, 0.06); border-radius: 8px; padding: 10px 12px; }
 .dt-loading { text-align: center; color: var(--text3); padding: 30px 0; }
 
 /* 手机端“最大做题区”：桌面保持两栏全功能，窄屏把非做题面板折叠 */
@@ -1708,31 +1708,31 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 /* ===== 理论课堂 ===== */
 .dt-kb { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
 .dt-kb-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
-.dt-kb-input { flex: 1 1 220px; min-width: 180px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; outline: none; }
+.dt-kb-input { flex: 1 1 220px; min-width: 180px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: calc(13px * var(--ui-fs-scale, 1)); font-family: inherit; outline: none; }
 .dt-kb-input:focus { border-color: var(--accent); }
-.dt-kb-count { font-size: 11.5px; color: var(--text3); margin-left: 4px; }
+.dt-kb-count { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); margin-left: 4px; }
 .dt-kb-list { display: flex; flex-direction: column; gap: 8px; }
 .dt-kb-item { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; overflow: hidden; min-width: 0; max-width: 100%; }
 .dt-kb-item.open { border-color: var(--accent); }
 .dt-kb-item.star { border-left: 3px solid #fbbf24; }
 .dt-kb-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; flex-wrap: wrap; }
 .dt-kb-head:hover { background: rgba(34, 211, 238, 0.06); }
-.dt-kb-layer { background: rgba(34, 211, 238, 0.14); color: var(--accent); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
-.dt-kb-src { font-size: 10.5px; font-weight: 700; color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.5); border-radius: 20px; padding: 1px 7px; }
-.dt-kb-title { font-size: 13.5px; color: var(--text); flex: 1; }
-.dt-kb-read { color: #34d399; font-size: 13px; font-weight: 700; }
-.dt-kb-star { color: #fbbf24; font-size: 15px; cursor: pointer; }
+.dt-kb-layer { background: rgba(34, 211, 238, 0.14); color: var(--accent); font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+.dt-kb-src { font-size: calc(10.5px * var(--ui-fs-scale, 1)); font-weight: 700; color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.5); border-radius: 20px; padding: 1px 7px; }
+.dt-kb-title { font-size: calc(13.5px * var(--ui-fs-scale, 1)); color: var(--text); flex: 1; }
+.dt-kb-read { color: #34d399; font-size: calc(13px * var(--ui-fs-scale, 1)); font-weight: 700; }
+.dt-kb-star { color: #fbbf24; font-size: calc(15px * var(--ui-fs-scale, 1)); cursor: pointer; }
 .dt-kb-detail { border-top: 1px dashed var(--glass-border); padding: 10px 12px; }
-.dt-kb-row { font-size: 13px; line-height: 1.8; color: var(--text); margin-bottom: 8px; overflow-wrap: break-word; word-break: break-word; }
+.dt-kb-row { font-size: calc(13px * var(--ui-fs-scale, 1)); line-height: 1.8; color: var(--text); margin-bottom: 8px; overflow-wrap: break-word; word-break: break-word; }
 .dt-kb-row b { color: var(--accent); }
 .dt-kb-row.tip { background: rgba(251, 191, 36, 0.08); border-radius: 8px; padding: 6px 10px; }
 .dt-kb-steps { margin: 2px 0 0 18px; padding: 0; }
-.dt-kb-path { margin-top: 4px; font-size: 12.5px; color: var(--text3); background: rgba(34, 211, 238, 0.06); border-radius: 6px; padding: 5px 8px; overflow-wrap: break-word; word-break: break-word; }
+.dt-kb-path { margin-top: 4px; font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text3); background: rgba(34, 211, 238, 0.06); border-radius: 6px; padding: 5px 8px; overflow-wrap: break-word; word-break: break-word; }
 .dt-kb-ans { color: #34d399; font-weight: 700; margin-left: 6px; }
-.dt-kb-note { font-size: 11.5px; color: var(--text3); margin-bottom: 8px; }
+.dt-kb-note { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px; }
 .dt-kb-acts { margin-top: 4px; }
 .dt-kb-acts .busy { opacity: 0.7; }
-.dt-kb-empty { text-align: center; color: var(--text3); padding: 30px 0; font-size: 13px; }
+.dt-kb-empty { text-align: center; color: var(--text3); padding: 30px 0; font-size: calc(13px * var(--ui-fs-scale, 1)); }
 
 /* ===== 平板（≤1024px）：左栏收窄 ===== */
 @media (max-width: 1024px) {
@@ -1743,7 +1743,7 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 @media (max-width: 760px) {
   .dt-ui-toggle, .dt-side-toggle, .dt-set-toggle {
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 12px; min-height: 34px; padding: 5px 10px; border-radius: 20px;
+    font-size: calc(12px * var(--ui-fs-scale, 1)); min-height: 34px; padding: 5px 10px; border-radius: 20px;
   }
   .dt-side-toggle { margin-bottom: 4px; align-self: flex-start; }
   .dt-set-toggle { margin: 2px 0; }
@@ -1768,20 +1768,20 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
   .dt-side .dt-card { flex: 0 0 76%; min-width: 0; max-width: 320px; }
   .dt-side .dt-keys { display: none; }
   .dt-train { flex: 1 1 auto; min-width: 0; max-height: none; overflow-y: visible; overflow-x: hidden; }
-  .dt-title { font-size: 14px; }
+  .dt-title { font-size: calc(14px * var(--ui-fs-scale, 1)); }
   .dt-head { gap: 6px; margin-bottom: 8px; }
-  .dt-chip { font-size: 11px; padding: 3px 8px; }
+  .dt-chip { font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 3px 8px; }
   .dt-chip-sub { display: none; }
-  .dt-opt { font-size: 14.5px; padding: 12px 11px; min-height: 50px; }
-  .dt-q { font-size: 15.5px; line-height: 1.9; }
-  .dt-mat { font-size: 14.5px; line-height: 1.9; }
-  .dt-mat-note { font-size: 12px; }
-  .dt-mat :deep(th), .dt-mat :deep(td) { padding: 3px 5px; font-size: 11px; }
+  .dt-opt { font-size: calc(14.5px * var(--ui-fs-scale, 1)); padding: 12px 11px; min-height: 50px; }
+  .dt-q { font-size: calc(15.5px * var(--ui-fs-scale, 1)); line-height: 1.9; }
+  .dt-mat { font-size: calc(14.5px * var(--ui-fs-scale, 1)); line-height: 1.9; }
+  .dt-mat-note { font-size: calc(12px * var(--ui-fs-scale, 1)); }
+  .dt-mat :deep(th), .dt-mat :deep(td) { padding: 3px 5px; font-size: calc(11px * var(--ui-fs-scale, 1)); }
   .dt-mat :deep(table) { display: block; overflow-x: auto; }
-  .dt-modes .btn, .dt-diff .btn { font-size: 12px; padding: 6px 8px; min-height: 32px; }
-  .dt-ex-b { font-size: 13px; }
-  .dt-ex-acts .btn { font-size: 12px; min-height: 34px; }
-  .dt-kb-bar .btn { font-size: 11.5px; padding: 5px 7px; }
+  .dt-modes .btn, .dt-diff .btn { font-size: calc(12px * var(--ui-fs-scale, 1)); padding: 6px 8px; min-height: 32px; }
+  .dt-ex-b { font-size: calc(13px * var(--ui-fs-scale, 1)); }
+  .dt-ex-acts .btn { font-size: calc(12px * var(--ui-fs-scale, 1)); min-height: 34px; }
+  .dt-kb-bar .btn { font-size: calc(11.5px * var(--ui-fs-scale, 1)); padding: 5px 7px; }
   .dt-kb-head { padding: 8px 10px; }
   .dt-kb-detail { padding: 8px 10px; }
   .dt-kb-input { flex: 1 1 100%; min-width: 0; }
@@ -1796,16 +1796,16 @@ v-for="o in examLayerItem.options" :key="o.k" class="dt-opt"
 }
 /* ===== 极窄屏（≤380px，如 iPhone SE / 小屏安卓）：再降一档，保证一屏内可操作 ===== */
 @media (max-width: 380px) {
-  .dt-title { font-size: 13px; }
+  .dt-title { font-size: calc(13px * var(--ui-fs-scale, 1)); }
   .dt-acts { gap: 4px; }
-  .dt-chip { font-size: 10.5px; padding: 2px 6px; }
-  .dt-head .btn { font-size: 11.5px; padding: 5px 7px; }
+  .dt-chip { font-size: calc(10.5px * var(--ui-fs-scale, 1)); padding: 2px 6px; }
+  .dt-head .btn { font-size: calc(11.5px * var(--ui-fs-scale, 1)); padding: 5px 7px; }
   .dt-side .dt-card { flex: 0 0 88%; }
-  .dt-modes .btn, .dt-diff .btn { font-size: 11.5px; padding: 5px 7px; }
-  .dt-opt { font-size: 13.5px; padding: 10px 9px; }
-  .dt-q { font-size: 14.5px; line-height: 1.85; }
-  .dt-mat { font-size: 13.5px; }
-  .dt-ex-b { font-size: 12.5px; }
+  .dt-modes .btn, .dt-diff .btn { font-size: calc(11.5px * var(--ui-fs-scale, 1)); padding: 5px 7px; }
+  .dt-opt { font-size: calc(13.5px * var(--ui-fs-scale, 1)); padding: 10px 9px; }
+  .dt-q { font-size: calc(14.5px * var(--ui-fs-scale, 1)); line-height: 1.85; }
+  .dt-mat { font-size: calc(13.5px * var(--ui-fs-scale, 1)); }
+  .dt-ex-b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
 }
 
 /* v3.8.201 图/表材料手机可横滑看全（scoped 内 :deep 强制） */

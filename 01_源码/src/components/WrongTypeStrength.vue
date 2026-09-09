@@ -109,8 +109,8 @@ function pick(plate, s) {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.wts-title { font-size: 15px; font-weight: 800; color: var(--text, #222); }
-.wts-sub { font-size: 11px; color: var(--text3, #888); }
+.wts-title { font-size: calc(15px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--text, #222); }
+.wts-sub { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3, #888); }
 .wts-top {
   display: flex;
   align-items: center;
@@ -121,10 +121,10 @@ function pick(plate, s) {
   border-radius: 8px;
   background: rgba(226, 59, 59, 0.06);
 }
-.wts-top-l { font-size: 12px; font-weight: 700; color: #e23b3b; margin-right: 2px; }
+.wts-top-l { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: #e23b3b; margin-right: 2px; }
 .wts-top-chip {
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   padding: 3px 8px;
   border-radius: 20px;
   border: 1px solid transparent;
@@ -136,7 +136,7 @@ function pick(plate, s) {
 .wts-top-chip:hover { transform: translateY(-1px); }
 .wts-top-chip.on { box-shadow: 0 0 0 2px var(--pri, #4f7cff) inset; }
 .wts-empty {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-fs-scale, 1));
   color: var(--text3, #888);
   padding: 18px 6px;
   text-align: center;
@@ -149,8 +149,8 @@ function pick(plate, s) {
   gap: 8px;
   margin-bottom: 6px;
 }
-.wts-plate-n { font-size: 13px; font-weight: 700; color: var(--text, #222); }
-.wts-plate-t { font-size: 11px; color: var(--text3, #888); }
+.wts-plate-n { font-size: calc(13px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--text, #222); }
+.wts-plate-t { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3, #888); }
 .wts-row {
   display: flex;
   align-items: center;
@@ -164,7 +164,7 @@ function pick(plate, s) {
 .wts-row.on { background: rgba(79, 124, 255, 0.12); box-shadow: 0 0 0 1px var(--pri, #4f7cff) inset; }
 .wts-name {
   flex: 0 0 84px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-fs-scale, 1));
   color: var(--text, #222);
   text-align: right;
   white-space: nowrap;
@@ -187,22 +187,22 @@ function pick(plate, s) {
 }
 .wts-cnt {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   font-weight: 700;
   color: var(--text, #222);
   min-width: 44px;
   text-align: left;
 }
-.wts-cnt i { font-style: normal; font-weight: 400; font-size: 10.5px; color: var(--text3, #888); margin-left: 2px; }
+.wts-cnt i { font-style: normal; font-weight: 400; font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3, #888); margin-left: 2px; }
 .wts-active {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-fs-scale, 1));
   color: var(--text3, #888);
 }
 .wts-active b { color: var(--text, #222); }
 .wts-clear {
   margin-left: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   padding: 2px 8px;
   border-radius: 14px;
   border: 1px solid var(--glass-border, rgba(128, 128, 128, 0.3));

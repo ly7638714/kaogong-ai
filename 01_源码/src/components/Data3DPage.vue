@@ -50,7 +50,7 @@ const totalMin = computed(() => { studyTick.value; return fmtMin(totalSeconds())
   flex-wrap: wrap;
 }
 .d3d-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-fs-scale, 1));
   font-weight: 800;
   letter-spacing: 1px;
   background: linear-gradient(90deg, var(--hud-cyan), #a78bfa);
@@ -73,12 +73,12 @@ const totalMin = computed(() => { studyTick.value; return fmtMin(totalSeconds())
 }
 .d3d-card b {
   display: block;
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-fs-scale, 1));
   color: var(--hud-cyan);
   font-family: var(--font-hud);
 }
 .d3d-card span {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-fs-scale, 1));
   color: var(--text3);
 }
 .d3d-stage {
@@ -158,12 +158,12 @@ const totalMin = computed(() => { studyTick.value; return fmtMin(totalSeconds())
 }
 .d3d-foot {
   text-align: center;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
   color: var(--text3);
   line-height: 1.6;
 }
 @media (max-width: 640px) {
-  .d3d-title { font-size: 13px; }
+  .d3d-title { font-size: calc(13px * var(--ui-fs-scale, 1)); }
   .d3d-card { min-width: 60px; padding: 4px 8px; }
 }
 </style>

@@ -88,7 +88,7 @@ function capExamExplain() {
       <div class="draft-btn-row">
         <button class="btn btn-gh" :class="{ on: paperMode }" title="护眼纸张 / 屏幕模式切换" @click="paperMode = !paperMode; savePaperMode()">📄 {{ paperMode ? '纸张' : '屏幕' }}</button>
         <button v-if="sheetMode" class="btn btn-gh" :class="{ on: sheetShow }" title="仿真考试答题卡：填涂姓名/考场/准考证号，2B铅笔逐题填涂，交卷后统一查看答案" @click="sheetShow = !sheetShow">📋 仿真答题卡</button>
-        <span class="ep-hint" style="font-size: 11px">已答 {{ answeredCount }} / {{ questions.length }} · ✏️ 随手记点悬浮球写笔记</span>
+        <span class="ep-hint" style="font-size: calc(11px * var(--ui-fs-scale, 1))">已答 {{ answeredCount }} / {{ questions.length }} · ✏️ 随手记点悬浮球写笔记</span>
       </div>
       <div class="sim-q" v-html="qHtml"></div>
       <div v-if="q.err" class="sim-err">

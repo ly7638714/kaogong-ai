@@ -1830,6 +1830,12 @@ function openSvgBox(type, html) {
   svgBox.value = { type, html }
 }
 function closeSvgBox() { svgBox.value = null }
+// 聊天外浮层打开时隐藏“回到最新”，避免按钮盖在资料速算/片段阅读/错题页等界面上
+const backLayerOpen = computed(() =>
+  guideShow.value || imgView.value || !!svgBox.value || !!figView.value || bkShow.value ||
+  !!quizFull.value || wzOpen.value || examShow.value || solidShow.value || dtShow.value || yanShow.value ||
+  !!store.examOpen || !!((store.uiCtx || {}).panel) || !!((store.uiCtx || {}).examMgr)
+)
 function saveSvgBox() {
   const b = svgBox.value
   if (!b) return
@@ -2065,6 +2071,7 @@ defineEmits(['export-review'])
 // v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
 const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, left, runSec, limitSec, limitShow, stopTimer, countQuestions, startStopwatch, stopStopwatch, assessTime, fmtSec, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
 Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
+Object.assign(fpctx, { backLayerOpen })
 
 </script>
 <template>
@@ -2089,7 +2096,7 @@ Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
             border: 1px solid rgba(255, 255, 255, 0.1);
             background: var(--card);
             color: var(--text);
-            font-size: 13px;
+            font-size: calc(13px * var(--ui-fs-scale, 1));
           "
         />
         <button class="btn btn-pri" style="margin-top: 6px" @click="addImageUrl()">添加该图片</button>

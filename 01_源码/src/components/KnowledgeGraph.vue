@@ -663,54 +663,54 @@ watch(() => props.cards.length, () => {
 <style scoped>
 .kg-wrap { position: relative; }
 .kg-hd { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
-.kg-tip { font-size: 12.5px; color: var(--text2); flex: 1; min-width: 200px; }
-.kg-stat { font-size: 11.5px; color: var(--text3); white-space: nowrap; }
+.kg-tip { font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); flex: 1; min-width: 200px; }
+.kg-stat { font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); white-space: nowrap; }
 .kg-search { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.kg-search-in { flex: 1; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); font-size: 13px; }
-.kg-search-n { font-size: 12px; color: var(--hud-cyan); }
-.kg-search-x { border: 0; background: transparent; color: var(--text3); cursor: pointer; font-size: 13px; margin-left: 4px; }
+.kg-search-in { flex: 1; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); font-size: calc(13px * var(--ui-fs-scale, 1)); }
+.kg-search-n { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--hud-cyan); }
+.kg-search-x { border: 0; background: transparent; color: var(--text3); cursor: pointer; font-size: calc(13px * var(--ui-fs-scale, 1)); margin-left: 4px; }
 .kg-canvas-wrap { position: relative; height: 66vh; min-height: 420px; border: 1px solid rgba(80, 200, 255, 0.14); border-radius: 14px; overflow: hidden; outline: none; background: radial-gradient(ellipse at 50% 45%, #0a1428 0%, #04070f 60%, #020409 100%); }
 .kg-3d { width: 100%; height: 100%; }
 .kg-3d canvas { display: block; }
-.kg-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 13px; }
-.kg-tip-float { position: absolute; z-index: 5; max-width: 200px; padding: 7px 10px; border-radius: 10px; border: 1px solid rgba(34, 211, 238, 0.35); background: rgba(4, 10, 20, 0.94); color: var(--text); font-size: 11.5px; line-height: 1.5; pointer-events: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+.kg-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: calc(13px * var(--ui-fs-scale, 1)); }
+.kg-tip-float { position: absolute; z-index: 5; max-width: 200px; padding: 7px 10px; border-radius: 10px; border: 1px solid rgba(34, 211, 238, 0.35); background: rgba(4, 10, 20, 0.94); color: var(--text); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.5; pointer-events: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
 .kg-tip-float b { color: var(--hud-cyan); margin-right: 6px; }
-.kg-tip-float i { display: block; font-style: normal; color: var(--text3); font-size: 10.5px; }
+.kg-tip-float i { display: block; font-style: normal; color: var(--text3); font-size: calc(10.5px * var(--ui-fs-scale, 1)); }
 .kg-tip-float span { display: block; margin-top: 2px; }
-.kg-reset { position: absolute; right: 10px; top: 10px; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--glass-border-hi); background: rgba(4, 10, 20, 0.85); color: #fff; font-size: 15px; cursor: pointer; z-index: 2; }
+.kg-reset { position: absolute; right: 10px; top: 10px; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--glass-border-hi); background: rgba(4, 10, 20, 0.85); color: #fff; font-size: calc(15px * var(--ui-fs-scale, 1)); cursor: pointer; z-index: 2; }
 .kg-legend { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; z-index: 2; max-width: 82%; }
-.kg-lg { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text3); background: rgba(4, 10, 20, 0.78); border: 1px solid transparent; border-radius: 999px; padding: 2px 8px; cursor: pointer; transition: all 0.2s; }
+.kg-lg { display: inline-flex; align-items: center; gap: 4px; font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: var(--text3); background: rgba(4, 10, 20, 0.78); border: 1px solid transparent; border-radius: 999px; padding: 2px 8px; cursor: pointer; transition: all 0.2s; }
 .kg-lg:hover { border-color: var(--glass-border-hi); color: var(--text2); }
 .kg-lg.on { border-color: var(--hud-cyan); color: #fff; box-shadow: 0 0 10px rgba(34, 211, 238, 0.35); }
 .kg-lg i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .kg-lg-pano { border-style: dashed; }
 .kg-detail { margin-top: 10px; border: 1px solid rgba(34, 211, 238, 0.35); border-radius: 12px; padding: 10px 12px; background: var(--glass-bg); }
 .kg-d-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.kg-d-type { font-size: 13px; font-weight: 800; color: var(--hud-cyan); }
-.kg-d-src { flex: 1; font-size: 11.5px; color: var(--text2); }
-.kg-d-lit { font-size: 10.5px; color: #ffe9b8; border: 1px solid rgba(245, 197, 107, 0.4); border-radius: 999px; padding: 1px 8px; }
-.kg-d-x { border: 0; background: transparent; color: var(--text3); font-size: 14px; cursor: pointer; }
-.kg-d-tip { font-size: 12px; color: var(--text); margin: 6px 0; }
-.kg-d-sec { margin: 6px 0; font-size: 12.5px; color: var(--text2); }
+.kg-d-type { font-size: calc(13px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--hud-cyan); }
+.kg-d-src { flex: 1; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text2); }
+.kg-d-lit { font-size: calc(10.5px * var(--ui-fs-scale, 1)); color: #ffe9b8; border: 1px solid rgba(245, 197, 107, 0.4); border-radius: 999px; padding: 1px 8px; }
+.kg-d-x { border: 0; background: transparent; color: var(--text3); font-size: calc(14px * var(--ui-fs-scale, 1)); cursor: pointer; }
+.kg-d-tip { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text); margin: 6px 0; }
+.kg-d-sec { margin: 6px 0; font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); }
 .kg-d-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
-.kg-d-tag { font-size: 11px; background: rgba(34, 211, 238, 0.1); color: #7dd3fc; border: 1px solid rgba(34, 211, 238, 0.25); padding: 2px 8px; border-radius: 999px; }
+.kg-d-tag { font-size: calc(11px * var(--ui-fs-scale, 1)); background: rgba(34, 211, 238, 0.1); color: #7dd3fc; border: 1px solid rgba(34, 211, 238, 0.25); padding: 2px 8px; border-radius: 999px; }
 .kg-d-tag.danger { background: rgba(251, 113, 133, 0.1); color: #fda4af; border-color: rgba(251, 113, 133, 0.3); }
 .kg-d-ol { margin: 4px 0 0 18px; padding: 0; }
-.kg-d-ex { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 10px; padding: 8px 10px; margin: 8px 0; font-size: 12.5px; }
+.kg-d-ex { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 10px; padding: 8px 10px; margin: 8px 0; font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
 .kg-d-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
-.kg-d-opts span { font-size: 11.5px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); border-radius: 6px; padding: 2px 8px; }
+.kg-d-opts span { font-size: calc(11.5px * var(--ui-fs-scale, 1)); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); border-radius: 6px; padding: 2px 8px; }
 .kg-d-ans { margin-top: 5px; color: #86efac; font-weight: 700; }
 .kg-d-acts { margin-top: 8px; }
 /* 手机/窄屏适配（≤900px）：画布降高给下方详情留空间；图例缩小避免遮挡画布 */
 @media (max-width: 900px) {
   .kg-canvas-wrap { height: 46vh; min-height: 240px; }
   .kg-hd { gap: 6px; }
-  .kg-tip { font-size: 11.5px; }
-  .kg-stat { font-size: 10.5px; }
+  .kg-tip { font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+  .kg-stat { font-size: calc(10.5px * var(--ui-fs-scale, 1)); }
   .kg-legend { left: 6px; bottom: 6px; gap: 4px; max-width: 94%; }
-  .kg-lg { font-size: 9.5px; padding: 2px 6px; }
-  .kg-reset { width: 28px; height: 28px; font-size: 14px; right: 6px; top: 6px; }
-  .kg-tip-float { max-width: 150px; font-size: 11px; }
+  .kg-lg { font-size: calc(9.5px * var(--ui-fs-scale, 1)); padding: 2px 6px; }
+  .kg-reset { width: 28px; height: 28px; font-size: calc(14px * var(--ui-fs-scale, 1)); right: 6px; top: 6px; }
+  .kg-tip-float { max-width: 150px; font-size: calc(11px * var(--ui-fs-scale, 1)); }
   .kg-detail { padding: 8px 10px; }
 }
 </style>

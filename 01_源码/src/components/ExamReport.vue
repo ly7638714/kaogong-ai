@@ -109,11 +109,11 @@ function flagQ(qq) {
           <span class="sr-t">{{ qq.local ? '🎲 ' : qq.anchor ? '📐 ' : qq.zhenti ? '📋 ' : '' }}{{ (qq.subject || '') + ' · ' + (qq.stem || '').slice(0, 46) }}</span>
           <span v-if="marks[i]" class="sr-mine">{{ marks[i].pick ? '我涂 ' + marks[i].pick : (marks[i].blank ? '未答' : '') }} · 答案 {{ qq.answer || '—' }}</span>
           <span class="sr-exp">{{ reviewOpen[i] ? '▾ 收起解析' : '📖 解析' }}</span>
-          <button v-if="marks[i] && !marks[i].ok" class="sr-flag" style="margin-left: 6px; border: none; background: none; cursor: pointer; color: #fbbf24; font-size: 13px" title="认为这题有问题？上报后同类考点自动降权，避免再刷到" @click.stop="flagQ(qq)">⚠️ 疑题</button>
+          <button v-if="marks[i] && !marks[i].ok" class="sr-flag" style="margin-left: 6px; border: none; background: none; cursor: pointer; color: #fbbf24; font-size: calc(13px * var(--ui-fs-scale, 1))" title="认为这题有问题？上报后同类考点自动降权，避免再刷到" @click.stop="flagQ(qq)">⚠️ 疑题</button>
         </div>
         <div v-for="(qq, i) in questions" v-show="reviewOpen[i]" :key="'e' + i" class="sr-detail">
           <div class="sr-ex" v-html="renderMd(qq.explain || qq.analysis || '（暂无解析，可点「💬 发到对话」让 AI 讲解）')"></div>
-          <div style="margin-top: 4px"><button class="btn btn-gh" style="padding: 1px 8px; font-size: 11px" :disabled="qq.designerLoading" @click.stop="openDesigner(qq)">{{ qq.designerLoading ? '🧠 正在生成命题人设计说明…' : (qq.designer ? '🧠 查看命题人设计说明' : '🧠 生成命题人设计说明（出题意图·考察能力·陷阱）') }}</button><span v-if="qq.designer" style="font-size:10px;color:var(--text3);margin-left:6px">由命题视角生成，非解析复述</span></div>
+          <div style="margin-top: 4px"><button class="btn btn-gh" style="padding: 1px 8px; font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="qq.designerLoading" @click.stop="openDesigner(qq)">{{ qq.designerLoading ? '🧠 正在生成命题人设计说明…' : (qq.designer ? '🧠 查看命题人设计说明' : '🧠 生成命题人设计说明（出题意图·考察能力·陷阱）') }}</button><span v-if="qq.designer" style="font-size: calc(10px * var(--ui-fs-scale, 1));color:var(--text3);margin-left:6px">由命题视角生成，非解析复述</span></div>
         </div>
       </div>
     </div>
@@ -122,7 +122,7 @@ function flagQ(qq) {
         <summary>📤 导出整卷（Word / PDF / Markdown / LaTeX / Typst）{{ aiLayout ? ' · ✨ AI排版开' : '' }}</summary>
         <div class="ep-export-row" style="flex-wrap: wrap">
           <span class="ep-export-l">📷 单题截图：</span>
-          <select v-model.number="shotIdx" style="max-width: 180px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: 12px" title="选择要截图的题号">
+          <select v-model.number="shotIdx" style="max-width: 180px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: calc(12px * var(--ui-fs-scale, 1))" title="选择要截图的题号">
             <option v-for="(q, j) in questions" :key="j" :value="j">第 {{ j + 1 }} 题{{ q.subject ? ' · ' + q.subject : '' }}</option>
           </select>
           <button class="btn btn-gh ep-export-b" title="截图当前选中题目：完整题干+选项+作答+解析（与错题本截图一致，整题渲染）" @click="shotQuestion()">📷 截本题（题+解析）</button>
