@@ -2289,7 +2289,8 @@ onUnmounted(() => {
             </div>
             <div class="fld mk-model">
               <label>模型（按发布时间 新→旧 排序）</label>
-              <select v-model="store.cfg.text.model" @change="saveCfg()">
+              <input v-if="store.cfg.text.prov === 'custom'" v-model="store.cfg.text.model" class="mk-cust-in" style="width:100%" placeholder="直接输入中转站/自定义模型名，如 gpt-4o、deepseek-chat" @change="saveCfg()" />
+              <select v-else v-model="store.cfg.text.model" @change="saveCfg()">
                 <option v-for="m in catModels('text')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
               </select>
               <span class="ep-hint">换服务商若原模型不在其清单内，会自动切到该服务商最新模型。</span>
@@ -2352,7 +2353,8 @@ onUnmounted(() => {
             </div>
             <div class="fld mk-model">
               <label>模型（按发布时间 新→旧 排序）</label>
-              <select v-model="store.cfg.vision.model" @change="saveCfg()">
+              <input v-if="store.cfg.vision.prov === 'custom'" v-model="store.cfg.vision.model" class="mk-cust-in" style="width:100%" placeholder="直接输入中转站视觉模型名，如 gpt-4o、qwen-vl-max" @change="saveCfg()" />
+              <select v-else v-model="store.cfg.vision.model" @change="saveCfg()">
                 <option v-for="m in catModels('vision')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
               </select>
               <span class="ep-hint">DeepSeek 用「同一个 DeepSeek Key」，模型自动带 deepseek-v4-flash-vision-exp。</span>
@@ -2403,7 +2405,8 @@ onUnmounted(() => {
             </div>
             <div class="fld mk-model">
               <label>模型（新→旧；选便宜快的文本模型即可）</label>
-              <select v-model="store.cfg.rd.model" @change="saveCfg()">
+              <input v-if="store.cfg.rd.prov === 'custom'" v-model="store.cfg.rd.model" class="mk-cust-in" style="width:100%" placeholder="直接输入中转站模型名" @change="saveCfg()" />
+              <select v-else v-model="store.cfg.rd.model" @change="saveCfg()">
                 <option v-for="m in catModels('rd')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
               </select>
               <span class="ep-hint">讲稿改写对模型要求不高，选该服务商便宜的模型即可省额度（如 DeepSeek-V4-Flash）。</span>
@@ -2457,7 +2460,8 @@ onUnmounted(() => {
             </div>
             <div class="fld mk-model">
               <label>模型（新→旧排序；本地需先 ollama pull）</label>
-              <select v-model="store.cfg.fig.model" @change="saveCfg()">
+              <input v-if="['custom','ollama','lmstudio','jan'].includes(store.cfg.fig.prov)" v-model="store.cfg.fig.model" class="mk-cust-in" style="width:100%" placeholder="直接输入模型名（本地/自定义）" @change="saveCfg()" />
+              <select v-else v-model="store.cfg.fig.model" @change="saveCfg()">
                 <option v-for="m in catModels('fig')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
               </select>
               <span class="ep-hint">Ollama / LM Studio / Jan 本地模型无需 Key，填任意占位即可（如 ollama）。</span>
