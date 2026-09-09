@@ -45,7 +45,7 @@ export function pickGenCfg() {
       return withUrl({ prov: fig.prov || 'zhipu', key: fig.key, url: fig.url, model: fig.model || 'glm-4.6-flash' })
     }
     const fast = String(read(KEY_FAST) || read(KEY_CHAT_FAST) || '').trim()
-    if (fast) return withUrl({ ...c, model: fast })
+    if (fast) return withUrl({ ...c, model: fast, noThink: true })
   } catch (e) {}
   return withUrl(c)
 }

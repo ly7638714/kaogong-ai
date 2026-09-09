@@ -449,18 +449,18 @@ export function buildWrongAnalysis(wq) {
   return s
 }
 
-// ===== 萌宠对话问答：走「文本·非思考」快模型（如 deepseek-chat），秒回 + 真人语音朗读 =====
+// ===== 萌宠对话问答：走「文本·非思考」快模型（如 deepseek-v4-flash），秒回 + 真人语音朗读 =====
 export const petChat = ref([]) // { role:'user'|'pet', text, ts }
 export const petChatBusy = ref(false)
 export const petSpeakReply = ref(true) // 回复是否自动用真人音色朗读
-// 快模型配置：优先用户填的「快模型」；DeepSeek 默认 deepseek-chat；其他去掉思考后缀
+// 快模型配置：优先用户填的「快模型」；DeepSeek 默认 deepseek-v4-flash 非思考；其他去掉思考后缀
 export function petFastCfg() {
   const base = store.cfg.text && store.cfg.text.key ? { ...store.cfg.text } : null
   if (!base) return null
   let fast = ''
   try { fast = String(localStorage.getItem('xc_chat_fast_model') || localStorage.getItem('xc_fast_gen_model') || '').trim() } catch (e) {}
-  if (fast) return { ...base, model: fast }
-  if ((base.prov || '') === 'ds' && /deepseek/i.test(String(base.model || ''))) return { ...base, model: 'deepseek-chat' }
+  if (fast) return { ...base, model: fast, noThink: true }
+  if ((base.prov || '') === 'ds' && /deepseek/i.test(String(base.model || ''))) return { ...base, model: 'deepseek-v4-flash', noThink: true }
   const m = String(base.model || '').replace(/-(thinking|reasoner|r1|v4)(-.*)?$/i, '')
   return m && m !== base.model ? { ...base, model: m } : base
 }

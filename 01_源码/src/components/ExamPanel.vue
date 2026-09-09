@@ -39,7 +39,7 @@ const modules = ref((TEMPLATES.find((t) => t.id === 'gk_ds') || TEMPLATES[0]).mo
 const perQ = ref(60)            // 每题限时（秒），默认 60 秒（≤1分钟）
 const aiCap = ref(0)            // 每板块题量：0=全量（按卷面模板/用户设定），>0=抽样上限（快速）
 const genConcur = ref(3)        // 出卷并发度：并发出题请求数（视模型 API 限流调整）
-const fastGenModel = ref(localStorage.getItem('xc_fast_gen_model') || '') // 出题快模型：填非思考模型名(如 deepseek-chat)，出题/预生成用它提速；留空=跟随文字模型
+const fastGenModel = ref(localStorage.getItem('xc_fast_gen_model') || '') // 出题快模型：填非思考模型名(如 deepseek-v4-flash)，出题/预生成用它提速；留空=跟随文字模型
 watch(fastGenModel, (v) => { try { localStorage.setItem('xc_fast_gen_model', String(v || '').trim()) } catch (e) {} })
 const useFigGen = ref(localStorage.getItem('xc_use_fig_gen') === '1') // 出题用智谱快模型（复用图形增强配置）
 watch(useFigGen, (v) => { try { localStorage.setItem('xc_use_fig_gen', v ? '1' : '0') } catch (e) {} })

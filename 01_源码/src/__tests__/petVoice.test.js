@@ -44,9 +44,10 @@ describe('petFastCfg 萌宠快模型（非思考）', () => {
     fakeLs.removeItem('xc_chat_fast_model'); fakeLs.removeItem('xc_fast_gen_model')
     vi.stubGlobal('localStorage', fakeLs)
   })
-  it('DeepSeek 默认切 deepseek-chat（非思考秒回）', () => {
+  it('DeepSeek 默认切 deepseek-v4-flash 并标记非思考', () => {
     const c = petFastCfg()
-    expect(c.model).toBe('deepseek-chat')
+    expect(c.model).toBe('deepseek-v4-flash')
+    expect(c.noThink).toBe(true)
   })
   it('用户填了快模型时优先使用', () => {
     fakeLs.setItem('xc_chat_fast_model', 'glm-4-flash')

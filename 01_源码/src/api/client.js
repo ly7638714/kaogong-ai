@@ -53,6 +53,25 @@ function hds(c) {
   return h
 }
 
+// DeepSeek 旧模型名已于 2026-07-24 停用：deepseek-chat/reasoner 原分别对应
+// deepseek-v4-flash 的非思考/思考模式。这里做兼容映射，并支持 noThink 快答显式关思考。
+function dsRequest(c) {
+  const m = String((c && c.model) || '').trim()
+  const out = { model: m, thinking: null }
+  if ((c && c.prov) === 'ds') {
+    if (m === 'deepseek-chat') {
+      out.model = 'deepseek-v4-flash'
+      out.thinking = 'disabled'
+    } else if (m === 'deepseek-reasoner') {
+      out.model = 'deepseek-v4-flash'
+      out.thinking = 'enabled'
+    } else if (c.noThink && /deepseek-v4/i.test(m)) {
+      out.thinking = 'disabled'
+    }
+  }
+  return out
+}
+
 // 智能识图路由：发图时决定走哪条通道
 // ① vision=主视觉模型可识图（智谱/通义/OpenAI）→ 直接发图
 // ② fig-read=主视觉不能识图但有「图形增强」视觉模型 → 读图提取文字 → 文字模型作答
@@ -78,8 +97,11 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
   // 推理/思考模型（deepseek-reasoner、deepseek-v4 系列、kimi 等）不支持 temperature，
   // 且「思考过程 + 图片 + 正文」会大量占用 max_tokens：必须给足输出上限并去掉 temperature，
   // 否则思考没写完 max_tokens 就耗尽，正式回答(content)为空（表现为"只出思考过程"）。
-  const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
-  const body = { model: c.model, messages, max_tokens: isReasoner ? 20000 : 10000, stream: true }
+  const ds = dsRequest(c)
+  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
+  const isReasoner = ds.thinking === 'enabled' || (ds.thinking !== 'disabled' && lookReasoner)
+  const body = { model: ds.model, messages, max_tokens: isReasoner ? 20000 : 10000, stream: true }
+  if (ds.thinking) body.thinking = { type: ds.thinking }
   if (!isReasoner) body.temperature = 0.7
   // 超时兜底：无论是否传入外部 signal，内部超时始终生效；用 AbortSignal.any 合并两者
   const _ctrl = new AbortController()
@@ -199,13 +221,16 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
 
 export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000, signal) {
   assertBudget()
-  const isReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(c.model || '')
+  const ds = dsRequest(c)
+  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
+  const isReasoner = ds.thinking === 'enabled' || (ds.thinking !== 'disabled' && lookReasoner)
   const body = {
-    model: c.model,
+    model: ds.model,
     messages,
     max_tokens: isReasoner ? Math.max(maxTokens, 8192) : maxTokens,
     stream: false
   }
+  if (ds.thinking) body.thinking = { type: ds.thinking }
   if (!isReasoner) body.temperature = 0.3
   let lastErr = null
   // 最多 2 次尝试：网络抖动 / 超时 / 空响应自动重试一次

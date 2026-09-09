@@ -40,8 +40,8 @@ export const DEF_PRICES = {
   'deepseek-v4-flash-vision-exp': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash-Vision-Exp 空闲档·缓存未命中 输入1/输出4 元每百万（2026-09-10 起；高峰×2；图片转 token 计费）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4-pro': { in: 0.0045, out: 0.0135, note: 'DeepSeek 官方·V4-Pro 空闲档·缓存未命中 输入4.5/输出13.5 元每百万(高峰×2；缓存命中更低)', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4-flash': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 空闲档·缓存未命中 输入1/输出4 元每百万（2026-09-10 起；高峰×2）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
-  'deepseek-reasoner': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 思考模式(兼容名) 价同 V4-Flash；思考会多产出输出 token', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
-  'deepseek-chat': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash 非思考(兼容名) 价同 V4-Flash', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-reasoner': { in: 0.001, out: 0.004, note: 'DeepSeek 旧兼容名(2026-07-24 已停用)·代码映射到 V4-Flash 思考模式，价同 V4-Flash；思考会多产出输出 token', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
+  'deepseek-chat': { in: 0.001, out: 0.004, note: 'DeepSeek 旧兼容名(2026-07-24 已停用)·代码映射到 V4-Flash 非思考，价同 V4-Flash', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
 
   // ---------- 智谱 GLM（open.bigmodel.cn/pricing 2026-09 核验；取 [32+) 档为默认）----------
   'glm-4.7-flash': { in: 0, out: 0, note: '智谱官方·GLM-4.7-Flash 免费', src: 'https://open.bigmodel.cn/pricing' },

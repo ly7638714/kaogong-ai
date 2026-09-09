@@ -2,6 +2,10 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.265] — 2026-09-09 · DeepSeek 旧名兼容 + 快答真实非思考
+- DeepSeek `deepseek-chat` / `deepseek-reasoner` 旧名已于 2026-07-24 停用；代码加入兼容映射：`deepseek-chat` → `deepseek-v4-flash` 非思考，`deepseek-reasoner` → `deepseek-v4-flash` 思考，避免老配置直接请求旧名报错。
+- 对话快答/萌宠/出题快模型现在会对 DeepSeek V4 发送 `thinking: disabled`，真正进入非思考模式，而不是名义上选 V4-Flash 却仍走思考。
+
 ## [3.8.264] — 2026-09-09 · DeepSeek Flash 系列新定价 + V4.1-Flash 候选模型
 - DeepSeek Flash 系列按 2026-09-10 12:00 起新定价更新默认计价表：空闲档缓存未命中输入 1 元/百万、输出 4 元/百万；缓存命中输入 0.02 元/百万；高峰时段按官方为空闲 2 倍（V4-Pro 未在本次调价范围，保持不变）。
 - 模型注册表加入 `deepseek-v4.1-flash` 可选候选，标注“平台可选后再用”，不改变默认快模型；避免 DeepSeek 尚未对当前 Key 开放时误选。

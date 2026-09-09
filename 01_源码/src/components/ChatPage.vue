@@ -612,7 +612,7 @@ async function runChat() {
   try {
     chatFast = String(localStorage.getItem('xc_chat_fast_model') || localStorage.getItem('xc_fast_gen_model') || '').trim()
     if (chatFast && quickMode.value) {
-      const fastC = { ...replyC, model: chatFast }
+      const fastC = { ...replyC, model: chatFast, noThink: true }
       const fv = supportsVision(fastC)
       if (!curIsImg || !fv) {
         replyC = fastC
@@ -887,7 +887,7 @@ async function drawTutuAnno(msg, q) {
       addMsg({ role: 'assistant', content: '📐 原图标注（重绘+标注，辅助看懂规律）：\n\n```svg\n' + svg + '\n```' })
       showToast('✅ 已补画标注图', 'success')
     } else {
-      showToast('⚠️ 标注图生成失败（模型未输出有效 SVG；可在出卷参数填「出题快模型」如 deepseek-chat 提速画图）', 'error')
+      showToast('⚠️ 标注图生成失败（模型未输出有效 SVG；可在出卷参数填「出题快模型」如 deepseek-v4-flash 提速画图）', 'error')
     }
   } catch (e) {
     showToast('⚠️ 标注图生成失败：' + e.message, 'error')
