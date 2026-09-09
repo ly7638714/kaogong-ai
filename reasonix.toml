@@ -1,5 +1,0 @@
-[permissions]
-allow = []
-
-[sandbox]
-allow_write = ["${HOME}/AppData/Local/Temp"]
