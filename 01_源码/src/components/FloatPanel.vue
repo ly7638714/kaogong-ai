@@ -11,6 +11,7 @@ import AccumOverview from './AccumOverview.vue' // v3.8.191 顶部概览子组�
 import AccumToolbar from './AccumToolbar.vue' // v3.8.191 工具区子组件
 import AccumContent from './AccumContent.vue' // v3.8.191 正文学习区
 import AccumDialogs from './AccumDialogs.vue' // v3.8.191 详解/记忆库/笔记区
+import AccGame from './AccGame.vue'
 import { CHANGSHI, SHIZHENG, CHENGYU, SHICI, YUFEN_CHENGYU, YUFEN_SHICI, skillMemCS, skillMemZZ } from '../data/memoryPools' // v3.8.188 数据池单源
 const { run: aiRun } = useAi()
 
@@ -21,6 +22,7 @@ const SZCATS = ['理论会议', '政策经济', '科技民生', '贵州地方']
 
 // ===== 状态 =====
 const cat = ref('常识')
+const gameShow = ref(false)
 // 批次7·S6：技能矩阵记忆词条接入积累池（常识12条+政治10条）
 const cur = ref('')
 const curRegion = ref('全部') // 时政地区筛选：全部/国内/贵州
@@ -751,6 +753,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
       <div class="acc-head">
         <div class="acc-title-row">
           <span class="acc-title">🗂️ 常识 · 时政积累</span>
+          <button class="fp-b" style="border-color:rgba(34,211,238,.45);color:var(--hud-cyan)" @click="gameShow = true">🎮 记忆闯关</button>
           <button class="fp-b gold" @click="memShow = true">📦 记忆库（{{ store.myMem.length }}）</button>
         </div>
         <AccumOverview :guide-show="guideShow" :due-count-all="dueCountAll" :today-reviewed="todayReviewed" :acc-stats="accStats" :today-goal-pct="todayGoalPct" :srs-stages="srsStages" :srs-int="SRS_INT" :daily-goal="DAILY_GOAL" @close-guide="closeGuide()" @start-study="startStudy()" />
@@ -758,6 +761,7 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
     <AccumToolbar :ctx="fpctx" />
     <AccumContent :ctx="fpctx" />
     <AccumDialogs :ctx="fpctx" />
+    <AccGame v-if="gameShow" @close="gameShow = false" />
     </div>
     </div>
     <!-- 我的导入笔记（Obsidian/Markdown） -->
