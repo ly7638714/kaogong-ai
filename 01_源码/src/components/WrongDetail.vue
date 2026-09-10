@@ -8,6 +8,7 @@ import { retrieveCardsV2 } from '../kb/retrieveV2' // R5 关联知识卡（只�
 import { markLearned } from '../utils/learned'
 import { loadSrs, saveSrs, enqueueNew, ymdKey } from '../utils/memorySrs' // R5 二期：一键入记忆
 import { showToast } from '../utils/toast' // R5 标记已学
+import { absorbState } from '../utils/wrongAbsorb'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -57,6 +58,10 @@ const {
 
 // R5：按本题考点检索关联方法卡（≤3），可在详情内展开 / 标记已学 / 跳知识库
 const kbOpen = ref(false)
+const absorb = computed(() => {
+  const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
+  return absorbState(q)
+})
 const kbCards = computed(() => {
   try {
     const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
@@ -179,6 +184,28 @@ function capWrongExplain() {
             <span class="wq-goto" title="主动回忆复盘：先默写考点/思路再展开解析（计入二刷统计）" @click.self.stop="openRecall(store.wqs[cur])">🧠 主动回忆</span>
             <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>
             <span class="wq-goto" @click.self.stop="ankiPush()">🃏 推到 Anki</span>
+          </div>
+          <div class="absorb-card" :class="{ ok: absorb.score >= 85, warn: absorb.score < 40 }">
+            <div class="absorb-hd">
+              <b>🧠 彻底吃透 {{ absorb.score }}%</b>
+              <span class="absorb-lv">{{ absorb.level }}</span>
+              <span class="cr-tip">六维证据：答案 / 错因 / 考点 / 方法 / 变式 / 复习</span>
+            </div>
+            <div class="absorb-bar"><i :style="{ width: absorb.score + '%' }"></i></div>
+            <div class="absorb-steps">
+              <span v-for="s in absorb.steps" :key="s.k" :class="{ done: s.done }">{{ s.done ? '✓' : '○' }} {{ s.label }}</span>
+            </div>
+            <div v-if="absorb.next" class="absorb-next">
+              下一步：<b>{{ absorb.next.tip }}</b>
+              <button v-if="['answer','reason','core','method'].includes(absorb.next.k)" class="btn btn-pri" @click="rep = true">去补全</button>
+              <button v-else-if="absorb.next.k === 'variant'" class="btn btn-pri" :disabled="vtBusy" @click="startVariant()">做变式</button>
+              <button v-else class="btn btn-pri" @click="openRedo()">去二刷</button>
+            </div>
+            <div v-else class="absorb-next done">这道题的证据链已完整，继续保持间隔复习即可。</div>
+            <div v-if="store.wqs[cur].absorb && (store.wqs[cur].absorb.kp || store.wqs[cur].absorb.fix)" class="absorb-core">
+              <div v-if="store.wqs[cur].absorb.kp"><b>考点：</b>{{ store.wqs[cur].absorb.kp }}</div>
+              <div v-if="store.wqs[cur].absorb.fix"><b>一句话修正：</b>{{ store.wqs[cur].absorb.fix }}</div>
+            </div>
           </div>
           <!-- 原题截图 -->
           <div v-if="(store.wqs[cur].imgs || []).length" class="wq-imgs">
@@ -350,6 +377,24 @@ function capWrongExplain() {
           </div>
         </div>
 </template>
+<style scoped>
+.absorb-card { margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); }
+.absorb-card.ok { border-color: rgba(52, 211, 153, 0.45); }
+.absorb-card.warn { border-color: rgba(251, 113, 133, 0.4); }
+.absorb-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.absorb-lv { font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--accent); }
+.absorb-card.ok .absorb-lv { color: #34d399; }
+.absorb-card.warn .absorb-lv { color: #fb7185; }
+.absorb-bar { height: 6px; border-radius: 4px; background: rgba(127, 127, 127, 0.18); overflow: hidden; margin: 7px 0; }
+.absorb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #fb7185, #fbbf24, #34d399); }
+.absorb-steps { display: flex; gap: 5px; flex-wrap: wrap; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); }
+.absorb-steps span { border: 1px solid var(--glass-border); border-radius: 14px; padding: 2px 7px; }
+.absorb-steps span.done { color: #34d399; border-color: rgba(52, 211, 153, 0.42); }
+.absorb-next { margin-top: 7px; font-size: calc(12px * var(--ui-fs-scale, 1)); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.absorb-next .btn { padding: 3px 10px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+.absorb-next.done { color: #34d399; }
+.absorb-core { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--glass-border); font-size: calc(12.5px * var(--ui-fs-scale, 1)); line-height: 1.7; }
+</style>
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="show = false">关闭</button>
           <button class="btn btn-gh" @click="del()">🗑 删除</button>

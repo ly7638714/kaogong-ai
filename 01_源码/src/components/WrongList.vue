@@ -5,6 +5,7 @@ import { toRefs, computed, watch, ref } from 'vue'
 import { WRONG_GROUPS as TAX, canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, typeOrderOfSub, CANON_TYPE_ORDER, groupLabelOf } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
 import { richMd } from '../utils/wrongText' // 错题渲染净化（字面换行/空svg围栏修复后再渲染）
 import { reviewHealth } from '../utils/reviewHealth' // 复盘健康分（深化）
+import { absorbSummary } from '../utils/wrongAbsorb'
 const dueOf = (q) => !!(q && q.digested && q.dueAt && q.dueAt <= Date.now())
 const repOf = (q) => { const rs = (q && q.reviewStats) || {}; return { r: rs.r || 0, e: rs.e || 0 } }
 
@@ -19,6 +20,7 @@ const {
   fSubj,
   jumpN,
   kw,
+  absorbOf1,
   pageN,
   reasonList,
   shown,
@@ -49,6 +51,7 @@ function toggleItemReasons(q) {
 }
 // ===== 板块→细分→题型（v3.8.207 归一：与 AI出题/题型库同一套 canonical）=====
 const allWqs = () => (props.ctx.store && props.ctx.store.wqs) || []
+const absorbStat = computed(() => absorbSummary(allWqs()))
 // 细分下拉：只列“真细分”（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治），组名不再混入
 const groupSubs = computed(() => {
   const list = []
@@ -191,8 +194,9 @@ function dueTipLater() {
           <option value="time">⏱ 最新优先</option>
           <option value="wrong">💢 错得多优先</option>
           <option value="mastery">🎯 掌握低优先</option>
+          <option value="absorb">🧠 吸收度低优先</option>
         </select>
-        <span class="wq-count">筛选后 <b>{{ shownTotal }}</b> / {{ stats.t }} 题</span>
+        <span class="wq-count">筛选后 <b>{{ shownTotal }}</b> / {{ stats.t }} 题 · 平均吸收 <b>{{ absorbStat.avg }}%</b> · 待吃透 {{ absorbStat.weak }}</span>
         <div class="wq-jump">
           <input v-model="jumpN" inputmode="numeric" placeholder="跳转序号" />
           <button class="btn btn-gh" style="padding: 6px 10px" @click="jumpTo()">跳转</button>
@@ -232,6 +236,7 @@ function dueTipLater() {
             <span class="ws">{{ wrongSubOf(q) || '未分类' }}</span>
             <span class="rv" :class="{ ok: q.reviewed }">{{ q.reviewed ? '✅ 已复盘' : '⏳ 待复盘' }}</span>
             <span class="ms" :class="{ dig: q.digested }">{{ q.digested ? (dueOf(q) ? '🔔 到期' : '✅ 已消化') : '掌握 ' + masteryOf(q) + '%' }}</span>
+            <span class="as" :class="{ ok: absorbOf1(q).score >= 85, warn: absorbOf1(q).score < 40 }">吸收 {{ absorbOf1(q).score }}%</span>
             <span v-if="repOf(q).r" class="rw" :class="{ bad: repOf(q).e > 0 }">{{ repOf(q).e ? '复错 ' + repOf(q).e + '/' + repOf(q).r : '复做 ' + repOf(q).r }}</span>
           </div>
           <div v-if="(q.imgs || []).length" class="wq-thumb">
@@ -264,4 +269,7 @@ function dueTipLater() {
 .rr-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
 .wr > span { max-width: min(100%, 620px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wr-toggle { border: 1px dashed var(--glass-border); background: transparent; color: var(--accent); border-radius: 12px; padding: 1px 7px; font: inherit; cursor: pointer; }
+.as { color: var(--accent); font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; }
+.as.ok { color: #34d399; }
+.as.warn { color: #fb7185; }
 </style>

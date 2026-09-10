@@ -14,6 +14,7 @@ import { mountCharts } from '../utils/chartMount' // 统计图(ECharts)：错题
 import { cleanTextKeepFigures } from '../utils/wrongText'
 import { scheduleAfter } from '../utils/reviewSchedule' // R1/R2 复习调度与复错
 import { questionMastery } from '../utils/mastery' // R3 evidence-based 单题掌握度
+import { absorbState } from '../utils/wrongAbsorb' // 错题吸收度闭环
 import { reasonProfile, wqsOfReason } from '../utils/reasonProfile' // R4 错因画像
 import { canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, CANON_TYPE_ORDER } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
 import { genTutuQuestion } from '../utils/tutuGen' // 图推缺失图形时的本地确定性重建
@@ -264,6 +265,7 @@ const filtered = computed(() => {
   })
   if (sortBy.value === 'wrong') list = list.slice().sort((a, b) => (b.wrongCount || 1) - (a.wrongCount || 1))
   else if (sortBy.value === 'mastery') list = list.slice().sort((a, b) => masteryOf(a) - masteryOf(b))
+  else if (sortBy.value === 'absorb') list = list.slice().sort((a, b) => absorbState(a).score - absorbState(b).score)
   else list = list.slice().sort((a, b) => (b.at || 0) - (a.at || 0))
   return list
 })
@@ -555,6 +557,9 @@ function submitByChoice(k) {
 }
 function masteryOf(q) {
   return questionMastery(q)
+}
+function absorbOf1(q) {
+  return absorbState(q)
 }
 function redoFeedback(q) {
   if (!q) return ''
@@ -959,6 +964,12 @@ function vtSubmit() {
   if (unanswered) { showToast('还有 ' + unanswered + ' 题未作答，请全部做完再提交答题卡', 'info'); return }
   vtScore.value = vtQueue.value.reduce((s, _q, i) => s + (vtResultOf(i) === 'ok' ? 1 : 0), 0)
   vtMode.value = 'result'
+  const base = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (base) {
+    base.variantStats = { total: vtQueue.value.length, ok: vtScore.value, at: Date.now() }
+    base.mastery = questionMastery(base)
+    saveWqs()
+  }
 }
 function vtToggleOpen(i) { vtOpen.value[i] = !vtOpen.value[i] }
 function vtClose() {
@@ -1062,6 +1073,21 @@ async function askCoreDeep() {
       return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '【题目】' + stem + '\n\n板块要点参考：' + tpl.points.join('；') + (mine ? '\n\n【本题个人复盘】' + mine : '') }], maxTokensFor(c, 1800), 90000)
     }, { label: 'AI 深度剖析' })
     coreAiText.value = out || localSkeletonFallback(q, tpl)
+    const text = String(coreAiText.value || '')
+    const pick = (re) => {
+      const m = text.match(re)
+      return m ? String(m[1] || '').trim().slice(0, 800) : ''
+    }
+    q.absorb = Object.assign({}, q.absorb || {}, {
+      kp: pick(/(?:【考点】|考点\s*[:：])\s*([^\n]+)/i),
+      skeleton: pick(/(?:【骨架(?:\/结构)?】|骨架\s*[:：])\s*([\s\S]*?)(?=\n\s*(?:【|$))/i),
+      trap: pick(/(?:【[^】]*陷阱[^】]*】|陷阱\s*[:：])\s*([\s\S]*?)(?=\n\s*(?:【|$))/i),
+      fix: pick(/(?:【一句话记忆锚点】|记忆锚点\s*[:：])\s*([^\n]+)/i),
+      text: text.slice(0, 3000),
+      at: Date.now()
+    })
+    q.mastery = questionMastery(q)
+    saveWqs()
   } finally {
     coreAiBusy.value = false
   }
@@ -1385,7 +1411,7 @@ const wrongCtx = reactive({
   downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
-  masteryOf, md, openCards, openIdx, openRedo, openRelated,
+  masteryOf, absorbOf1, md, openCards, openIdx, openRedo, openRelated,
   openRename, origStem, pageN, paperView, presetBoxOpen, presetReasons,
   qcPapers, qcQuiz, reasonBoxOpen, reasonList, reasonModal, redo,
   redoAnswer, redoChoices, redoFeedback, redoHasChoice, redoHistory, redoPaper,
