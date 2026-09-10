@@ -136,10 +136,11 @@ const stats = computed(() => {
   const t = store.wqs.length
   const r = store.wqs.filter((q) => q.reviewed).length
   const due = store.wqs.filter((q) => q.digested && q.dueAt && q.dueAt <= Date.now()).length
+  const arch = store.wqs.filter((q) => q.archived).length
   let rr = 0,
     ee = 0
   store.wqs.forEach((q) => { const rs = q.reviewStats || {}; if (rs.r) { rr += rs.r; ee += rs.e || 0 } })
-  return { t, rev: r, pend: t - r, due, rep: { r: rr, e: ee } }
+  return { t, rev: r, pend: t - r, due, arch, rep: { r: rr, e: ee } }
 })
 // ===== 板块→细分→题型 归一（v3.8.207）=====
 // 细分板块 = 真细分（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治）；
@@ -247,6 +248,9 @@ const PAGE = 20
 const pageN = ref(1)
 const filtered = computed(() => {
   let list = store.wqs.filter((q) => {
+    if (fState.value === 'arch') {
+      if (!q.archived) return false
+    } else if (q.archived) return false
     if (fSubj.value && wrongSubOf(q) !== fSubj.value) return false
     if (!fSubj.value && fGroup.value && canonicalGroupOf(q) !== fGroup.value) return false
     if (fRev.value === 'rev' && !q.reviewed) return false
@@ -280,6 +284,39 @@ function jumpTo() {
   jumpN.value = ''
 }
 function resetFilters() { fGroup.value = ''; fSubj.value = ''; fRev.value = 'all'; fReason.value = ''; fSub.value = ''; kw.value = ''; sortBy.value = 'time'; pageN.value = 1 }
+// 吃透收藏夹：归档后从当前错题列表隐藏，可随时移回继续学习
+function archiveWrong(q) {
+  if (!q) return
+  q._archivePrev = {
+    digested: !!q.digested,
+    digestLvl: Number(q.digestLvl) || 0,
+    dueAt: q.dueAt || null,
+    reviewed: !!q.reviewed,
+    mastery: Number(q.mastery) || 0
+  }
+  q.archived = true
+  q.archivedAt = Date.now()
+  q.reviewed = true
+  q.digested = true
+  q.dueAt = null
+  q.mastery = 100
+  saveWqs()
+  showToast('📦 已移入吃透收藏夹，可从「吃透收藏」中移回', 'success')
+}
+function unarchiveWrong(q) {
+  if (!q) return
+  const prev = q._archivePrev || {}
+  q.archived = false
+  q.archivedAt = 0
+  q.reviewed = !!prev.reviewed
+  q.digested = !!prev.digested
+  q.digestLvl = Number(prev.digestLvl) || 0
+  q.dueAt = prev.dueAt || null
+  q.mastery = Number(prev.mastery) || 0
+  q._archivePrev = null
+  saveWqs()
+  showToast('↩ 已移回错题集，继续学习', 'success')
+}
 // 一键去重：完全相同的错题只保留一道
 function dedupeNow() {
   const n = dedupeWrongs()
@@ -1442,7 +1479,7 @@ const wrongCtx = reactive({
   redoAnswer, redoChoices, redoFeedback, redoHasChoice, redoHistory, redoPaper,
   redoPick, redoQ, redoQuizCol, redoResult, redoT, relatedQs,
   removeReason, renameInput, rep, resetFilters, repairFig, reviewGaps, save,
-  setTypeFilter, show, shown, shownTotal, sortBy, startVariant, stats,
+  setTypeFilter, show, shown, shownTotal, sortBy, startVariant, stats, archiveWrong, unarchiveWrong,
   store, subjList, WRONG_GROUPS, submitByChoice, submitRedo, todayFocus, toggleReason,
   typeStats, vaultOpen, viewImg, vtAddWrong, vtAllWrong, vtAnswers, vtBusy,
   vtChoose, vtClose, vtCmpBusy, vtCmpText, vtCount, vtDeepCompare,

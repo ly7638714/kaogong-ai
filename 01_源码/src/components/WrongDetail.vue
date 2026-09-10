@@ -101,6 +101,8 @@ const {
   gotoChat,
   gotoDeepChat,
   gotoWrongExam,
+  archiveWrong,
+  unarchiveWrong,
   openRecall,
   openRedo,
   wrongSubOf,
@@ -184,6 +186,8 @@ function capWrongExplain() {
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
             <span class="wq-goto" title="带着本题去对话页，让 AI 按考点、骨架、陷阱、修正、变式深挖" @click.self.stop="gotoDeepChat()">💬 带去对话深挖</span>
             <span class="wq-goto" title="进入错题集组卷；本场作答结果会自动写回原错题吸收度" @click.self.stop="gotoWrongExam()">🎲 去 AI 出题练</span>
+            <span v-if="store.wqs[cur].archived" class="wq-goto" title="移回错题集继续学习" @click.self.stop="unarchiveWrong(store.wqs[cur])">↩ 移回错题集</span>
+            <span v-else class="wq-goto" title="彻底吃透后移出错题集，放入单独收藏夹" @click.self.stop="archiveWrong(store.wqs[cur])">📦 吃透收藏</span>
             <span class="wq-goto" title="以答题界面（可作答+即时判题）重做本题" @click.self.stop="openRedo()">✍️ 答题界面重做</span>
             <span class="wq-goto" title="主动回忆复盘：先默写考点/思路再展开解析（计入二刷统计）" @click.self.stop="openRecall(store.wqs[cur])">🧠 主动回忆</span>
             <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>

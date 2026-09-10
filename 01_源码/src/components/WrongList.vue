@@ -14,6 +14,7 @@ const props = defineProps({ ctx: { type: Object, required: true } })
 
 const {
   cur,
+  fGroup,
   fReason,
   fRev,
   fState,
@@ -82,7 +83,7 @@ watch(fSubj, (v) => {
 
 const {
   PAGE,
-  fGroup, WRONG_GROUPS,
+  WRONG_GROUPS,
   dedupeNow,
   jumpTo,
   loadMore,
@@ -98,7 +99,9 @@ const {
   openBatchReview,
   openRecall,
   startReasonPractice,
-  wrongSubOf
+  wrongSubOf,
+  archiveWrong,
+  unarchiveWrong
 } = props.ctx
 // 复盘健康分（本地轻量计算，无副作用）
 const health = computed(() => {
@@ -175,7 +178,9 @@ function dueTipLater() {
           <option value="undig">⏳ 待消化</option>
           <option value="due">🔔 到期复习</option>
           <option value="dig">✅ 已消化</option>
+          <option value="arch">📦 吃透收藏（{{ stats.arch || 0 }}）</option>
         </select>
+        <button class="btn" :class="fState === 'arch' ? 'btn-pri' : 'btn-gh'" style="padding:6px 10px" @click="fState = fState === 'arch' ? 'all' : 'arch'; pageN = 1">📦 吃透收藏 {{ stats.arch || 0 }}</button>
         <select v-model="fReason">
           <option value="">全部错因</option>
           <option v-for="r in reasonList" :key="r" :value="r">{{ r }}</option>
@@ -209,6 +214,7 @@ function dueTipLater() {
           </span>
         </div>
       </div>
+      <div v-if="fState === 'arch'" class="wq-archive-note">📦 吃透收藏夹：这里只显示你认为已彻底吃透、暂时移出错题集的题目。点题目可查看详情，点「移回错题集」即可继续学习。</div>
       <div class="wl">
         <div v-if="!store.wqs.length" class="empty">
           <div class="empty-i">📋</div>
@@ -243,6 +249,8 @@ function dueTipLater() {
             <span v-if="q.wrongCount && q.wrongCount > 1" class="wtm">错 {{ q.wrongCount }} 次</span>
             <button class="redo-mini" @click.stop="cur = store.wqs.indexOf(q); openRedo()">✍️ 二刷</button>
             <button class="redo-mini" title="主动回忆复盘：先默写考点/思路，再展开解析自评" @click.stop="openRecall(q)">🧠 回忆</button>
+            <button v-if="q.archived" class="redo-mini" title="移回错题集继续学习" @click.stop="unarchiveWrong(q)">↩ 移回错题集</button>
+            <button v-else class="redo-mini" title="认为已彻底吃透：移出错题集并放入单独收藏夹" @click.stop="archiveWrong(q)">📦 吃透收藏</button>
           </div>
         </div>
         <div v-if="shownTotal > shown.length" class="wq-more">
@@ -262,4 +270,5 @@ function dueTipLater() {
 .as { color: var(--accent); font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; }
 .as.ok { color: #34d399; }
 .as.warn { color: #fb7185; }
+.wq-archive-note { margin: 8px 0; padding: 8px 10px; border-radius: 8px; border: 1px dashed rgba(52,211,153,.45); background: rgba(52,211,153,.07); color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.7; }
 </style>
