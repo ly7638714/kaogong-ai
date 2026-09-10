@@ -51,7 +51,7 @@ const {
     <!-- 词条详解（成语/实词） -->
     <div v-if="detailShow && detailItem" class="ov show" @click.self="detailShow = false">
       <div class="pnl idiom-pnl">
-        <h3>📖 {{ detailItem.t }} <span class="id-tag">{{ detailItem.cat }}</span><span v-if="detailItem.src" class="src-badge" :class="detailItem.src === '雨菲800词' ? 'yf' : 'bt'">{{ detailItem.src === '雨菲800词' ? '🟣 雨菲800词' : '🟠 半月谈' }}</span></h3>
+        <h3>📖 {{ detailItem.t }} <span class="id-tag">{{ detailItem.cat }}</span><span v-if="detailItem.src" class="src-badge" :class="detailItem.src === '雨菲800词' ? 'yf' : 'bt'">{{ detailItem.src === '雨菲800词' ? '🟣 雨菲800词' : '🟠 半月谈' }}</span><span v-if="detailItem.verified" class="id-tag">✅ 已校订</span></h3>
         <div class="id-row"><b>释义</b><span>{{ detailItem.yishi || '—' }}</span></div>
         <div v-if="detailItem.jy" class="id-row"><b>近义</b><span>{{ detailItem.jy }}</span></div>
         <div v-if="detailItem.fy" class="id-row"><b>反义</b><span>{{ detailItem.fy }}</span></div>

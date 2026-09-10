@@ -36,6 +36,7 @@ function closeGame() {
   gameStats.value = loadGameStats()
   gameWrongN.value = loadGameWrong().length
 }
+const safeLex = (list) => (Array.isArray(list) ? list.filter((x) => x && x.verified !== false) : [])
 // 批次7·S6：技能矩阵记忆词条接入积累池（常识12条+政治10条）
 const cur = ref('')
 const curRegion = ref('全部') // 时政地区筛选：全部/国内/贵州
@@ -64,9 +65,9 @@ function pool(c) {
     const mine = myMem.value.filter((x) => x.type === '时政').map((x) => ({ t: x.text, date: '', region: '我的', cat: '我的' }))
     list = shizhengAvailable().concat(skillMemZZ).concat(mine)
   } else if (c === '成语') {
-    list = CHENGYU.concat(YUFEN_CHENGYU).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
+    list = safeLex(CHENGYU.concat(YUFEN_CHENGYU)).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
   } else if (c === '实词') {
-    list = SHICI.concat(YUFEN_SHICI).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
+    list = safeLex(SHICI.concat(YUFEN_SHICI)).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
   } else {
     const mine = myMem.value.filter((x) => x.type === '常识').map((x) => ({ t: x.text, cat: '我的' }))
     list = CHANGSHI.concat(skillMemCS).concat(mine)
@@ -376,8 +377,8 @@ const curCats = computed(() => {
 // ===== 词库来源引导（雨菲800词 + 易混词B5 融合后的可发现性）=====
 // 基线池：不套 fCat/kw 过滤，仅用于统计各分类条数，让用户直观看到新增规模
 function basePool(c) {
-  if (c === '成语') return CHENGYU.concat(YUFEN_CHENGYU).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
-  if (c === '实词') return SHICI.concat(YUFEN_SHICI).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
+  if (c === '成语') return safeLex(CHENGYU.concat(YUFEN_CHENGYU)).concat(myMem.value.filter((x) => x.type === '成语').map((x) => ({ t: x.text, cat: '我的' })))
+  if (c === '实词') return safeLex(SHICI.concat(YUFEN_SHICI)).concat(myMem.value.filter((x) => x.type === '实词').map((x) => ({ t: x.text, cat: '我的' })))
   return pool(c)
 }
 // 来源统计：让用户直观看到三个词库各自贡献多少条（尤其易混分类）
@@ -385,7 +386,7 @@ const srcStats = computed(() => {
   if (!isLex.value) return null
   const all = basePool(cat.value)
   const by = (s) => all.filter((x) => x.src === s).length
-  return { 内置: all.filter((x) => !x.src).length, '雨菲800词': by('雨菲800词'), '半月谈': by('半月谈') }
+  return { 内置: all.filter((x) => !x.src).length, '雨菲800词': by('雨菲800词'), '半月谈': by('半月谈'), 校订: all.filter((x) => x.verified).length, 待复核: all.filter((x) => x.verified === false).length }
 })
 const isLex = computed(() => cat.value === '成语' || cat.value === '实词')
 const catTotal = computed(() => (isLex.value ? basePool(cat.value).length : 0))
@@ -766,15 +767,15 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
       <div class="acc-head">
         <div class="acc-title-row">
           <span class="acc-title">🗂️ 常识 · 时政积累</span>
-          <button class="fp-b" style="border-color:rgba(34,211,238,.45);color:var(--hud-cyan)" @click="openGame()">🎮 记忆闯关</button>
+          <button class="fp-b" style="border-color:rgba(34,211,238,.45);color:var(--hud-cyan)" @click="openGame()">🧪 记忆训练营</button>
           <button class="fp-b gold" @click="memShow = true">📦 记忆库（{{ store.myMem.length }}）</button>
         </div>
         <div class="acc-game-hero">
           <div class="agh-main">
             <div class="agh-icon">🎮</div>
             <div>
-              <div class="agh-t">今日记忆闯关</div>
-              <div class="agh-d">看词选义、看义选词、语境填空、Boss 混合战。答对答错自动进入 SRS 复习计划。</div>
+              <div class="agh-t">今日记忆闭环</div>
+              <div class="agh-d">主动回忆 → 反向提取 → 易混辨析 → 情境应用；错题会用另一种题型回炉，结果自动进入 SRS 复习计划。</div>
             </div>
           </div>
           <div class="agh-stats">

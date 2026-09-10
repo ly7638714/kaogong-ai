@@ -69,19 +69,19 @@ const {
     </div>
     <!-- 词条来源说明条（常驻，可关闭；讲清雨菲800词 / 半月谈 角标含义） -->
     <div v-if="isLex && !srcTipOff" class="fp-srctip">
-      <span>📚 词条来源：<b class="st-b yf">🟣 雨菲800词</b> 与 <b class="st-b bt">🟠 半月谈</b> 已并入易混词辨析；带角标的即来自对应词库。<template v-if="srcStats">（本类共 {{ catTotal }} 条：内置 {{ srcStats.内置 }} · 雨菲 {{ srcStats['雨菲800词'] }} · 半月谈 {{ srcStats['半月谈'] }}）</template></span>
+      <span>📚 词条来源：<b class="st-b yf">🟣 雨菲800词</b> 与 <b class="st-b bt">🟠 半月谈</b> 已做词典 + AI 校订，原始扫描残片不会直接展示。<template v-if="srcStats">（本类共 {{ catTotal }} 条：已校订 {{ srcStats['校订'] }}<template v-if="srcStats['待复核']"> · 待复核 {{ srcStats['待复核'] }}</template>）</template></span>
       <button class="st-x" @click="dismissSrcTip()">✕</button>
     </div>
     <!-- 首次进入引导（一次性，切到成语/实词才出现；教用户怎么用易混辨析） -->
     <div v-if="isLex && lexGuide" class="fp-lexguide">
       <div class="lg-card">
         <div class="lg-h">🎓 易混词辨析 · 新词库上线</div>
-        <p>本次为你接入两大词库，已自动并入「易混」分类：</p>
+        <p>本次为你接入两大词库，并完成逐条校订，已自动并入「易混」分类：</p>
         <ul>
           <li><b class="st-b yf">🟣 雨菲800词</b>：公考高频实词/成语主书（原《雨菲言语·27言语带背800词》），高频常考词。</li>
           <li><b class="st-b bt">🟠 半月谈</b>：易混词专项（原《言语理解易混词B5》），带双向辨析，专攻克易混点。</li>
         </ul>
-        <p class="lg-how">👉 用法：点下方 <b>「📖 详解/辨析」</b> 看 <b>逻辑填空用法</b>（含易混对象）；切到 <b>「易混」</b> 分类可集中刷易混对。</p>
+        <p class="lg-how">👉 用法：点下方 <b>「📖 详解/辨析」</b> 看 <b>释义与易混对象</b>；到 <b>「🎮 记忆闯关」</b> 用主动回忆、交错辨析和错误回炉把词真正记住。</p>
         <div class="lg-btns">
           <button class="btn btn-gh" @click="closeLexGuide()">稍后看</button>
           <button class="btn btn-pri" @click="tryYihun()">⚡ 一键去刷易混词</button>

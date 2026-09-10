@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { buildDeck, GAME_SUBJECTS, GAME_LEVELS, GAME_MODES, loadGameWrong, saveGameWrong, loadGameStats, saveGameStats } from '../utils/accGame'
+import { buildDeck, makeQuestion, poolForSubject, GAME_SUBJECTS, GAME_LEVELS, GAME_MODES, loadGameWrong, saveGameWrong, loadGameStats, saveGameStats } from '../utils/accGame'
 import { loadSrs, saveSrs, rememberOne, ymdKey } from '../utils/memorySrs'
 import { addPoints as petAddPoints } from '../utils/pet'
 import { showToast } from '../utils/toast'
@@ -8,11 +8,12 @@ import { showToast } from '../utils/toast'
 const emit = defineEmits(['close'])
 const screen = ref('start')
 const subject = ref('all')
-const mode = ref('level')
+const mode = ref('camp')
 const level = ref(1)
 const deck = ref([])
 const idx = ref(0)
 const picked = ref('')
+const revealed = ref(false)
 const correctN = ref(0)
 const wrongN = ref(0)
 const score = ref(0)
@@ -21,6 +22,8 @@ const maxCombo = ref(0)
 const hearts = ref(3)
 const elapsed = ref(0)
 const result = ref(null)
+const retryN = ref(0)
+const retryFixed = ref(0)
 const mistakeTerms = ref(loadGameWrong())
 const stats = ref(loadGameStats())
 let timer = null
@@ -28,46 +31,90 @@ let autoNextTimer = null
 const TOTAL_SECONDS = 60
 
 const current = computed(() => deck.value[idx.value] || null)
-const progressPct = computed(() => (deck.value.length ? Math.round((idx.value / deck.value.length) * 100) : 0))
+const progressPct = computed(() => (deck.value.length ? Math.round(((idx.value + 1) / deck.value.length) * 100) : 0))
 const remainSec = computed(() => Math.max(0, TOTAL_SECONDS - elapsed.value))
 const levelName = computed(() => (GAME_LEVELS.find((x) => x.k === level.value) || GAME_LEVELS[0]).t)
+const isFlash = computed(() => current.value && current.value.type === 'flash')
 
 function clearTimer() {
-  if (timer) { clearInterval(timer); timer = null }
-  if (autoNextTimer) { clearTimeout(autoNextTimer); autoNextTimer = null }
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+  if (autoNextTimer) {
+    clearTimeout(autoNextTimer)
+    autoNextTimer = null
+  }
+}
+function dueTermsForCurrentSubject() {
+  const srs = loadSrs()
+  const today = ymdKey()
+  return Object.keys(srs)
+    .filter((key) => srs[key] && (!srs[key].due || srs[key].due <= today))
+    .map((key) => key.slice(key.lastIndexOf('|') + 1))
 }
 function start() {
-  const n = mode.value === 'rapid' ? 80 : mode.value === 'wrong' ? Math.max(6, Math.min(20, mistakeTerms.value.length || 8)) : 10
-  const lv = mode.value === 'rapid' || mode.value === 'wrong' ? 4 : level.value
-  const d = buildDeck(subject.value, lv, n, { wrongTerms: mode.value === 'wrong' ? mistakeTerms.value : [] })
-  if (!d.length) { showToast('当前分类词条不足，先换一个分类试试', 'info'); return }
+  const isRapid = mode.value === 'rapid'
+  const isWrong = mode.value === 'wrong'
+  const isSrs = mode.value === 'srs'
+  const isCamp = mode.value === 'camp'
+  const n = isRapid ? 80 : isWrong ? Math.max(6, Math.min(20, mistakeTerms.value.length || 8)) : isCamp ? 20 : 10
+  let lv = isRapid || isWrong || isSrs ? 4 : level.value
+  let forceType = ''
+  if (isCamp) lv = 'camp'
+  if (mode.value === 'flash') {
+    lv = 1
+    forceType = 'flash'
+  }
+  if (mode.value === 'contrast') {
+    lv = 3
+    forceType = 'discrimination'
+  }
+  const dueTerms = isSrs ? dueTermsForCurrentSubject() : []
+  if (isSrs && !dueTerms.length) {
+    showToast('今天没有到期的记忆词条，先做一组主动回忆巩固也不错', 'info')
+    forceType = 'flash'
+    lv = 1
+  }
+  const d = buildDeck(subject.value, lv, n, {
+    wrongTerms: isWrong ? mistakeTerms.value : [],
+    dueTerms,
+    forceType
+  })
+  if (!d.length) {
+    showToast('当前分类词条不足，先换一个分类试试', 'info')
+    return
+  }
   deck.value = d
   idx.value = 0
   picked.value = ''
+  revealed.value = false
   correctN.value = 0
   wrongN.value = 0
   score.value = 0
   combo.value = 0
   maxCombo.value = 0
-  hearts.value = mode.value === 'rapid' ? 5 : 3
+  hearts.value = isRapid ? 5 : 3
   elapsed.value = 0
   result.value = null
+  retryN.value = 0
+  retryFixed.value = 0
   screen.value = 'play'
   clearTimer()
   timer = setInterval(() => {
     elapsed.value++
-    if (mode.value === 'rapid' && remainSec.value <= 0) finish()
+    if (isRapid && remainSec.value <= 0) finish()
   }, 1000)
   focusKey()
 }
 function focusKey() {
-  try { window.focus() } catch (e) {}
+  try {
+    window.focus()
+  } catch (e) {}
 }
-function answer(k) {
+function mark(ok) {
   const q = current.value
-  if (!q || picked.value) return
-  picked.value = k
-  const ok = k === q.answer
+  if (!q) return
   if (ok) {
     correctN.value++
     combo.value++
@@ -81,27 +128,67 @@ function answer(k) {
     hearts.value = Math.max(0, hearts.value - 1)
     if (!mistakeTerms.value.includes(q.term)) mistakeTerms.value.push(q.term)
   }
+  if (q.retry) {
+    retryN.value++
+    if (ok) retryFixed.value++
+  }
   saveGameWrong(mistakeTerms.value)
   const srs = loadSrs()
   rememberOne(srs, q.item.subject || subject.value, q.term, ok, ymdKey())
   saveSrs(srs)
-  if (mode.value === 'rapid') {
-    autoNextTimer = setTimeout(() => next(), ok ? 260 : 620)
-  }
+  if (mode.value === 'rapid') autoNextTimer = setTimeout(() => next(), ok ? 260 : 620)
+}
+function answer(k) {
+  const q = current.value
+  if (!q || picked.value || q.type === 'flash') return
+  picked.value = k
+  const ok = k === q.answer
+  mark(ok)
+}
+function reveal() {
+  if (isFlash.value) revealed.value = true
+}
+function selfRate(rating) {
+  if (!isFlash.value || !revealed.value || picked.value) return
+  picked.value = rating
+  mark(rating === 'know')
+}
+function queueRetry() {
+  const q = current.value
+  if (!q || q.retry || mode.value === 'rapid' || deck.value.length >= 36) return
+  if (deck.value.some((x) => x.retry && x.term === q.term)) return
+  const pool = poolForSubject(subject.value)
+  const retry = makeQuestion(q.item, pool, 4, 0, Math.random, q.type === 'meaning2term' ? 'fill' : 'meaning2term')
+  retry.retry = true
+  retry.tag = '错误回炉 · ' + retry.tag
+  retry.science = '错误回炉：在短间隔后用另一种题型重新提取，修正错误记忆'
+  const at = Math.min(idx.value + 3, deck.value.length)
+  deck.value.splice(at, 0, retry)
 }
 function next() {
   if (!picked.value) return
-  if (mode.value === 'level' && hearts.value <= 0) { finish(); return }
-  if (idx.value >= deck.value.length - 1) { finish(); return }
+  const wasCorrect = picked.value === current.value.answer || picked.value === 'know'
+  if (!wasCorrect) queueRetry()
+  if (hearts.value <= 0) {
+    finish()
+    return
+  }
+  if (idx.value >= deck.value.length - 1) {
+    finish()
+    return
+  }
   idx.value++
   picked.value = ''
+  revealed.value = false
 }
 function finish() {
   if (screen.value !== 'play') return
   clearTimer()
   const total = correctN.value + wrongN.value
   const acc = total ? Math.round((correctN.value / total) * 100) : 0
-  result.value = { total, acc, score: score.value, maxCombo: maxCombo.value, elapsed: elapsed.value, passed: hearts.value > 0 && acc >= 60 }
+  const memoryScore = Math.max(0, Math.min(100, Math.round(acc * 0.75 + Math.min(maxCombo.value, 8) * 3 - retryN.value * 4)))
+  const strategies = Array.from(new Set(deck.value.map((q) => q.science).filter(Boolean))).slice(0, 4)
+  result.value = { total, acc, score: score.value, maxCombo: maxCombo.value, elapsed: elapsed.value, passed: hearts.value > 0 && acc >= 60, retryN: retryN.value, retryFixed: retryFixed.value, strategies, memoryScore }
   const s = Object.assign({}, stats.value)
   s.best = Math.max(Number(s.best) || 0, score.value)
   s.total = (Number(s.total) || 0) + total
@@ -116,9 +203,24 @@ function finish() {
   saveGameStats(s)
   screen.value = 'result'
 }
-function again() { screen.value = 'start'; result.value = null; clearTimer() }
+function again() {
+  screen.value = 'start'
+  result.value = null
+  clearTimer()
+}
 function onKey(e) {
-  if (screen.value !== 'play' || picked.value) return
+  if (screen.value !== 'play') return
+  if (picked.value) {
+    if (e.key === 'Enter') next()
+    if (e.key === 'Escape') emit('close')
+    return
+  }
+  if (isFlash.value) {
+    if (!revealed.value && (e.key === 'Enter' || e.key === ' ')) reveal()
+    else if (revealed.value && ['1', '2', '3'].includes(e.key)) selfRate(['forgot', 'fuzzy', 'know'][Number(e.key) - 1])
+    if (e.key === 'Escape') emit('close')
+    return
+  }
   const keys = current.value ? current.value.options.map((o) => o.k) : []
   const i = ['1', '2', '3', '4', 'A', 'B', 'C', 'D', 'T', 'F'].indexOf(String(e.key).toUpperCase())
   if (i >= 0) {
@@ -130,7 +232,10 @@ function onKey(e) {
   if (e.key === 'Escape') emit('close')
 }
 onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() })
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  clearTimer()
+})
 </script>
 
 <template>
@@ -145,11 +250,18 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
 
       <div v-if="screen === 'start'" class="ag-start">
         <div class="ag-hero">
-          <div class="ag-hero-i">🧠</div>
+          <div class="ag-hero-i">🔬</div>
           <div>
-            <div class="ag-hero-t">把常识、政治理论、时政、成语、实词练成游戏</div>
-            <div class="ag-hero-s">看词选义 → 看义选词 → 语境填空 → Boss 混合战。答对答错都会自动写入艾宾浩斯复习计划。</div>
+            <div class="ag-hero-t">把“看过”练成真正记得住、调得出</div>
+            <div class="ag-hero-s">主动回忆、提取练习、交错辨析、错误回炉、间隔复习五条记忆链组合训练。每一次作答都会同步进艾宾浩斯排期。</div>
           </div>
+        </div>
+        <div class="ag-science">
+          <span>🧠 主动回忆：先想再看</span>
+          <span>⚡ 提取练习：看义找词</span>
+          <span>🧩 交错练习：易混词强制辨析</span>
+          <span>🔁 错误回炉：错题换题型重现</span>
+          <span>⏳ 间隔复习：到期优先</span>
         </div>
         <div class="ag-sec">选择战场</div>
         <div class="ag-subjects">
@@ -184,18 +296,39 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
         <div class="ag-bar"><i :style="{ width: progressPct + '%' }"></i></div>
         <div class="ag-card">
           <div class="ag-tag">{{ current.tag }} · {{ subject === 'all' ? '混合挑战' : subject }}<span v-if="mode === 'level'"> · {{ levelName }}</span></div>
-          <div class="ag-prompt">{{ current.prompt }}</div>
-          <div class="ag-options" :class="{ tf: current.options.length === 2 }">
-            <button v-for="o in current.options" :key="o.k" class="ag-opt" :class="{ picked: picked === o.k, right: picked && o.ok, wrong: picked && picked === o.k && !o.ok }" :disabled="!!picked" @click="answer(o.k)">
-              <b>{{ o.k }}</b><span>{{ o.t }}</span>
-            </button>
+          <div v-if="isFlash" class="ag-flash">
+            <div class="ag-flash-term">{{ current.term }}</div>
+            <div class="ag-flash-hint">先在心里说出它的含义、感情色彩和常见搭配</div>
+            <button v-if="!revealed" class="btn btn-pri ag-reveal" @click="reveal()">翻面核对答案</button>
+            <template v-else>
+              <div class="ag-flash-answer">{{ current.explain }}</div>
+              <div v-if="current.tip" class="ag-fb-tip">💡 {{ current.tip }}</div>
+              <div class="ag-self">
+                <button class="ag-self-btn forgot" :class="{ on: picked === 'forgot' }" @click="selfRate('forgot')">😵 忘了</button>
+                <button class="ag-self-btn fuzzy" :class="{ on: picked === 'fuzzy' }" @click="selfRate('fuzzy')">🤔 模糊</button>
+                <button class="ag-self-btn know" :class="{ on: picked === 'know' }" @click="selfRate('know')">✅ 记住</button>
+              </div>
+            </template>
           </div>
-          <div v-if="picked" class="ag-feedback" :class="picked === current.answer ? 'ok' : 'bad'">
+          <template v-else>
+            <div class="ag-prompt">{{ current.prompt }}</div>
+            <div class="ag-options" :class="{ tf: current.options.length === 2 }">
+              <button v-for="o in current.options" :key="o.k" class="ag-opt" :class="{ picked: picked === o.k, right: picked && o.ok, wrong: picked && picked === o.k && !o.ok }" :disabled="!!picked" @click="answer(o.k)">
+                <b>{{ o.k }}</b><span>{{ o.t }}</span>
+              </button>
+            </div>
+          </template>
+          <div v-if="current.science" class="ag-science-note">🧪 {{ current.science }}</div>
+          <div v-if="picked && !isFlash" class="ag-feedback" :class="picked === current.answer ? 'ok' : 'bad'">
             <div class="ag-fb-t">{{ picked === current.answer ? '✅ 答对了' : '❌ 正确答案：' + current.answer }}</div>
             <div class="ag-fb-b">{{ current.explain }}</div>
             <div v-if="current.tip" class="ag-fb-tip">💡 {{ current.tip }}</div>
             <button v-if="mode !== 'rapid'" class="btn btn-pri" @click="next()">{{ idx >= deck.length - 1 ? '查看成绩' : '下一题' }}</button>
             <span v-else class="ag-tip">自动进入下一题…</span>
+          </div>
+          <div v-if="picked && isFlash" class="ag-feedback" :class="picked === 'know' ? 'ok' : 'bad'">
+            <div class="ag-fb-t">{{ picked === 'know' ? '✅ 已记为记住' : picked === 'fuzzy' ? '🟡 已记为模糊，会更快再出现' : '❌ 已进入回炉队列' }}</div>
+            <button class="btn btn-pri" @click="next()">{{ idx >= deck.length - 1 ? '查看成绩' : '下一题' }}</button>
           </div>
         </div>
       </div>
@@ -209,6 +342,12 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
           <div><b>{{ result.maxCombo }}</b><span>最高连击</span></div>
           <div><b>{{ result.total }}</b><span>本局题数</span></div>
         </div>
+        <div class="ag-strategy-res">
+          <div class="ag-memory-score">🧠 本局记忆强度 <b>{{ result.memoryScore }}</b> / 100</div>
+          <b>本局训练策略</b>
+          <span v-for="s in result.strategies" :key="s">{{ s }}</span>
+        </div>
+        <div v-if="result.retryN" class="ag-retry-res">🔁 错误回炉 {{ result.retryN }} 次，其中当场修正 {{ result.retryFixed }} 次</div>
         <div v-if="mistakeTerms.length" class="ag-wrong-list">
           <b>需要回炉：</b>
           <span v-for="t in mistakeTerms.slice(0, 12)" :key="t">{{ t }}</span>
@@ -234,6 +373,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
 .ag-hero-i { font-size: 42px; }
 .ag-hero-t { font-size: calc(17px * var(--ui-fs-scale, 1)); font-weight: 800; }
 .ag-hero-s { font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); line-height: 1.7; margin-top: 5px; }
+.ag-science { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.ag-science span { border: 1px solid rgba(34,211,238,.32); background: rgba(34,211,238,.08); color: var(--text2); border-radius: 14px; padding: 3px 9px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
 .ag-sec { font-weight: 800; color: var(--text2); margin: 12px 0 6px; font-size: calc(13px * var(--ui-fs-scale, 1)); }
 .ag-subjects, .ag-modes, .ag-levels { display: flex; gap: 7px; flex-wrap: wrap; }
 .ag-sub, .ag-mode, .ag-level { border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); border-radius: 10px; padding: 8px 11px; font: inherit; font-size: calc(12.5px * var(--ui-fs-scale, 1)); cursor: pointer; text-align: left; }
@@ -250,6 +391,17 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
 .ag-card { border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 16px; padding: 16px; }
 .ag-tag { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--accent); font-weight: 800; margin-bottom: 10px; }
 .ag-prompt { font-size: calc(18px * var(--ui-fs-scale, 1)); line-height: 1.8; font-weight: 700; color: var(--text); }
+.ag-flash { text-align: center; padding: 16px 6px 8px; }
+.ag-flash-term { font-size: calc(34px * var(--ui-fs-scale, 1)); line-height: 1.25; font-weight: 900; color: var(--accent); letter-spacing: .04em; }
+.ag-flash-hint { color: var(--text3); font-size: calc(12.5px * var(--ui-fs-scale, 1)); margin: 9px 0 16px; }
+.ag-reveal { padding: 9px 22px; }
+.ag-flash-answer { margin: 8px auto 0; max-width: 680px; padding: 13px; border-radius: 12px; background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.3); text-align: left; font-size: calc(15px * var(--ui-fs-scale, 1)); line-height: 1.85; }
+.ag-self { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+.ag-self-btn { border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); border-radius: 10px; padding: 8px 15px; font: inherit; font-size: calc(13px * var(--ui-fs-scale, 1)); cursor: pointer; }
+.ag-self-btn.forgot.on { border-color: #fb7185; color: #fb7185; background: rgba(251,113,133,.12); }
+.ag-self-btn.fuzzy.on { border-color: #fbbf24; color: #fbbf24; background: rgba(251,191,36,.12); }
+.ag-self-btn.know.on { border-color: #34d399; color: #34d399; background: rgba(52,211,153,.12); }
+.ag-science-note { margin-top: 11px; color: var(--text3); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.6; }
 .ag-options { display: grid; gap: 9px; margin-top: 14px; }
 .ag-options.tf { grid-template-columns: 1fr 1fr; }
 .ag-opt { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 12px 13px; border-radius: 12px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font: inherit; font-size: calc(14px * var(--ui-fs-scale, 1)); line-height: 1.7; cursor: pointer; }
@@ -269,6 +421,12 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); clearTimer() }
 .ag-res-grid > div { border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px; }
 .ag-res-grid b { display: block; font-size: calc(22px * var(--ui-fs-scale, 1)); color: #34d399; }
 .ag-res-grid span { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); }
+.ag-strategy-res { max-width: 680px; margin: 13px auto 0; color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); }
+.ag-memory-score { margin-bottom: 10px; color: var(--text); }
+.ag-memory-score b { color: #34d399; font-size: calc(17px * var(--ui-fs-scale, 1)); }
+.ag-strategy-res b { display: block; margin-bottom: 6px; }
+.ag-strategy-res span { display: inline-block; margin: 2px 5px 2px 0; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(34,211,238,.32); background: rgba(34,211,238,.08); }
+.ag-retry-res { margin-top: 9px; color: #fbbf24; font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .ag-wrong-list { margin: 16px auto 0; max-width: 680px; text-align: left; color: var(--text2); font-size: calc(12.5px * var(--ui-fs-scale, 1)); line-height: 1.8; }
 .ag-wrong-list span { display: inline-block; border: 1px solid rgba(251,113,133,.4); color: #fb7185; border-radius: 14px; padding: 1px 8px; margin: 2px 4px 2px 0; }
 .ag-res-acts { display: flex; gap: 8px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }

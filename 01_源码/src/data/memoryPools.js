@@ -1,5 +1,5 @@
 // memoryPools.js —— 积累数据池单源（v3.8.188）：常识/时政/成语/实词 + 技能卡记忆词条
-// 由 FloatPanel.vue 原内置池抽取（条目结构原样保留）；供积累页 / 今日复习中枢共用
+// 雨菲/半月谈扫描 PDF 词条必须先经过 yuFei 校订流水线，禁止把 OCR 残片直接接入学习库。
 import { MEMORY } from '../kb/cards-index'
 import { YUFEN_CHENGYU, YUFEN_SHICI } from '../ku/yufeiLexicon'
 export { YUFEN_CHENGYU, YUFEN_SHICI }
@@ -225,8 +225,8 @@ export const skillMemZZ = MEMORY.filter((m) => m.plate === '政治理论').map((
 const POOL_ALL = []
 CHANGSHI.forEach((i) => POOL_ALL.push(Object.assign({ pool: '常识' }, i)))
 SHIZHENG.forEach((i) => POOL_ALL.push(Object.assign({ pool: '时政' }, i)))
-CHENGYU.concat(YUFEN_CHENGYU).forEach((i) => POOL_ALL.push(Object.assign({ pool: '成语' }, i)))
-SHICI.concat(YUFEN_SHICI).forEach((i) => POOL_ALL.push(Object.assign({ pool: '实词' }, i)))
+CHENGYU.concat(YUFEN_CHENGYU).filter((i) => i.verified !== false).forEach((i) => POOL_ALL.push(Object.assign({ pool: '成语' }, i)))
+SHICI.concat(YUFEN_SHICI).filter((i) => i.verified !== false).forEach((i) => POOL_ALL.push(Object.assign({ pool: '实词' }, i)))
 skillMemCS.forEach((i) => POOL_ALL.push(Object.assign({ pool: '常识' }, i)))
 skillMemZZ.forEach((i) => POOL_ALL.push(Object.assign({ pool: '时政' }, i)))
 export function findPoolItem(title) {
