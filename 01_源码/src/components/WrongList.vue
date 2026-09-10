@@ -2,10 +2,11 @@
 // R4：错题模块子组件（从 WrongPage.vue 对应模板逐字搬入）
 // 父组件通过 ctx 注入全部依赖；模板保持与 WrongPage 完全一致，仅把状态/方法从 ctx 暴露到本组件作用域。
 import { toRefs, computed, watch, ref } from 'vue'
-import { WRONG_GROUPS as TAX, canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, typeOrderOfSub, CANON_TYPE_ORDER, groupLabelOf } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
+import { WRONG_GROUPS as TAX, canonicalSubOf, typeLabelOf, typeOrderOfSub, groupLabelOf } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
 import { richMd } from '../utils/wrongText' // 错题渲染净化（字面换行/空svg围栏修复后再渲染）
 import { reviewHealth } from '../utils/reviewHealth' // 复盘健康分（深化）
 import { absorbSummary } from '../utils/wrongAbsorb'
+import { subsForGroup, typesForSub } from '../utils/wrongFilterHierarchy'
 const dueOf = (q) => !!(q && q.digested && q.dueAt && q.dueAt <= Date.now())
 const repOf = (q) => { const rs = (q && q.reviewStats) || {}; return { r: rs.r || 0, e: rs.e || 0 } }
 
@@ -52,42 +53,31 @@ function toggleItemReasons(q) {
 // ===== 板块→细分→题型（v3.8.207 归一：与 AI出题/题型库同一套 canonical）=====
 const allWqs = () => (props.ctx.store && props.ctx.store.wqs) || []
 const absorbStat = computed(() => absorbSummary(allWqs()))
-// 细分下拉：只列“真细分”（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治），组名不再混入
+// 细分下拉：严格依赖大板块，未选大板块时不展开；选中后只列该板块下的细分，禁止跨板块混排
 const groupSubs = computed(() => {
-  const list = []
-  const push = (n) => { if (n && !list.includes(n)) list.push(n) }
-  const present = new Set()
-  allWqs().forEach((q) => { if (q) { const sub = canonicalSubOf(q); if (sub && isRealSub(sub)) present.add(sub) } })
-  const g = fGroup.value ? TAX.find((x) => x.label === fGroup.value) : null
-  if (g) (g.subs || []).forEach(push)
-  else TAX.forEach((xg) => (xg.subs || []).forEach(push))
-  const extras = [...present].filter((s) => !list.includes(s))
-  return list.filter((s) => present.has(s)).concat(extras)
+  return subsForGroup(fGroup.value, TAX)
 })
-// 题型下拉：选了细分 → 该细分 canonical 题型池；只选组/全选 → 组内或全部真实题型（按 canonical 顺序，不跨板块混排）
+// 题型下拉：必须先选细分板块；只列该细分 canonical 题型池，严禁跨细分/跨板块混排
 const subOpts = computed(() => {
-  if (fSubj.value) {
-    const pool = typeOrderOfSub(fSubj.value)
-    const hasUnc = allWqs().some((q) => q && canonicalSubOf(q) === fSubj.value && typeLabelOf(q) === '未分类')
-    return (pool && pool.length ? pool.slice() : []).concat(hasUnc ? ['未分类'] : [])
-  }
-  const seen = new Set()
-  allWqs().forEach((q) => {
-    if (!q) return
-    if (fGroup.value && canonicalGroupOf(q) !== fGroup.value) return
-    const t = typeLabelOf(q)
-    if (t) seen.add(t)
-  })
-  const rank = (t) => { const i = CANON_TYPE_ORDER.indexOf(t); return i < 0 ? 99999 : i }
-  const arr = [...seen].filter((t) => t !== '未分类').sort((a, b) => rank(a) - rank(b))
-  if (seen.has('未分类')) arr.push('未分类')
-  return arr
+  if (!fSubj.value) return []
+  const pool = typesForSub(fSubj.value)
+  const hasUnc = allWqs().some((q) => q && canonicalSubOf(q) === fSubj.value && typeLabelOf(q) === '未分类')
+  if (hasUnc && !pool.includes('未分类')) pool.push('未分类')
+  return pool
 })
+function subCount(s) {
+  return allWqs().filter((q) => q && canonicalSubOf(q) === s).length
+}
+function typeCount(t) {
+  return allWqs().filter((q) => q && canonicalSubOf(q) === fSubj.value && typeLabelOf(q) === t).length
+}
 // 细分被选中时自动反同步大板块（保证与下拉/筛选一致）
 watch(fSubj, (v) => {
-  if (!v) return
+  if (!v) { fSub.value = ''; return }
   const g = TAX.find((x) => x.label === v || (x.subs || []).includes(v))
   if (g && fGroup.value !== g.label) fGroup.value = g.label
+  const pool = typeOrderOfSub(v) || []
+  if (fSub.value && fSub.value !== '未分类' && !pool.includes(fSub.value)) fSub.value = ''
 })
 
 const {
@@ -165,14 +155,14 @@ function dueTipLater() {
           <option v-for="g in WRONG_GROUPS" :key="g.label" :value="g.label">{{ groupLabelOf(g.label) }}</option>
           <option v-if="fGroup && !WRONG_GROUPS.some((g) => g.label === fGroup)" :value="fGroup">◉ {{ groupLabelOf(fGroup) || fGroup }}</option>
         </select>
-        <select v-model="fSubj" title="细分板块：不选板块时可跨板块直选细分（选后自动归位所属大板块）">
-          <option value="">全部细分板块（不选板块=跨全部板块筛细分）</option>
-          <option v-for="s in groupSubs" :key="s" :value="s">{{ s }}</option>
+        <select v-model="fSubj" :disabled="!fGroup" title="细分板块：必须先选大板块，再展开该板块的一一对应细分">
+          <option value="">{{ fGroup ? '全部细分板块' : '请先选择大板块' }}</option>
+          <option v-for="s in groupSubs" :key="s" :value="s">{{ s }}（{{ subCount(s) }}）</option>
           <option v-if="fSubj && !groupSubs.includes(fSubj)" :value="fSubj">⏺ {{ fSubj }}</option>
         </select>
-        <select v-model="fSub" title="题型：选了细分板块则列该板块题型；否则跨板块按题型筛">
-          <option value="">全部题型</option>
-          <option v-for="s in subOpts" :key="s" :value="s">{{ s }}</option>
+        <select v-model="fSub" :disabled="!fSubj" title="题型：必须先选细分板块，只列该细分对应的题型">
+          <option value="">{{ fSubj ? '全部题型' : '请先选择细分板块' }}</option>
+          <option v-for="s in subOpts" :key="s" :value="s">{{ s }}（{{ typeCount(s) }}）</option>
           <option v-if="fSub && !subOpts.includes(fSub)" :value="fSub">⏺ {{ fSub }}</option>
         </select>
         <select v-model="fRev">
