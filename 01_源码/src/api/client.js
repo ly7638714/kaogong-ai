@@ -53,21 +53,21 @@ function hds(c) {
   return h
 }
 
-// DeepSeek 旧模型名已于 2026-07-24 停用：deepseek-chat/reasoner 原分别对应
-// deepseek-v4-flash 的非思考/思考模式。V4.1-Flash 按官方 2026-09-10 12:00(北京时间)上线；
-// 上线前若用户提前选了它，则自动回退同档 V4-Flash，避免请求报“模型不支持”。
+// DeepSeek 官方当前接受的最新文本模型名为 deepseek-flash 与 deepseek-v4-pro。
+// 站内保留 V4.1-Flash/V4-Flash 等展示名，但请求前统一映射到官方实际模型名，
+// 避免出现“supported API model names are deepseek-flash, deepseek-v4-pro”的报错。
 function dsRequest(c) {
   const m = String((c && c.model) || '').trim()
   const out = { model: m, thinking: null }
   if ((c && c.prov) === 'ds') {
-    if (m === 'deepseek-v4.1-flash' && Date.now() < new Date('2026-09-10T04:00:00.000Z').getTime()) {
-      out.model = 'deepseek-v4-flash'
+    if (m === 'deepseek-v4.1-flash' || m === 'deepseek-v4-flash') {
+      out.model = 'deepseek-flash'
     }
     if (m === 'deepseek-chat') {
-      out.model = 'deepseek-v4-flash'
+      out.model = 'deepseek-flash'
       out.thinking = 'disabled'
     } else if (m === 'deepseek-reasoner') {
-      out.model = 'deepseek-v4-flash'
+      out.model = 'deepseek-flash'
       out.thinking = 'enabled'
     } else if (c.noThink && /deepseek-v4/i.test(m)) {
       out.thinking = 'disabled'

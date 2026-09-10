@@ -74,8 +74,8 @@ export const MODELS = {
   text: {
     // DeepSeek（2026-04-24 V4 发布；chat/reasoner 旧名已于 2026-07-24 停用；V4.1-Flash 按平台可选模型列入，官方未公布前不设为默认）
     ds: [
-      { id: 'deepseek-v4.1-flash', label: 'DeepSeek-V4.1-Flash（9/10 12:00 正式开放）', pub: '2026-09', tag: 'fast', note: '正式开放前选择会自动用同档 V4-Flash，开放后即走 V4.1-Flash' },
-      { id: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash（快·推荐）', pub: '2026-04', tag: 'fast', note: '项目默认·便宜省 token' },
+      { id: 'deepseek-v4.1-flash', label: 'DeepSeek-V4.1-Flash（快·推荐）', pub: '2026-09', tag: 'fast', note: '官方请求名：deepseek-flash' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4-Flash（旧展示名·兼容）', pub: '2026-04', tag: 'fast', note: '请求时自动映射为 deepseek-flash' },
       { id: 'deepseek-v4-pro',   label: 'DeepSeek-V4-Pro（强推理·Agent）', pub: '2026-04', tag: 'think', note: '对标顶级闭源' }
     ],
     // 智谱 GLM（2026：GLM-5.2→GLM-5→GLM-5-Turbo→GLM-4.7-Flash）

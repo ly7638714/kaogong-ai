@@ -111,21 +111,25 @@ describe('DeepSeek 旧模型名兼容映射', () => {
     await chatOnce({ prov: 'ds', key: 'k', url: 'https://x.test/chat', model: cfg.model, ...(cfg.noThink != null ? { noThink: cfg.noThink } : {}) }, [{ role: 'user', content: 'q' }], 2000)
     return body
   }
-  it('deepseek-chat 映射为 v4-flash 且关闭思考', async () => {
+  it('deepseek-chat 映射为 deepseek-flash 且关闭思考', async () => {
     const body = await bodyFor({ model: 'deepseek-chat' })
-    expect(body.model).toBe('deepseek-v4-flash')
+    expect(body.model).toBe('deepseek-flash')
     expect(body.thinking).toEqual({ type: 'disabled' })
     expect(typeof body.temperature).toBe('number')
   })
-  it('deepseek-reasoner 映射为 v4-flash 且开启思考', async () => {
+  it('deepseek-reasoner 映射为 deepseek-flash 且开启思考', async () => {
     const body = await bodyFor({ model: 'deepseek-reasoner' })
-    expect(body.model).toBe('deepseek-v4-flash')
+    expect(body.model).toBe('deepseek-flash')
     expect(body.thinking).toEqual({ type: 'enabled' })
     expect(body.temperature).toBeUndefined()
   })
+  it('V4.1-Flash 使用官方实际模型名 deepseek-flash', async () => {
+    const body = await bodyFor({ model: 'deepseek-v4.1-flash' })
+    expect(body.model).toBe('deepseek-flash')
+  })
   it('v4-flash 标记 noThink 时发送 thinking=disabled', async () => {
     const body = await bodyFor({ model: 'deepseek-v4-flash', noThink: true })
-    expect(body.model).toBe('deepseek-v4-flash')
+    expect(body.model).toBe('deepseek-flash')
     expect(body.thinking).toEqual({ type: 'disabled' })
   })
 })

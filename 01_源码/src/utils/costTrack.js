@@ -8,6 +8,7 @@ const KEY = 'xc_cost'
 const MAX_RECORDS = 3000
 const PRICE_SCHEMA = '2026-09-10-deepseek-flash-v1'
 const DEEPSEEK_FLASH_KEYS = [
+  'deepseek-flash',
   'deepseek-v4.1-flash',
   'deepseek-v4-flash-vision-exp',
   'deepseek-v4-flash',
@@ -36,6 +37,7 @@ export const DEF_PRICES = {
   // ---------- DeepSeek（2026-09-10 12:00 起 Flash 系列新定价，官方公告/价格页核验）----------
   // Flash 新价（元/百万）：空闲缓存命中输入 0.02、空闲缓存未命中输入 1、空闲输出 4；高峰为 2 倍。
   // 本表仍取「空闲档·缓存未命中」作默认，属于保守估算；若 API 返回缓存命中可自行调低输入单价。
+  'deepseek-flash': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·当前 Flash API 名（V4.1-Flash）空闲档·缓存未命中 输入1/输出4 元每百万（高峰×2；缓存命中输入0.02 元/百万）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4.1-flash': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4.1-Flash（新）空闲档·缓存未命中 输入1/输出4 元每百万（高峰×2；缓存命中输入0.02 元/百万）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4-flash-vision-exp': { in: 0.001, out: 0.004, note: 'DeepSeek 官方·V4-Flash-Vision-Exp 空闲档·缓存未命中 输入1/输出4 元每百万（2026-09-10 起；高峰×2；图片转 token 计费）', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
   'deepseek-v4-pro': { in: 0.0045, out: 0.0135, note: 'DeepSeek 官方·V4-Pro 空闲档·缓存未命中 输入4.5/输出13.5 元每百万(高峰×2；缓存命中更低)', src: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing' },
