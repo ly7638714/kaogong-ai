@@ -27,6 +27,26 @@ const {
   stats,
   reasonTop
 } = toRefs(props.ctx)
+const reasonOpen = ref(false)
+const itemReasonOpen = ref({})
+function shortReason(s, max = 28) {
+  let t = String(s || '').replace(/\s+/g, ' ').trim()
+  if (!t) return '未命名错因'
+  t = t.replace(/^[“”"'‘’]+|[“”"'‘’]+$/g, '')
+  const cut = t.search(/[。；;！!？?]/)
+  if (cut >= 10 && cut <= max + 10) t = t.slice(0, cut)
+  if (t.length > max) t = t.slice(0, max - 1) + '…'
+  return t
+}
+const reasonVisible = computed(() => (reasonOpen.value ? reasonTop.value : reasonTop.value.slice(0, 3)))
+function visibleItemReasons(q) {
+  const arr = (q && q.reasons) || []
+  return itemReasonOpen.value[q && q.id] ? arr : arr.slice(0, 2)
+}
+function toggleItemReasons(q) {
+  if (!q || !q.id) return
+  itemReasonOpen.value = { ...itemReasonOpen.value, [q.id]: !itemReasonOpen.value[q.id] }
+}
 // ===== 板块→细分→题型（v3.8.207 归一：与 AI出题/题型库同一套 canonical）=====
 const allWqs = () => (props.ctx.store && props.ctx.store.wqs) || []
 // 细分下拉：只列“真细分”（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治），组名不再混入
@@ -185,10 +205,15 @@ function dueTipLater() {
         <button class="btn btn-gh" style="padding: 6px 12px" title="把题干完全相同的错题合并为一道，只保留 1 条" @click="dedupeNow()">🧹 一键去重</button>
       </div>
       <div v-if="reasonTop && reasonTop.length" class="wq-reasons">
-        <span class="wq-reasons-hd">⚠️ 高频错因 · 点筛选 · ✍️连做同类</span>
-        <span v-for="r in reasonTop" :key="r.reason" class="chip" :class="{ on: fReason === r.reason }" :title="'涉及：' + (r.plates || []).join(' / ')" @click="setReasonFilter(r.reason === fReason ? '' : r.reason)">
-          {{ r.reason }}<b class="rr-n">×{{ r.n }}</b><i v-if="r.e" class="rr-e">复错{{ r.e }}</i><em class="rr-go" @click.stop="startReasonPractice(r.reason)">✍️</em>
-        </span>
+        <div class="wq-reasons-hd">
+          <span>⚠️ 高频错因 · 点筛选 · ✍️连做同类</span>
+          <button v-if="reasonTop.length > 3" class="wq-reasons-toggle" @click="reasonOpen = !reasonOpen">{{ reasonOpen ? '收起' : '展开全部 ' + reasonTop.length }}</button>
+        </div>
+        <div class="wq-reason-list">
+          <span v-for="r in reasonVisible" :key="r.reason" class="chip" :class="{ on: fReason === r.reason }" :title="r.reason + (r.plates && r.plates.length ? '\n涉及：' + r.plates.join(' / ') : '')" @click="setReasonFilter(r.reason === fReason ? '' : r.reason)">
+            <b class="rr-t">{{ shortReason(r.reason) }}</b><b class="rr-n">×{{ r.n }}</b><i v-if="r.e" class="rr-e">复错{{ r.e }}</i><em class="rr-go" @click.stop="startReasonPractice(r.reason)">✍️</em>
+          </span>
+        </div>
       </div>
       <div class="wl">
         <div v-if="!store.wqs.length" class="empty">
@@ -214,7 +239,8 @@ function dueTipLater() {
           </div>
           <div class="wq" v-html="richMd(String(q.question || ''))"></div>
           <div v-if="q.reasons && q.reasons.length" class="wr">
-            <span v-for="r in q.reasons" :key="r">{{ r }}</span>
+            <span v-for="r in visibleItemReasons(q)" :key="r" :title="r">{{ shortReason(r, 56) }}</span>
+            <button v-if="q.reasons.length > 2" class="wr-toggle" @click.stop="toggleItemReasons(q)">{{ itemReasonOpen[q.id] ? '收起错因' : '展开 ' + q.reasons.length + ' 条错因' }}</button>
           </div>
           <div class="wt">
             {{ q.time }} · {{ q.answer ? '答案 ' + q.answer : '未填答案' }}
@@ -229,3 +255,13 @@ function dueTipLater() {
         </div>
       </div>
 </template>
+<style scoped>
+.wq-reasons { margin: 8px 0 10px; }
+.wq-reasons-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
+.wq-reasons-toggle { border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--accent); border-radius: 14px; padding: 2px 9px; font: inherit; cursor: pointer; }
+.wq-reason-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.wq-reason-list .chip { max-width: min(100%, 460px); display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rr-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+.wr > span { max-width: min(100%, 620px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-toggle { border: 1px dashed var(--glass-border); background: transparent; color: var(--accent); border-radius: 12px; padding: 1px 7px; font: inherit; cursor: pointer; }
+</style>

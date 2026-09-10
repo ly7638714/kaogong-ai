@@ -2,6 +2,11 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.275] — 2026-09-10 · 错题页长列表阅读优化
+- “高频错因”默认只展示前 3 条，可展开全部；每条自动压缩成短摘要，完整内容放在悬停提示里，不再因为长段 AI 错因把页面撑得过长。
+- 错题卡片默认只显示前 2 条错因摘要，其余可按题展开/收起，长错因不再反复铺满列表。
+- 网页、安卓正式版/试用版、iOS 试用 PWA 同步更新。
+
 ## [3.8.274] — 2026-09-10 · DeepSeek 新模型名兼容
 - 适配 DeepSeek 官方当前支持的实际文本模型名 `deepseek-flash`、`deepseek-v4-pro`。
 - 站内 `DeepSeek-V4.1-Flash` 与旧展示名 `deepseek-v4-flash` 在请求前自动映射为 `deepseek-flash`；`deepseek-chat`、`deepseek-reasoner` 也统一走该实际模型名，避免测试连通时报“不支持的模型名”。
