@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveNotes } from './store'
 import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
 import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
+import { queryProviderBalance } from './utils/apiBalance'
 import { PLATE_MODE } from './api'
 import { PROVIDERS, MODELS, defaultModelOf, mergedModelsOf, providerOf, REGISTRY_VERSION, fastTextOf } from './api/modelRegistry'
 import ChatPage from './components/ChatPage.vue'
@@ -371,6 +372,52 @@ function costSaveBudget() {
   showToast(costBudget.value > 0 ? ('✅ 今日预算已设为 ¥' + costBudget.value + '，超额将先弹确认') : 'ℹ️ 今日预算已关闭（不限制）', 'success')
 }
 const costOpen = ref(null)
+const balanceRows = ref([])
+const balanceBusy = ref(false)
+const balanceAt = ref(0)
+const BALANCE_CACHE_KEY = 'xc_balance_cache_v1'
+function readBalanceCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(BALANCE_CACHE_KEY) || 'null')
+    if (c && Array.isArray(c.rows)) { balanceRows.value = c.rows; balanceAt.value = Number(c.at) || 0 }
+  } catch (e) {}
+}
+readBalanceCache()
+function configuredBalanceCfgs() {
+  const groups = [
+    ['文字模型', store.cfg.text],
+    ['视觉模型', store.cfg.vision],
+    ['图形增强', store.cfg.fig],
+    ['语音讲稿', store.cfg.rd]
+  ]
+  const seen = new Set()
+  const out = []
+  groups.forEach(([label, cfg]) => {
+    if (!cfg || !cfg.key) return
+    const key = [cfg.prov || '', cfg.url || '', cfg.key || ''].join('|')
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ label, cfg })
+  })
+  return out
+}
+async function refreshBalances() {
+  if (balanceBusy.value) return
+  const targets = configuredBalanceCfgs()
+  if (!targets.length) { showToast('请先在设置里配置至少一个模型的 API Key', 'info'); return }
+  balanceBusy.value = true
+  try {
+    const rows = await Promise.all(targets.map(async ({ label, cfg }) => {
+      const r = await queryProviderBalance(cfg)
+      return Object.assign({ slot: label }, r)
+    }))
+    balanceRows.value = rows
+    balanceAt.value = Date.now()
+    try { localStorage.setItem(BALANCE_CACHE_KEY, JSON.stringify({ at: balanceAt.value, rows })) } catch (e) {}
+  } finally {
+    balanceBusy.value = false
+  }
+}
 function costSavePrices() {
   savePrices(costPrices.value)
   showToast('✅ 计价表已保存（后续花费按新单价估算）', 'success')
@@ -3538,6 +3585,21 @@ onUnmounted(() => {
           <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1));color:var(--text3)">元/日 · 今日已用 <b style="color:var(--accent)">{{ fmtCost(costStat.today) }}</b><template v-if="costBudget > 0 && costStat.today >= costBudget"> · <b style="color:#fb7185">已超预算，后续调用需确认</b></template></span>
           <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costSaveBudget()">💾 保存预算</button>
         </div>
+        <div class="balance-box">
+          <div class="balance-hd">
+            <b>💳 平台余额</b>
+            <span v-if="balanceAt" class="balance-time">更新于 {{ fmtTime(balanceAt) }}</span>
+            <button class="btn btn-gh" :disabled="balanceBusy" @click="refreshBalances()">{{ balanceBusy ? '⏳ 查询中…' : '🔄 查询余额' }}</button>
+          </div>
+          <div v-if="!balanceRows.length" class="balance-empty">点击「查询余额」查看已配置平台的余额；未开放余额接口的平台会提供后台入口。</div>
+          <div v-for="b in balanceRows" :key="b.slot + b.provider" class="balance-row">
+            <span class="balance-label">{{ b.slot }} · {{ b.label }}</span>
+            <b v-if="b.text" class="balance-val">{{ b.text }}</b>
+            <span v-else class="balance-msg">{{ b.msg }}</span>
+            <a v-if="b.dashboard" :href="b.dashboard" target="_blank" rel="noopener" class="balance-link">去后台 ↗</a>
+          </div>
+          <div class="balance-tip">余额接口只读取你本机填写的 Key，不上传数据；每次查询都会直连对应平台官方接口。</div>
+        </div>
         <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.6; margin: 6px 2px 8px">
           📌 每次调用 <b>实时记一笔</b>：功能 / 模型 / 图文类型 / 输入·输出·思考 token（接口有 usage 用精确值并标「精确」，否则按文本估算）/ 耗时 / 费用明细。金额按下方计价表估算，仅供心里有底，以服务商账单为准；<b>本地免费服务（Ollama/LM Studio/Jan）计 ¥0</b>。
         </div>
@@ -3565,27 +3627,30 @@ onUnmounted(() => {
         </div>
         <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🧾 最近记录（{{ costStat.list.length }}）<span style="font-weight:400;color:var(--text3);font-size: calc(11px * var(--ui-fs-scale, 1))">点某条可展开费用明细</span></div>
         <div class="cost-list">
-          <div v-for="(r, i) in costStat.list" :key="i" class="cost-it" :class="{ open: costOpen === i }" @click="costOpen = costOpen === i ? null : i">
-            <span class="ci-time" :title="fmtTime(r.t)">{{ fmtTime(r.t) }}</span>
-            <span class="ci-kind" :title="costKindLabel(r.kind)">{{ r.kind === 'img' ? '🖼' : r.kind === 'audio' ? '🔊' : '📝' }}</span>
-            <span class="ci-feat">{{ COST_FEATURES[r.feature] || r.feature }}</span>
-            <span class="ci-model" :title="'提供商：' + (r.provider || '?')">{{ r.model || r.provider || '?' }}</span>
-            <span class="ci-tk" :title="'输入 ' + r.inT + ' / 输出 ' + r.outT + (r.reasonT ? ' / 思考 ' + r.reasonT : '') + ' tok'">
-              {{ fmtTok(r.inT) }}/{{ fmtTok(r.outT) }}{{ r.reasonT ? '+' + fmtTok(r.reasonT) : '' }} tok{{ r.exact ? '·精确' : '·估' }}
-            </span>
-            <span v-if="r.sec" class="ci-sec">{{ r.sec }}s</span>
-            <b class="ci-cost" :title="costCostDetail(r)">{{ fmtCost(r.cost) }}</b>
+          <div v-for="(r, i) in costStat.list" :key="i" class="cost-it-wrap">
+            <div class="cost-it" :class="{ open: costOpen === i }" @click="costOpen = costOpen === i ? null : i">
+              <span class="ci-time" :title="fmtTime(r.t)">{{ fmtTime(r.t) }}</span>
+              <span class="ci-kind" :title="costKindLabel(r.kind)">{{ r.kind === 'img' ? '🖼' : r.kind === 'audio' ? '🔊' : '📝' }}</span>
+              <span class="ci-feat">{{ COST_FEATURES[r.feature] || r.feature }}</span>
+              <span class="ci-model" :title="'提供商：' + (r.provider || '?')">{{ r.model || r.provider || '?' }}</span>
+              <span class="ci-tk" :title="'输入 ' + r.inT + ' / 输出 ' + r.outT + (r.reasonT ? ' / 思考 ' + r.reasonT : '') + ' tok'">
+                {{ fmtTok(r.inT) }}/{{ fmtTok(r.outT) }}{{ r.reasonT ? '+' + fmtTok(r.reasonT) : '' }} tok{{ r.exact ? '·精确' : '·估' }}
+              </span>
+              <span v-if="r.sec" class="ci-sec">{{ r.sec }}s</span>
+              <b class="ci-cost" :title="costCostDetail(r)">{{ fmtCost(r.cost) }}</b>
+              <button class="ci-toggle" @click.stop="costOpen = costOpen === i ? null : i">{{ costOpen === i ? '收起' : '展开' }}</button>
+            </div>
+            <div v-if="costOpen === i" class="cost-detail cost-detail-inline">
+              <div><b>时间：</b>{{ fmtTime(r.t) }}</div>
+              <div><b>功能：</b>{{ COST_FEATURES[r.feature] || r.feature }}（{{ costKindLabel(r.kind) }}）</div>
+              <div><b>模型：</b>{{ r.model || '?' }}<span v-if="r.provider">（{{ r.provider }}）</span></div>
+              <div><b>Token：</b>输入 {{ r.inT }} / 输出 {{ r.outT }}<template v-if="r.reasonT"> / 思考 {{ r.reasonT }}</template>（{{ r.exact ? '接口精确' : '文本估算' }}）</div>
+              <div v-if="r.sec"><b>耗时：</b>{{ r.sec }} 秒</div>
+              <div><b>费用明细：</b>{{ costCostDetail(r) || '—' }} = <b>{{ fmtCost(r.cost) }}</b></div>
+              <div v-if="r.note"><b>备注：</b>{{ r.note }}</div>
+            </div>
           </div>
           <div v-if="!costStat.list.length" class="cost-empty">还没有 AI 调用记录，去问答/刷题/朗读试试（实时动态记）</div>
-        </div>
-        <div v-if="costOpen != null && costStat.list[costOpen]" class="cost-detail">
-          <div><b>时间：</b>{{ fmtTime(costStat.list[costOpen].t) }}</div>
-          <div><b>功能：</b>{{ COST_FEATURES[costStat.list[costOpen].feature] || costStat.list[costOpen].feature }}（{{ costKindLabel(costStat.list[costOpen].kind) }}）</div>
-          <div><b>模型：</b>{{ costStat.list[costOpen].model || '?' }}<span v-if="costStat.list[costOpen].provider">（{{ costStat.list[costOpen].provider }}）</span></div>
-          <div><b>Token：</b>输入 {{ costStat.list[costOpen].inT }} / 输出 {{ costStat.list[costOpen].outT }}<template v-if="costStat.list[costOpen].reasonT"> / 思考 {{ costStat.list[costOpen].reasonT }}</template>（{{ costStat.list[costOpen].exact ? '接口精确' : '文本估算' }}）</div>
-          <div v-if="costStat.list[costOpen].sec"><b>耗时：</b>{{ costStat.list[costOpen].sec }} 秒</div>
-          <div><b>费用明细：</b>{{ costCostDetail(costStat.list[costOpen]) || '—' }} = <b>{{ fmtCost(costStat.list[costOpen].cost) }}</b></div>
-          <div v-if="costStat.list[costOpen].note"><b>备注：</b>{{ costStat.list[costOpen].note }}</div>
         </div>
         <details class="guide" style="margin-top: 10px">
           <summary>⚙️ 计价表（2026-09-10 起 DeepSeek Flash 新价：空闲缓存未命中输入1/输出4 元每百万，缓存命中输入0.02，高峰×2；另含智谱/通义/OpenAI/Kimi/Gemini/豆包等官方公开价。单位：输入框=元/千 token = 官方价(元/百万)÷1000。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
