@@ -68,6 +68,7 @@ const gFabIntent = ref('') // 本次打开意图：''=沿用记忆 / 'mini'=单�
 const draftFabOn = ref(localStorage.getItem('xc_draft_fab_on') !== '0')
 function saveDraftFabOn() { try { localStorage.setItem('xc_draft_fab_on', draftFabOn.value ? '1' : '0') } catch (e) {} }
 const gFab = ref(null)
+const gFabDock = ref('') // 随手记贴边隐藏方向：left / right
 // 悬浮球位置钳制：保证任何窗口/设备（桌面/手机/APK）内都可见，永不超出当前显示窗口
 function clampFab(p) {
   const vw = window.innerWidth || document.documentElement.clientWidth || 360
@@ -75,10 +76,55 @@ function clampFab(p) {
   p.x = Math.max(4, Math.min(vw - 56, p.x))
   p.y = Math.max(4, Math.min(vh - 60, p.y))
 }
-try { const p = JSON.parse(localStorage.getItem('xc_global_fab') || 'null'); if (p && p.x != null) { clampFab(p); gFab.value = p } } catch (e) {}
+function gFabDockSide(p) {
+  if (!p || typeof p.x !== 'number') return ''
+  const w = 46
+  const vw = window.innerWidth || 360
+  const leftGap = p.x
+  const rightGap = vw - p.x - w
+  if (leftGap < 14 && leftGap <= rightGap) return 'left'
+  if (rightGap < 14) return 'right'
+  return ''
+}
+function gFabDockPos(side) {
+  const vw = window.innerWidth || 360
+  const p = gFab.value || {}
+  const x = side === 'left' ? -34 : vw - 12
+  return { x, y: typeof p.y === 'number' ? p.y : Math.max(120, (window.innerHeight || 640) - 150) }
+}
+function revealGFabDock() {
+  const side = gFabDock.value
+  if (!side) return
+  gFabDock.value = ''
+  const p = gFabDockPos(side)
+  p.x = side === 'left' ? 12 : (window.innerWidth || 360) - 58
+  clampFab(p)
+  gFab.value = p
+  try { localStorage.setItem('xc_global_fab', JSON.stringify(p)) } catch (e) {}
+}
+try {
+  const p = JSON.parse(localStorage.getItem('xc_global_fab') || 'null')
+  if (p && p.x != null) {
+    const side = gFabDockSide(p)
+    if (side) {
+      gFabDock.value = side
+      gFab.value = gFabDockPos(side)
+    } else {
+      clampFab(p)
+      gFab.value = p
+    }
+  }
+} catch (e) {}
 // 首次打开默认位置：右下角（贴近拇指、避开底部导航/输入栏；inset 定位天然不超窗，任何设备都可见）
-const gFabStyle = computed(() => gFab.value ? { left: gFab.value.x + 'px', top: gFab.value.y + 'px' } : { right: '16px', bottom: '88px' })
+const gFabStyle = computed(() => {
+  const p = gFabDock.value ? gFabDockPos(gFabDock.value) : gFab.value
+  return p ? { left: p.x + 'px', top: p.y + 'px', right: 'auto', bottom: 'auto' } : { right: '16px', bottom: '88px' }
+})
 function reClampFab() {
+  if (gFabDock.value) {
+    gFab.value = gFabDockPos(gFabDock.value)
+    return
+  }
   if (!gFab.value) return
   clampFab(gFab.value)
   try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (e) {}
@@ -116,8 +162,15 @@ function onGFabDown(e) {
     try { btn.releasePointerCapture(e.pointerId) } catch (_) {}
     if (moved) {
       gFab.value = cur
-      try { localStorage.setItem('xc_global_fab', JSON.stringify(cur)) } catch (_) {}
+      const side = gFabDockSide(cur)
+      gFabDock.value = side
+      if (side) gFab.value = gFabDockPos(side)
+      try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (_) {}
     } else {
+      if (gFabDock.value) {
+        revealGFabDock()
+        return
+      }
       // 单击=小画板；双击（300ms 内第二次）= 全屏原题勾画，不挡功能界面
       const now = Date.now()
       if (now - gLastTap < 320) {
@@ -3005,7 +3058,8 @@ onUnmounted(() => {
           <div class="guide-body">
             <ul>
               <li><b>打开</b>：点任意界面的「✏️」悬浮球，弹出全透明手写板（能看清底层文字），✕ / Esc 关闭后自动保存。</li>
-              <li><b>拖动</b>：按住悬浮球可拖到屏幕任意位置，位置自动记忆；点一下（未拖动）即打开。</li>
+              <li><b>贴边隐藏</b>：拖到屏幕左右边缘会自动变透明、只留一个可点的边；点击先呼出完整按钮，再点一次打开。</li>
+              <li><b>拖动</b>：按住悬浮球可拖到屏幕任意位置，位置自动记忆；离开边缘后点一下（未拖动）即打开。</li>
               <li><b>画笔</b>：🖊钢笔 / 🖌毛笔 / ✏️铅笔 / 🖍马克笔 / 🧯荧光笔，6 色，笔头 0.35~2.0mm（点「✒️笔头」循环切换）。</li>
               <li><b>擦除/撤销</b>：🧽橡皮（再点切换小/中/大）；↩撤销最近 20 步（Ctrl/Cmd+Z）；🗑清空。</li>
               <li><b>保存/历史</b>：💾存版 保留新版本；📁记录 可查看全部版本（含时间）、📂载入、🗑删除。</li>
@@ -3711,7 +3765,7 @@ onUnmounted(() => {
     <div id="toast" ref="toastEl" class="toast"></div>
     <!-- 全局随手记：任何界面可写的悬浮手写板（做题界面自动隐藏，由做题草稿球接管） -->
     <Teleport to="body">
-      <button v-if="draftFabOn && !globalDraft" class="draft-fab gfab" :style="gFabStyle" :title="'✏️ 随手记：单击=小画板 · 双击=全屏勾画原题（可拖动，设置里可关闭）'" @pointerdown="onGFabDown">✏️</button>
+      <button v-if="draftFabOn && !globalDraft" class="draft-fab gfab" :class="{ dock: !!gFabDock }" :style="gFabStyle" :title="gFabDock ? '✏️ 随手记已贴边隐藏：点击呼出后再点打开' : '✏️ 随手记：单击=小画板 · 双击=全屏勾画原题（可拖动，设置里可关闭）'" @pointerdown="onGFabDown">✏️</button>
       <DraftPad v-if="globalDraft" :initial-mode="gFabIntent" draft-key="global" title="📝 全局随手记" @close="globalDraft = false; gFabIntent = ''" />
     </Teleport>
   </div>

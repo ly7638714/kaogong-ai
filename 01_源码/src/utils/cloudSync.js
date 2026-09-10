@@ -4,6 +4,7 @@
 import { store } from '../store'
 import { collectAll } from './dataBackup'
 import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav'
+import { WRONG_DELETED_KEY, filterDeletedWrongs, parseWrongDeleted } from './wrongDelete'
 
 export const SYNC_STATE_KEY = 'xc_sync_state'
 const LOCAL_ONLY_KEYS = new Set([
@@ -203,18 +204,37 @@ function deepMergeValue(key, lv, rv, depth = 0) {
   return null // 标量冲突由 mergeSyncData 用基线裁决
 }
 
+function parseArrayValue(v) {
+  try {
+    const arr = JSON.parse(String(v || '[]'))
+    return Array.isArray(arr) ? arr : []
+  } catch (e) {
+    return []
+  }
+}
+
 export function mergeSyncData(localData, remoteData, baseline = {}) {
   const local = localData || {}
   const remote = remoteData || {}
   const base = baseline || {}
+  const localDeleted = parseWrongDeleted(local[WRONG_DELETED_KEY])
+  const remoteDeleted = parseWrongDeleted(remote[WRONG_DELETED_KEY])
+  const deleted = mergeArrays(localDeleted, remoteDeleted, WRONG_DELETED_KEY)
   const keys = new Set([...Object.keys(local), ...Object.keys(remote)])
   const out = {}
+  if (deleted.length || local[WRONG_DELETED_KEY] || remote[WRONG_DELETED_KEY]) out[WRONG_DELETED_KEY] = JSON.stringify(deleted)
   for (const k of keys) {
     if (!shouldSyncKey(k)) continue
+    if (k === WRONG_DELETED_KEY) continue
     const lv = k in local ? local[k] : null
     const rv = k in remote ? remote[k] : null
     if (lv == null) { out[k] = rv; continue }
     if (rv == null) { out[k] = lv; continue }
+    if (k === 'xc_wqs') {
+      const merged = mergeArrays(parseArrayValue(lv), parseArrayValue(rv), k)
+      out[k] = JSON.stringify(filterDeletedWrongs(merged, deleted))
+      continue
+    }
     const merged = deepMergeValue(k, lv, rv, 0)
     if (merged != null) { out[k] = merged; continue }
     // 标量：本机没改且云端改了 → 用云端；两边都改或只有本机改 → 用本机，防自动覆盖正在学习的新数据。
@@ -262,6 +282,15 @@ export function applyLocalMerge(localAll, remoteRaw, baseline = {}) {
   return { local, remote, merged, changed, sameAsRemote }
 }
 
+export function hydrateStoreFromPlan(plan) {
+  if (!plan || !plan.merged || !plan.merged.xc_wqs) return
+  try {
+    store.wqs = filterDeletedWrongs(JSON.parse(plan.merged.xc_wqs), plan.merged[WRONG_DELETED_KEY])
+  } catch (e) {
+    try { store.wqs = JSON.parse(plan.merged.xc_wqs) } catch (e) {}
+  }
+}
+
 export async function runCloudSync() {
   const w = (store.cfg && store.cfg.webdav) || {}
   if (!w.url || !w.url.trim()) throw new Error('请先填写 WebDAV 地址')
@@ -274,6 +303,7 @@ export async function runCloudSync() {
 
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  hydrateStoreFromPlan(plan)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote) {
     const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }

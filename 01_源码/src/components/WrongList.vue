@@ -85,6 +85,7 @@ const {
   PAGE,
   WRONG_GROUPS,
   dedupeNow,
+  delPermanent,
   jumpTo,
   loadMore,
   masteryOf,
@@ -251,6 +252,7 @@ function dueTipLater() {
             <button class="redo-mini" title="主动回忆复盘：先默写考点/思路，再展开解析自评" @click.stop="openRecall(q)">🧠 回忆</button>
             <button v-if="q.archived" class="redo-mini" title="移回错题集继续学习" @click.stop="unarchiveWrong(q)">↩ 移回错题集</button>
             <button v-else class="redo-mini" title="认为已彻底吃透：移出错题集并放入单独收藏夹" @click.stop="archiveWrong(q)">📦 吃透收藏</button>
+            <button class="redo-mini danger" title="永久删除：同步、导出和旧备份恢复都不会再保留" @click.stop="delPermanent(q)">🗑 永久删除</button>
           </div>
         </div>
         <div v-if="shownTotal > shown.length" class="wq-more">

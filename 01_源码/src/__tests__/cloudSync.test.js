@@ -59,6 +59,19 @@ describe('cloudSync 多端安全合并', () => {
     expect(JSON.parse(merged.xc_msgs)).toHaveLength(1)
   })
 
+  it('错题永久删除墓碑会过滤本地与云端旧记录', () => {
+    const local = {
+      xc_wqs: JSON.stringify([]),
+      xc_wq_deleted: JSON.stringify([{ id: 'w1', qhash: 'q1', t: 1690000000100 }])
+    }
+    const remote = {
+      xc_wqs: JSON.stringify([{ id: 'w1', question: '已经删除的旧题', t: 1690000000000 }])
+    }
+    const merged = mergeSyncData(local, remote, {})
+    expect(JSON.parse(merged.xc_wqs)).toEqual([])
+    expect(JSON.parse(merged.xc_wq_deleted)).toHaveLength(1)
+  })
+
   it('applyLocalMerge 下载远端后把两端集合安全合并并写回本机', () => {
     testMem.clear()
     testMem.set('xc_msgs', JSON.stringify([{ id: 'm1', t: 1690000000100, role: 'user', text: '本机' }]))

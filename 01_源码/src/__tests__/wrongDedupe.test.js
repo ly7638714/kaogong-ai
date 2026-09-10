@@ -1,11 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { store, addWrong, dedupeWrongs, isCompleteWrong } from '../store'
+import { store, addWrong, dedupeWrongs, deleteWrongPermanent, isCompleteWrong } from '../store'
+
+const testMem = new Map()
+globalThis.localStorage = {
+  getItem: (k) => (testMem.has(k) ? testMem.get(k) : null),
+  setItem: (k, v) => testMem.set(k, String(v)),
+  removeItem: (k) => testMem.delete(k),
+  key: (i) => [...testMem.keys()][i] ?? null,
+  get length() { return testMem.size }
+}
 
 const FULL_Q = '这是一道完整的选择题题干内容。A. 选项甲 B. 选项乙 C. 选项丙 D. 选项丁'
 const mk = (q = FULL_Q, extra = {}) => ({ id: Date.now() + Math.random(), question: q, answer: '正确答案 B', subject: '言语理解', ...extra })
 
 describe('错题查重与去重', () => {
-  beforeEach(() => { store.wqs.length = 0 })
+  beforeEach(() => { store.wqs.length = 0; testMem.clear() })
 
   it('addWrong：完全相同的题干只存一道，重复时累计错误次数', () => {
     const a = mk(FULL_Q)
@@ -69,5 +78,14 @@ describe('错题查重与去重', () => {
     expect(isCompleteWrong(mk('太短')).ok).toBe(false)
     expect(isCompleteWrong(mk('这是一道完整的题没有答案只有题干文字内容', { answer: '' })).ok).toBe(false)
     expect(isCompleteWrong(mk('好的 我来帮你 这道题选 A 因为……', { answer: '' })).ok).toBe(false)
+  })
+
+  it('deleteWrongPermanent 移出列表并写入删除墓碑', () => {
+    const q = mk(FULL_Q)
+    addWrong(q)
+    expect(deleteWrongPermanent(q)).toBe(true)
+    expect(store.wqs).toHaveLength(0)
+    const tombstones = JSON.parse(localStorage.getItem('xc_wq_deleted') || '[]')
+    expect(tombstones.some((x) => String(x.id) === String(q.id))).toBe(true)
   })
 })

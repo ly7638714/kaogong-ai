@@ -4,6 +4,7 @@ import { canonicalSubjectOf } from './utils/wrongTaxonomy' // v3.8.212 板块/�
 import { showToast } from './utils/toast'
 import { safeSet, KEYS, migrate } from './utils/storage'
 import { extractChoices, answerLetter } from './utils/quiz'
+import { addWrongDeleted, filterDeletedWrongs, loadWrongDeleted } from './utils/wrongDelete'
 const D = () => ({
   text: { prov: 'ds', key: '', url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' },
   vision: {
@@ -154,7 +155,7 @@ export function load() {
   } catch (e) {}
   try {
     const w = localStorage.getItem('xc_wqs')
-    if (w) store.wqs = JSON.parse(w)
+    if (w) store.wqs = filterDeletedWrongs(JSON.parse(w), loadWrongDeleted())
     // v3.8.212 一次性迁移：存量错题 subject 统一为 canonical（细分小板块或大板块全称）
     if (Array.isArray(store.wqs) && store.wqs.length && localStorage.getItem('xc_wq_subj_v1') !== '1') {
       let changed = false
@@ -300,6 +301,15 @@ export function dedupeWrongs() {
   for (let i = remove.length - 1; i >= 0; i--) store.wqs.splice(remove[i], 1)
   saveWqs()
   return remove.length
+}
+
+export function deleteWrongPermanent(q) {
+  const idx = store.wqs.indexOf(q)
+  if (idx < 0) return false
+  addWrongDeleted(q)
+  store.wqs.splice(idx, 1)
+  saveWqs()
+  return true
 }
 
 export const saveWqs = () => { safeSet(KEYS.WQS, store.wqs) }

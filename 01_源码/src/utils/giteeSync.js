@@ -3,7 +3,7 @@
 /* global btoa, atob, FormData */
 import { store, saveCfg } from '../store'
 import { collectAll } from './dataBackup'
-import { applyLocalMerge, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
 
 const GE_API = 'https://gitee.com/api/v5'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -227,6 +227,7 @@ export async function runGiteeSync() {
   const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  hydrateStoreFromPlan(plan)
   const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   // 云端文件无法解析时仍用最新 sha 覆盖重建，不让用户手动去仓库删文件。

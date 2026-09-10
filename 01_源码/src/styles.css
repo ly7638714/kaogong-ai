@@ -3197,6 +3197,8 @@ body[data-theme='light'] .app.is-2d {
 .ms.dig { background: rgba(52, 211, 153, 0.14); color: #6ee7b7; }
 .redo-mini { margin-left: auto; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(52, 211, 153, 0.4); background: transparent; color: #6ee7b7; font-size: calc(11px * var(--ui-fs-scale, 1)); cursor: pointer; font-family: inherit; }
 .redo-mini:hover { background: rgba(52, 211, 153, 0.12); }
+.redo-mini.danger { border-color: rgba(251, 113, 133, 0.45); color: #fb7185; }
+.redo-mini.danger:hover { background: rgba(251, 113, 133, 0.12); }
 .redo-ov .pnl { max-width: 620px; max-height: 86vh; overflow-y: auto; }
 .redo-timer { font-family: var(--font-hud); color: var(--hud-cyan); font-size: calc(13px * var(--ui-fs-scale, 1)); margin-left: 8px; }
 .redo-subj { display: inline-block; margin: 6px 0; padding: 2px 10px; border-radius: 999px; background: rgba(34, 211, 238, 0.12); color: var(--hud-cyan); font-size: calc(12px * var(--ui-fs-scale, 1)); }
@@ -4467,6 +4469,9 @@ body[data-theme='light'] .sim-doing.paper { background: #faf5e6; }
 .gfab::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1.5px solid rgba(167, 139, 250, 0.55); animation: gfabPulse 2.6s ease-in-out infinite; pointer-events: none; }
 @keyframes gfabPulse { 0%, 100% { transform: scale(1); opacity: .5; } 50% { transform: scale(1.28); opacity: 0; } }
 .gfab:active::after { animation: none; opacity: 0; }
+.draft-fab.gfab.dock { opacity: 0.32; box-shadow: none; transition: transform .18s, opacity .18s; }
+.draft-fab.gfab.dock:hover { opacity: 0.88; transform: scale(1.03); }
+.draft-fab.gfab.dock::after { animation: none; opacity: 0; }
 
 /* 纸张模式下表格/代码/引用边框适配（浅色底用深色边框） */
 .sim-doing.paper .table-scroll { border-radius: 8px; }

@@ -4,7 +4,7 @@
 /* global btoa, atob */
 import { store, saveCfg } from '../store'
 import { collectAll } from './dataBackup'
-import { applyLocalMerge, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
 
 const GH_API = 'https://api.github.com'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -157,6 +157,7 @@ export async function runGitHubSync() {
   const remoteRaw = remoteFile ? remoteFile.obj : null
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  hydrateStoreFromPlan(plan)
   const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote || (remoteFile && remoteFile.corrupted)) {

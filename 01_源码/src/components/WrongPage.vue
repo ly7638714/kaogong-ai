@@ -1,7 +1,7 @@
 <script setup>
 
 import { ref, reactive, computed, watch, onUnmounted, nextTick } from 'vue'
-import { store, saveWqs, addWrong, dedupeWrongs } from '../store'
+import { store, saveWqs, addWrong, dedupeWrongs, deleteWrongPermanent } from '../store'
 import { showToast } from '../utils/toast'
 import { useAi } from '../utils/useAi'
 const { run: aiRun } = useAi()
@@ -1195,12 +1195,22 @@ function save() {
 }
 function del() {
   if (cur.value < 0) return
-  if (!confirm('确定删除这道错题？')) return
-  store.wqs.splice(cur.value, 1)
-  saveWqs()
+  if (!confirm('永久删除这道错题？\n\n删除后会写入同步墓碑，之后同步、导出和旧备份恢复都不会再把它带回来。')) return
+  deleteWrongPermanent(store.wqs[cur.value])
   cur.value = -1
   show.value = false
-  showToast('已删除错题', 'info')
+  showToast('已永久删除错题，之后同步不会再恢复', 'success')
+}
+function delPermanent(q) {
+  if (!q) return
+  if (!confirm('永久删除「' + String((q.subject || q.plate || '错题')).slice(0, 20) + '」？\n\n此操作会写入删除墓碑，之后同步、导出和旧备份恢复都不会再保留该题。')) return
+  const wasOpen = cur.value >= 0 && store.wqs[cur.value] === q
+  deleteWrongPermanent(q)
+  if (wasOpen) {
+    cur.value = -1
+    show.value = false
+  }
+  showToast('已永久删除错题，之后同步不会再恢复', 'success')
 }
 async function ankiPush() {
   const q = store.wqs[cur.value]
@@ -1469,7 +1479,7 @@ const wrongCtx = reactive({
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
   cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
-  cur, customReason, dedupeNow, del, delVaultPaper, delVaultQuiz,
+  cur, customReason, dedupeNow, del, delPermanent, delVaultPaper, delVaultQuiz,
   downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat, gotoDeepChat, gotoWrongExam,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
