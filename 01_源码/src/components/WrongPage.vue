@@ -1207,6 +1207,31 @@ function gotoChat() {
     window.dispatchEvent(new CustomEvent('xc-goto-msg', { detail: q.msgIdx }))
   }
 }
+// 错题 → 对话深挖：带着题干/选项/答案/错因进入对话，AI 按“考点-骨架-陷阱-修正-变式”输出
+function gotoDeepChat() {
+  const q = store.wqs[cur.value]
+  if (!q) return
+  const opts = extractChoices(q.question || '').map((o) => o.k + '. ' + o.t).join('\n')
+  const reasons = (q.reasons || []).filter(Boolean).join('、')
+  const prompt = [
+    '【错题深挖】请按“考点定位 → 核心骨架 → 我的错因 → 命题陷阱 → 一句话修正 → 同类变式”讲透这道题，不要只给答案。',
+    '题目：' + String(q.question || '').slice(0, 1200),
+    opts ? '选项：\n' + opts : '',
+    q.answer ? '正确答案：' + q.answer : '',
+    reasons ? '我的错因：' + reasons : '',
+    q.note ? '我的笔记：' + q.note : ''
+  ].filter(Boolean).join('\n\n').slice(0, 2600)
+  store.pendingAsk = prompt
+  store.tab = 'chat'
+  show.value = false
+  showToast('已带到对话页，可编辑后发送深挖', 'success')
+}
+// 错题 → AI出题/错题集组卷：结果交卷后自动回流原错题，计入吸收度
+function gotoWrongExam() {
+  store.tab = 'chat'
+  show.value = false
+  setTimeout(() => window.dispatchEvent(new CustomEvent('xc-open-exam', { detail: { src: 'wrong' } })), 30)
+}
 // 让小助手引导归纳错因
 const aiBusy = ref(false)
 function origCtx() {
@@ -1409,7 +1434,7 @@ const wrongCtx = reactive({
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
   cur, customReason, dedupeNow, del, delVaultPaper, delVaultQuiz,
   downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
-  fmtT, focusList, focusRedo, focusShow, frm, gotoChat,
+  fmtT, focusList, focusRedo, focusShow, frm, gotoChat, gotoDeepChat, gotoWrongExam,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
   masteryOf, absorbOf1, md, openCards, openIdx, openRedo, openRelated,
   openRename, origStem, pageN, paperView, presetBoxOpen, presetReasons,

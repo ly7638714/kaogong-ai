@@ -99,6 +99,8 @@ const {
   del,
   downloadImg,
   gotoChat,
+  gotoDeepChat,
+  gotoWrongExam,
   openRecall,
   openRedo,
   wrongSubOf,
@@ -180,6 +182,8 @@ function capWrongExplain() {
           <div class="pnl-sub">
             {{ wrongSubOf(store.wqs[cur]) || '未分类' }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
+            <span class="wq-goto" title="带着本题去对话页，让 AI 按考点、骨架、陷阱、修正、变式深挖" @click.self.stop="gotoDeepChat()">💬 带去对话深挖</span>
+            <span class="wq-goto" title="进入错题集组卷；本场作答结果会自动写回原错题吸收度" @click.self.stop="gotoWrongExam()">🎲 去 AI 出题练</span>
             <span class="wq-goto" title="以答题界面（可作答+即时判题）重做本题" @click.self.stop="openRedo()">✍️ 答题界面重做</span>
             <span class="wq-goto" title="主动回忆复盘：先默写考点/思路再展开解析（计入二刷统计）" @click.self.stop="openRecall(store.wqs[cur])">🧠 主动回忆</span>
             <span class="wq-goto" @click.self.stop="copyObsidianWrong(store.wqs[cur])">📋 复制 Obsidian</span>

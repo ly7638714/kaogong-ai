@@ -12,6 +12,8 @@ import { zhentiIndex, zhentiPaper, zhentiToItems, zhentiTypes } from '../data/zh
 import { allAnchors } from '../data/anchorSet' // 35号批次4-B(2/2)：锚点自测（每板块10道固定真题）
 import { pickGenCfg } from '../utils/fastMode' // 出题/预生成统一快模型路由
 import { petAnalyzeCurrent } from '../utils/pet'
+import { scheduleAfter } from '../utils/reviewSchedule'
+import { questionMastery } from '../utils/mastery'
 import { appendAttempt, buildAttempt, backfillFromQuizCol } from '../utils/attemptLog' // 35号批次1-B 作答事件流
 import { autoWrongReasons } from '../utils/trapMap' // 35号批次3-A 陷阱映射→错因
 import { mountCharts } from '../utils/chartMount'
@@ -673,6 +675,7 @@ function finish() {
   clearTimers()
   // 35号批次1-B：首次交卷前把 quizCol 存量 history 幂等回填为作答事件（老用户升级即有数据）
   backfillFromQuizCol(quizCol.value)
+  const syncedWrongIds = new Set()
   questions.value.forEach((qq, i) => {
     const m = marks.value[i]
     if (m == null) marks.value[i] = { ok: false, pick: '', timeout: false, blank: true }
@@ -687,7 +690,28 @@ function finish() {
     // 35号批次1-B：统一作答事件流；真题 AI 判题未返回(judging)时跳过该题，避免写入错误结果
     if (singleMode.value) { updateQuizColResult(qq, okFinal, mm && mm.usedSec); sameRecord(qq.subject, qq.variant || qq.kpoint || '', okFinal) } // 5.3 同类连做（答题卡模式交卷记）
     if (mm && !mm.judging) appendAttempt(buildAttempt(qq, mm, attemptSrcOf(qq), curPaper.value && curPaper.value.id))
+    // 错题集组卷/AI出题回流：把本场作答写回原错题，作为吸收度“间隔复习”证据
+    if (qq && qq.fromWrong && qq.wrongId && !syncedWrongIds.has(qq.wrongId) && mm && !mm.blank && mm.pick != null) {
+      const wq = store.wqs.find((x) => x && x.id === qq.wrongId)
+      if (wq) {
+        syncedWrongIds.add(qq.wrongId)
+        const now = Date.now()
+        const patch = scheduleAfter(wq, okFinal, now)
+        wq.correctStreak = okFinal ? (wq.correctStreak || 0) + 1 : 0
+        wq.wrongCount = (wq.wrongCount || 1) + (okFinal ? 0 : 1)
+        wq.lastRedo = new Date(now).toLocaleString()
+        wq.lastRedoAt = now
+        wq.digested = patch.digested
+        wq.digestLvl = patch.digestLvl
+        wq.dueAt = patch.dueAt
+        wq.digestedAt = patch.digested ? (wq.digestedAt || now) : null
+        wq.reviewStats = patch.reviewStats
+        wq.redoHistory = (wq.redoHistory || []).slice(-9).concat([{ at: new Date(now).toLocaleString(), ok: okFinal, t: mm.usedSec || 0, pick: mm.pick || '', src: 'exam' }])
+        wq.mastery = questionMastery(wq)
+      }
+    }
   })
+  if (syncedWrongIds.size) saveWqs()
   // 答题卡交卷后：萌宠自动分析第一道错题错因（延续原即时模式的错因分析能力）
   if (sheetMode.value) {
     const wi = questions.value.findIndex((qq, i) => marks.value[i] && !marks.value[i].ok)

@@ -2001,7 +2001,7 @@ onMounted(() => {
 })
 onMounted(() => document.addEventListener('click', onMsgFigClick))
 onUnmounted(() => document.removeEventListener('click', onMsgFigClick))
-function onOpenExam() { openExam('ai') }
+function onOpenExam(e) { openExam((e && e.detail && e.detail.src) || 'ai') }
 function onOpenPaperData(e) { openPaperData(e && e.detail) }
 function onModePickOutside(e) { if (modeOpen.value && !(e.target && e.target.closest && e.target.closest('.mode-pick'))) modeOpen.value = false }
 function onOpenPaper() { openExam('import') }
