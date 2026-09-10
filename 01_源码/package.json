@@ -1,7 +1,7 @@
 {
   "name": "xingce-ai-assistant",
   "private": true,
-  "version": "3.8.281",
+  "version": "3.8.282",
   "type": "module",
   "scripts": {
     "dev": "vite",

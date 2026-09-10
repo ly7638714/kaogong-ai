@@ -12,6 +12,7 @@ import AccumToolbar from './AccumToolbar.vue' // v3.8.191 工具区子组件
 import AccumContent from './AccumContent.vue' // v3.8.191 正文学习区
 import AccumDialogs from './AccumDialogs.vue' // v3.8.191 详解/记忆库/笔记区
 import AccGame from './AccGame.vue'
+import { loadGameStats, loadGameWrong } from '../utils/accGame'
 import { CHANGSHI, SHIZHENG, CHENGYU, SHICI, YUFEN_CHENGYU, YUFEN_SHICI, skillMemCS, skillMemZZ } from '../data/memoryPools' // v3.8.188 数据池单源
 const { run: aiRun } = useAi()
 
@@ -23,6 +24,18 @@ const SZCATS = ['理论会议', '政策经济', '科技民生', '贵州地方']
 // ===== 状态 =====
 const cat = ref('常识')
 const gameShow = ref(false)
+const gameStats = ref(loadGameStats())
+const gameWrongN = ref(loadGameWrong().length)
+function openGame() {
+  gameStats.value = loadGameStats()
+  gameWrongN.value = loadGameWrong().length
+  gameShow.value = true
+}
+function closeGame() {
+  gameShow.value = false
+  gameStats.value = loadGameStats()
+  gameWrongN.value = loadGameWrong().length
+}
 // 批次7·S6：技能矩阵记忆词条接入积累池（常识12条+政治10条）
 const cur = ref('')
 const curRegion = ref('全部') // 时政地区筛选：全部/国内/贵州
@@ -753,15 +766,30 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
       <div class="acc-head">
         <div class="acc-title-row">
           <span class="acc-title">🗂️ 常识 · 时政积累</span>
-          <button class="fp-b" style="border-color:rgba(34,211,238,.45);color:var(--hud-cyan)" @click="gameShow = true">🎮 记忆闯关</button>
+          <button class="fp-b" style="border-color:rgba(34,211,238,.45);color:var(--hud-cyan)" @click="openGame()">🎮 记忆闯关</button>
           <button class="fp-b gold" @click="memShow = true">📦 记忆库（{{ store.myMem.length }}）</button>
+        </div>
+        <div class="acc-game-hero">
+          <div class="agh-main">
+            <div class="agh-icon">🎮</div>
+            <div>
+              <div class="agh-t">今日记忆闯关</div>
+              <div class="agh-d">看词选义、看义选词、语境填空、Boss 混合战。答对答错自动进入 SRS 复习计划。</div>
+            </div>
+          </div>
+          <div class="agh-stats">
+            <span>🏆 最高 <b>{{ gameStats.best || 0 }}</b></span>
+            <span>🔥 连续 <b>{{ gameStats.streak || 0 }}</b> 天</span>
+            <span>🔁 回炉 <b>{{ gameWrongN }}</b></span>
+          </div>
+          <button class="btn btn-pri agh-btn" @click="openGame()">🚀 开始挑战</button>
         </div>
         <AccumOverview :guide-show="guideShow" :due-count-all="dueCountAll" :today-reviewed="todayReviewed" :acc-stats="accStats" :today-goal-pct="todayGoalPct" :srs-stages="srsStages" :srs-int="SRS_INT" :daily-goal="DAILY_GOAL" @close-guide="closeGuide()" @start-study="startStudy()" />
       </div>
     <AccumToolbar :ctx="fpctx" />
     <AccumContent :ctx="fpctx" />
     <AccumDialogs :ctx="fpctx" />
-    <AccGame v-if="gameShow" @close="gameShow = false" />
+    <AccGame v-if="gameShow" @close="closeGame()" />
     </div>
     </div>
     <!-- 我的导入笔记（Obsidian/Markdown） -->
@@ -805,6 +833,15 @@ const fpctx = reactive({ ref, computed, onMounted, onUnmounted, store, saveMyMem
   padding: 10px 12px;
 }
 .acc-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.acc-game-hero { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 11px 12px; border-radius: 14px; border: 1px solid rgba(34,211,238,.35); background: linear-gradient(135deg, rgba(34,211,238,.13), rgba(167,139,250,.1)); }
+.agh-main { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 220px; }
+.agh-icon { font-size: 30px; }
+.agh-t { font-weight: 900; color: var(--hud-cyan); font-size: calc(15px * var(--ui-fs-scale, 1)); }
+.agh-d { color: var(--text2); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.6; margin-top: 2px; }
+.agh-stats { display: flex; gap: 6px; flex-wrap: wrap; color: var(--text2); font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+.agh-stats span { border: 1px solid var(--glass-border); border-radius: 14px; padding: 2px 8px; background: rgba(255,255,255,.03); }
+.agh-stats b { color: var(--accent); }
+.agh-btn { padding: 7px 16px; font-size: calc(13px * var(--ui-fs-scale, 1)); }
 /* ===== 积累 UI v2：引导 / 今日概览 / 角标 / 更多折叠 ===== */
 .acc-guide {
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(59, 130, 246, 0.12));
