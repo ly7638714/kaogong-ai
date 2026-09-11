@@ -10,6 +10,7 @@ import { loadSrs, saveSrs, enqueueNew, ymdKey } from '../utils/memorySrs' // R5 
 import { showToast } from '../utils/toast' // R5 标记已学
 import { absorbState } from '../utils/wrongAbsorb'
 import { chatOnce, activeCfg } from '../api'
+import { COACH_OTHER, buildCoachPayload } from '../utils/wrongReasonCoach'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -64,10 +65,18 @@ const kbOpen = ref(false)
 const coachOpen = ref(false)
 const coachStep = ref(0)
 const coachFirst = ref('')
+const coachFirstCustom = ref('')
 const coachBlock = ref('')
+const coachBlockCustom = ref('')
+const coachNextAction = ref('')
+const coachNextCustom = ref('')
 const coachWrote = ref('')
 const coachBusy = ref(false)
 const coachFinal = ref([])
+const coachDeep = ref({ pattern: '', note: '', analysis: '' })
+const coachFieldGuide = ref({ pattern: { q: [], draft: '' }, note: { q: [], draft: '' }, analysis: { q: [], draft: '' } })
+const coachFieldBusy = ref('')
+const coachSaved = ref(false)
 const coachOptions = [
   { t: '只看了局部关键词，没先还原完整意思', d: '一眼抓到熟悉的词就急着选' },
   { t: '分不清结论和论据', d: '知道题干在讲事，但说不清到底要证明什么' },
@@ -82,6 +91,13 @@ const coachStep2Options = [
   { t: '选项说的是另一个主体/范围', d: '被相似词带跑，没有核对主体、时间、范围' },
   { t: '最后排除时凭感觉', d: '两个选项之间没有用统一标准比较' }
 ]
+const coachStep3Options = [
+  { t: '先把题干翻译成完整意思，再找结论和论据', d: '先还原意思，不急着看选项' },
+  { t: '先圈出结论，再逐一核对选项主体和范围', d: '用固定顺序排除，不靠语感' },
+  { t: '先写出判断标准，再比较选项力度', d: '两个选项之间用同一把尺子' },
+  { t: '先补对应知识点，再回来做同类题', d: '知识缺口先用例子补上' },
+  { t: '把这道题改成一句话规律，隔天复述一次', d: '把经验固定成可迁移动作' }
+]
 const reasonCoachReady = computed(() => !!(cur.value >= 0 && store.wqs[cur.value] && store.wqs[cur.value].reasonCoach && store.wqs[cur.value].reasonCoach.completed))
 function openLogicTranslate() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
@@ -92,53 +108,132 @@ function openLogicTranslate() {
   show.value = false
 }
 function openCoach() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  const rc = (q && q.reasonCoach) || {}
   coachOpen.value = true
   coachStep.value = 0
-  coachFirst.value = ''
-  coachBlock.value = ''
-  coachWrote.value = ''
-  coachFinal.value = []
+  coachFirst.value = rc.first || ''
+  coachFirstCustom.value = rc.firstCustom || ''
+  coachBlock.value = rc.block || ''
+  coachBlockCustom.value = rc.blockCustom || ''
+  coachNextAction.value = rc.next || ''
+  coachNextCustom.value = rc.nextCustom || ''
+  coachWrote.value = rc.reflection || ''
+  coachFinal.value = Array.isArray(rc.adopted) ? rc.adopted.slice() : []
+  coachDeep.value = rc.deep ? { pattern: '', note: '', analysis: '', ...rc.deep } : { pattern: '', note: '', analysis: '' }
+  coachFieldGuide.value = { pattern: { q: [], draft: '' }, note: { q: [], draft: '' }, analysis: { q: [], draft: '' } }
+  coachSaved.value = false
+}
+function pickCoachOption(step, t) {
+  if (step === 0) coachFirst.value = t
+  else if (step === 1) coachBlock.value = t
+  else coachNextAction.value = t
+}
+function coachChoice(step) {
+  if (step === 0) return coachFirst.value === COACH_OTHER ? coachFirstCustom.value.trim() : coachFirst.value
+  if (step === 1) return coachBlock.value === COACH_OTHER ? coachBlockCustom.value.trim() : coachBlock.value
+  return coachNextAction.value === COACH_OTHER ? coachNextCustom.value.trim() : coachNextAction.value
 }
 function coachNext() {
   if (coachStep.value === 0) {
-    if (!coachFirst.value) { showToast('先选一个最接近你当时状态的说法', 'info'); return }
+    if (!coachChoice(0)) { showToast('先选一个最接近你当时状态的说法，或写下自己的情况', 'info'); return }
     coachStep.value = 1
     return
   }
   if (coachStep.value === 1) {
-    if (!coachBlock.value) { showToast('再选一个最接近你的卡点', 'info'); return }
+    if (!coachChoice(1)) { showToast('再选一个最接近你的卡点，或写下自己的卡点', 'info'); return }
     coachStep.value = 2
   }
 }
 async function coachFinish() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
-  if (!coachFirst.value || !coachBlock.value || !coachWrote.value.trim()) { showToast('请先完成三步，再用自己的话写一句下次动作', 'info'); return }
+  if (!q) return
+  const payload = buildCoachPayload({
+    first: coachFirst.value,
+    firstCustom: coachFirstCustom.value,
+    block: coachBlock.value,
+    blockCustom: coachBlockCustom.value,
+    next: coachNextAction.value,
+    nextCustom: coachNextCustom.value,
+    reflection: coachWrote.value
+  })
+  if (!payload.first || !payload.block || !payload.next) { showToast('三步都完成后才能整理；每步都可以选选项或写“其他”', 'info'); return }
   coachBusy.value = true
   try {
-    q.reasonCoach = { first: coachFirst.value, block: coachBlock.value, reflection: coachWrote.value.trim(), completed: true, at: Date.now() }
+    q.reasonCoach = {
+      ...(q.reasonCoach || {}),
+      ...payload,
+      firstCustom: coachFirstCustom.value.trim(),
+      blockCustom: coachBlockCustom.value.trim(),
+      nextCustom: coachNextCustom.value.trim(),
+      completed: true,
+      at: Date.now()
+    }
+    const local = {
+      reasons: [
+        '当时状态：' + payload.first,
+        payload.block !== payload.first ? '核心卡点：' + payload.block : '',
+        '下次动作：' + payload.next
+      ].filter(Boolean).slice(0, 3),
+      pattern: '下次遇到同类题，先做到：' + payload.next,
+      note: payload.reflection || '我容易在“' + payload.block + '”这一环失去稳定判断；下次先写出判断标准，再比较选项。',
+      analysis: '这道题的失分链是：' + payload.first + ' → ' + payload.block + '。复盘时先还原当时的判断顺序，再把正确标准固定成下一步动作。'
+    }
+    applyCoachReview(q, local, { autoSave: true, source: 'local' })
+    coachFinal.value = local.reasons
+    coachDeep.value = { pattern: local.pattern, note: local.note, analysis: local.analysis }
+    coachSaved.value = true
     const c = activeCfg()
-    if (!c || !c.key) throw new Error('请先配置文字模型')
-    const sys = '你是错因教练。只能使用考生自己写下的观察和反思来整理错因，禁止补充考生没有表达过的原因，禁止替考生编造心理活动。只输出 JSON 数组，如 ["…","…"]。'
-    const user = '考生原话：\n1. 当时状态：' + coachFirst.value + '\n2. 卡点：' + coachBlock.value + '\n3. 下次动作：' + coachWrote.value.trim() + '\n请整理成 1-2 条具体错因，必须保留“下次先做什么”。'
-    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 500, 30000)
-    let arr = null
-    try { arr = JSON.parse(String(reply || '').trim()) } catch (e) { const m = String(reply || '').match(/\[[\s\S]*\]/); if (m) arr = JSON.parse(m[0]) }
-    coachFinal.value = Array.isArray(arr) ? arr.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 2) : []
-    if (!coachFinal.value.length) coachFinal.value = ['我对题干的翻译不够准确；下次先用自己的话复述结论和论据，再比较选项方向。']
+    if (c && c.key) {
+      await askAiReasons()
+      const deep = q.reasonCoach && q.reasonCoach.deep
+      if (deep && Object.values(deep).some(Boolean)) coachDeep.value = { ...coachDeep.value, ...deep }
+      if (Array.isArray(q.reasonCoach && q.reasonCoach.adopted) && q.reasonCoach.adopted.length) coachFinal.value = q.reasonCoach.adopted.slice()
+    } else {
+      showToast('✅ 已整理并自动加入错因；配置文字模型后可继续 AI 深挖', 'success')
+    }
   } catch (e) {
-    coachFinal.value = ['我在题干翻译或结构判断上不够准确；下次先用自己的话复述结论和论据，再比较选项方向。']
-    showToast('AI 整理未完成，已保留你自己的复盘草稿', 'info')
+    showToast('AI 深挖未完成，自己的分步复盘已经保存', 'info')
   } finally {
     coachBusy.value = false
   }
 }
-function adoptCoachReasons() {
+function appendDeepField(key, text) {
+  const add = String(text || '').trim()
+  if (!add) return
+  const old = String(frm.value[key] || '').trim()
+  if (old.includes(add)) return
+  frm.value[key] = old ? old + '\n\n' + add : add
+}
+function useCoachDraft(field) {
+  const draft = coachFieldGuide.value[field] && coachFieldGuide.value[field].draft
+  appendDeepField(field, draft)
+  showToast('已填入草稿，可继续按自己的话修改', 'success')
+}
+async function askCoachField(field) {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
-  if (!q || !coachFinal.value.length) return
-  coachFinal.value.forEach((r) => { if (!frm.value.sel.includes(r)) frm.value.sel.push(r) })
-  q.reasonCoach = { ...(q.reasonCoach || {}), completed: true, adopted: coachFinal.value.slice() }
-  coachOpen.value = false
-  showToast('已把你的复盘草稿放入错因，记得点“保存复盘”', 'success')
+  if (!q || coachFieldBusy.value) return
+  const c = activeCfg()
+  if (!c || !c.key) { showToast('请先配置文字模型', 'info'); return }
+  coachFieldBusy.value = field
+  try {
+    const labels = { pattern: '可迁移规律', note: '个人复盘笔记', analysis: '解析拆解' }
+    const rc = q.reasonCoach || {}
+    const sys = '你是行测错题教练。请围绕考生自己写下的分步复盘，帮他继续写“' + labels[field] + '”。不得新增考生没有表达过的错因，不得编造原题信息。只输出 JSON：{"questions":["追问1","追问2"],"draft":"基于考生原话整理的一段草稿"}。'
+    const user = '分步复盘：' + JSON.stringify({ first: rc.first, block: rc.block, next: rc.next, reflection: rc.reflection }) + '\n当前' + labels[field] + '：' + String(frm.value[field] || '（空）') + '\n请给出两个能让考生自己写出内容的追问，并给一段可编辑草稿。'
+    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 500, 45000)
+    let obj = null
+    try { obj = JSON.parse(String(reply || '').replace(/```json|```/g, '').trim()) } catch (e) { const m = String(reply || '').match(/\{[\s\S]*\}/); if (m) { try { obj = JSON.parse(m[0]) } catch (_) {} } }
+    const questions = Array.isArray(obj && obj.questions) ? obj.questions.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 3) : []
+    const draft = String((obj && obj.draft) || '').trim()
+    coachFieldGuide.value[field] = { q: questions, draft }
+    q.reasonCoach = { ...(q.reasonCoach || {}), guide: { ...((q.reasonCoach && q.reasonCoach.guide) || {}), [field]: questions } }
+    if (!questions.length && !draft) showToast('AI 暂无可用引导，请稍后重试', 'info')
+  } catch (e) {
+    showToast('AI 引导失败：' + String((e && e.message) || e).slice(0, 70), 'error')
+  } finally {
+    coachFieldBusy.value = ''
+  }
 }
 const absorb = computed(() => {
   const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
@@ -173,6 +268,7 @@ const {
   addCustomReason,
   aiPolishReason,
   ankiPush,
+  applyCoachReview,
   askAiReasons,
   askCoreDeep,
   closeImg,
@@ -396,9 +492,9 @@ function capWrongExplain() {
               </div>
               <!-- AI 引导找错因：帮助用户科学决策、自己发现错因 -->
               <div class="guide-row coach-row">
-                <button type="button" class="btn btn-pri" @click="openCoach()">🧭 三步引导我找错因</button>
-                <button type="button" class="btn btn-gh" :disabled="!reasonCoachReady || aiBusy" :title="reasonCoachReady ? '只基于你的三步回答整理，不会替你编造原因' : '先完成三步引导，AI 归纳才会解锁'" @click="askAiReasons()">{{ aiBusy ? '⏳ 归纳中…' : reasonCoachReady ? '🤖 整理成错因草稿' : '🔒 先完成三步引导' }}</button>
-                <span class="cr-tip">先自己观察 → 再写下次动作 → 最后才允许 AI 整理成草稿</span>
+                <button type="button" class="btn btn-pri" @click="openCoach()">🧭 分步引导复盘</button>
+                <button type="button" class="btn btn-gh" :disabled="!reasonCoachReady || aiBusy" :title="reasonCoachReady ? '基于你的分步复盘，继续生成错因、规律、个人笔记和解析拆解' : '先完成分步引导，AI 深挖才会解锁'" @click="askAiReasons()">{{ aiBusy ? '⏳ AI 深挖中…' : reasonCoachReady ? '🤖 AI 一键辅助（规律/笔记/解析）' : '🔒 先完成分步引导' }}</button>
+                <span class="cr-tip">每一步都能选选项或“其他（自写）”；完成后自动加入错因，再继续 AI 深挖</span>
               </div>
               <div v-if="guideText" class="guide-text">{{ guideText }}</div>
               <div v-if="coachOpen" class="coach-panel">
@@ -409,25 +505,49 @@ function capWrongExplain() {
                 </div>
                 <template v-if="coachStep === 0">
                   <div class="coach-q">先别急着看答案。你当时做这道题时，最接近哪种状态？</div>
-                  <button v-for="o in coachOptions" :key="o.t" class="coach-opt" :class="{ on: coachFirst === o.t }" @click="coachFirst = o.t"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                  <button v-for="o in coachOptions" :key="o.t" class="coach-opt" :class="{ on: coachFirst === o.t }" @click="pickCoachOption(0, o.t)"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                  <button class="coach-opt" :class="{ on: coachFirst === COACH_OTHER }" @click="pickCoachOption(0, COACH_OTHER)"><b>其他（自写）</b><span>选项都不贴合，我用原话写</span></button>
+                  <textarea v-if="coachFirst === COACH_OTHER" v-model="coachFirstCustom" rows="2" placeholder="写下你当时真实的想法或状态"></textarea>
                 </template>
                 <template v-else-if="coachStep === 1">
                   <div class="coach-q">很好。再往下追一层：你觉得自己真正卡在哪一步？</div>
-                  <button v-for="o in coachStep2Options" :key="o.t" class="coach-opt" :class="{ on: coachBlock === o.t }" @click="coachBlock = o.t"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                  <button v-for="o in coachStep2Options" :key="o.t" class="coach-opt" :class="{ on: coachBlock === o.t }" @click="pickCoachOption(1, o.t)"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                  <button class="coach-opt" :class="{ on: coachBlock === COACH_OTHER }" @click="pickCoachOption(1, COACH_OTHER)"><b>其他（自写）</b><span>我的卡点不在这些选项里</span></button>
+                  <textarea v-if="coachBlock === COACH_OTHER" v-model="coachBlockCustom" rows="2" placeholder="写下你真正卡住的具体一步"></textarea>
                 </template>
                 <template v-else>
-                  <div class="coach-q">最后不问 AI。请用你自己的话写一句：下次看到这类题，第一步先做什么？</div>
-                  <textarea v-model="coachWrote" rows="3" placeholder="例如：先把题干翻译成“谁想让谁相信什么”，再找结论和论据，不先看选项。"></textarea>
+                  <div class="coach-q">最后决定下次动作：遇到同类题，第一步先做什么？</div>
+                  <button v-for="o in coachStep3Options" :key="o.t" class="coach-opt" :class="{ on: coachNextAction === o.t }" @click="pickCoachOption(2, o.t)"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                  <button class="coach-opt" :class="{ on: coachNextAction === COACH_OTHER }" @click="pickCoachOption(2, COACH_OTHER)"><b>其他（自写）</b><span>我要写自己的下次动作</span></button>
+                  <textarea v-if="coachNextAction === COACH_OTHER" v-model="coachNextCustom" rows="2" placeholder="例如：先复述结论，再核对每个选项的主体和范围"></textarea>
+                  <textarea v-model="coachWrote" rows="3" placeholder="补充你自己的话（可空）：这次最真实的感受、容易忽略的点或想提醒自己的话"></textarea>
                 </template>
                 <div class="coach-actions">
                   <button v-if="coachStep < 2" class="btn btn-pri" @click="coachNext()">下一步 →</button>
-                  <button v-else class="btn btn-pri" :disabled="coachBusy" @click="coachFinish()">{{ coachBusy ? '⏳ 只整理你的原话…' : '生成我的错因草稿' }}</button>
+                  <button v-else class="btn btn-pri" :disabled="coachBusy" @click="coachFinish()">{{ coachBusy ? '⏳ 正在整理并深挖…' : '一键整理 · 自动加入错因 · 继续深挖' }}</button>
+                  <button v-if="coachStep > 0 && !coachBusy" class="btn btn-gh" @click="coachStep--">← 上一步</button>
                   <button class="btn btn-gh" @click="coachOpen = false">关闭</button>
                 </div>
-                <div v-if="coachFinal.length" class="coach-final">
-                  <b>草稿完全来自你刚才的回答：</b>
+                <div v-if="coachSaved || coachFinal.length" class="coach-final">
+                  <b>{{ coachSaved ? '✅ 已自动加入错因列表，并写入下方复盘区：' : '错因草稿：' }}</b>
                   <span v-for="r in coachFinal" :key="r">{{ r }}</span>
-                  <button class="btn btn-pri" @click="adoptCoachReasons()">采用为本题错因</button>
+                  <div class="coach-deep-grid">
+                    <div class="coach-deep-card">
+                      <div class="coach-deep-hd"><b>⚡ 可迁移规律</b><button class="btn btn-gh" :disabled="!!coachFieldBusy" @click="askCoachField('pattern')">{{ coachFieldBusy === 'pattern' ? '⏳ 引导中…' : 'AI 引导我写' }}</button></div>
+                      <textarea v-model="frm.method" rows="2" placeholder="下次遇到同类题先做什么"></textarea>
+                      <div v-if="coachFieldGuide.pattern.q.length" class="coach-guide-list"><span v-for="q in coachFieldGuide.pattern.q" :key="q">{{ q }}</span><button v-if="coachFieldGuide.pattern.draft" class="btn btn-gh" @click="useCoachDraft('pattern')">采用草稿</button></div>
+                    </div>
+                    <div class="coach-deep-card">
+                      <div class="coach-deep-hd"><b>📝 个人复盘笔记</b><button class="btn btn-gh" :disabled="!!coachFieldBusy" @click="askCoachField('note')">{{ coachFieldBusy === 'note' ? '⏳ 引导中…' : 'AI 引导我写' }}</button></div>
+                      <textarea v-model="frm.note" rows="3" placeholder="以第一人称写下这次真正要提醒自己的话"></textarea>
+                      <div v-if="coachFieldGuide.note.q.length" class="coach-guide-list"><span v-for="q in coachFieldGuide.note.q" :key="q">{{ q }}</span><button v-if="coachFieldGuide.note.draft" class="btn btn-gh" @click="useCoachDraft('note')">采用草稿</button></div>
+                    </div>
+                    <div class="coach-deep-card">
+                      <div class="coach-deep-hd"><b>🧠 解析拆解</b><button class="btn btn-gh" :disabled="!!coachFieldBusy" @click="askCoachField('analysis')">{{ coachFieldBusy === 'analysis' ? '⏳ 引导中…' : 'AI 引导我写' }}</button></div>
+                      <textarea v-model="frm.analysis" rows="3" placeholder="正确答案为什么成立、我错在哪一步、干扰项怎么设"></textarea>
+                      <div v-if="coachFieldGuide.analysis.q.length" class="coach-guide-list"><span v-for="q in coachFieldGuide.analysis.q" :key="q">{{ q }}</span><button v-if="coachFieldGuide.analysis.draft" class="btn btn-gh" @click="useCoachDraft('analysis')">采用草稿</button></div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <!-- 自定义错因 + AI 规范化 -->
@@ -443,12 +563,16 @@ function capWrongExplain() {
               <div class="cr-tip">✎/✕ 可改名、删除自定义与 AI 错因；✨ 规范化能把你的口语原因写成专业说法</div>
             </div>
             <div class="fld">
-              <label>⚡ 秒杀规律（一句话）</label>
+              <label>⚡ 秒杀规律（可迁移的一句话）</label>
               <input v-model="frm.method" placeholder="下次看到这类题先想…" />
             </div>
             <div class="fld">
-              <label>📝 个人笔记/解析</label>
+              <label>📝 个人复盘笔记</label>
               <textarea v-model="frm.note" rows="3" placeholder="记录命题人坑点、同类题联想…"></textarea>
+            </div>
+            <div class="fld">
+              <label>🧠 解析拆解</label>
+              <textarea v-model="frm.analysis" rows="3" placeholder="正确答案为什么成立、我错在哪一步、干扰项如何设置…"></textarea>
             </div>
             <div class="pnl-btns">
               <button class="btn btn-pri" @click="save()">💾 保存复盘</button>
@@ -467,6 +591,7 @@ function capWrongExplain() {
             <div class="rv-item">✅ 答案：{{ store.wqs[cur].answer }}</div>
             <div class="rv-item">⚡ 秒杀：{{ store.wqs[cur].method }}</div>
             <div class="rv-item">📝 {{ store.wqs[cur].note }}</div>
+            <div v-if="store.wqs[cur].analysis" class="rv-item">🧠 {{ store.wqs[cur].analysis }}</div>
             <div class="pnl-btns">
               <button class="btn btn-gh" @click="rep = true">✍️ 重新复盘</button>
               <button class="btn btn-gh" :disabled="vtBusy" @click="startVariant()">{{ vtBusy ? '⏳ 找同类/出变式…' : '🔁 变式训练' }}</button>

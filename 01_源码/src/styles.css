@@ -5179,4 +5179,12 @@ body[data-theme='light'] .ck-plan { background: #ffffff; }
 .coach-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
 .coach-final { margin-top: 10px; display: grid; gap: 6px; border-top: 1px dashed var(--glass-border); padding-top: 9px; }
 .coach-final span { color: var(--text2); line-height: 1.7; }
+.coach-panel textarea { width: 100%; min-height: 58px; margin: 4px 0 7px; resize: vertical; }
+.coach-deep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 8px; margin-top: 7px; }
+.coach-deep-card { border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px; background: rgba(127, 127, 127, 0.05); min-width: 0; }
+.coach-deep-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.coach-deep-hd .btn { padding: 2px 8px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+.coach-guide-list { display: grid; gap: 5px; margin-top: 3px; }
+.coach-guide-list span { border-left: 2px solid var(--accent); padding-left: 7px; font-size: calc(12px * var(--ui-fs-scale, 1)); }
+.coach-guide-list .btn { justify-self: start; padding: 2px 8px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
 .redo-img-hide { margin: 7px 0; border: 1px dashed var(--glass-border); border-radius: 8px; color: var(--text3); padding: 7px 9px; font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.6; }
