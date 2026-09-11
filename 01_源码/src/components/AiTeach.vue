@@ -5,15 +5,18 @@ import { chatOnce, activeCfg } from '../api'
 import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { store } from '../store'
+import { answerLetter } from '../utils/quiz'
 import { pickGenCfg } from '../utils/fastMode'
 
-const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' } })
+const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' }, initialAnswer: { type: String, default: '' } })
 const emit = defineEmits(['close'])
 const md = (t) => renderMd(t || '')
 const tab = ref(props.initialTab || 'logic')
 const logicText = ref(props.initialText || '')
 const logicBusy = ref(false)
 const logicOut = ref('')
+const logicExpectedAnswer = ref(answerLetter(props.initialAnswer || '') || String(props.initialAnswer || '').trim())
+const logicSource = ref(props.initialAnswer ? '错题集原始答案' : '')
 const imageBusy = ref(false)
 const wrongPick = ref('')
 const fileInput = ref(null)
@@ -198,8 +201,10 @@ async function recognizeImage(ev) {
 function pickWrong() {
   const q = wrongs.value.find((x) => String(x.id) === String(wrongPick.value))
   if (!q) return
-  logicText.value = String(q.question || '') + (q.answer ? '\n\n参考答案：' + q.answer : '')
-  showToast('已把错题带入翻译', 'success')
+  logicText.value = String(q.question || '')
+  logicExpectedAnswer.value = answerLetter(q.answer || '') || String(q.answer || '').trim()
+  logicSource.value = logicExpectedAnswer.value ? '错题集原始答案' : ''
+  showToast('已把错题带入翻译，答案字段单独锁定', 'success')
 }
 async function translate() {
   const q = logicText.value.trim()
@@ -207,9 +212,14 @@ async function translate() {
   logicBusy.value = true
   logicOut.value = ''
   try {
-    const sys = '你是行测逻辑判断名师，最擅长把抽象题干翻译成大白话。你只做结构翻译，不直接替用户选答案。'
-    const user = '请帮我彻底读懂这道题：\n\n' + q + '\n\n按下面格式输出：\n① 题干大白话：分别说清“事实是什么”和“最后想证明什么”\n② 论证结构：结论 / 论据 / 隐藏前提，用箭头标出推理方向\n③ 题型判定：削弱/加强/前提/解释/推出/评价\n④ 选项翻译：逐个用一句话翻译它的作用方向\n⑤ 我自己先做什么：给用户一个可执行动作，不要直接给最终答案'
-    logicOut.value = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1400, 60000)
+    const sys = '你是行测逻辑判断名师，只负责把题干和选项翻译成大白话、拆结论论据和选项作用方向。你绝对不能重新判题，也不能推翻或改写用户错题集里已经保存的正确答案。'
+    const locked = logicExpectedAnswer.value ? ('\n\n【系统锁定答案】错题集原始正确选项：' + logicExpectedAnswer.value + '。这是唯一权威答案，禁止改写、禁止重新选择、禁止输出与之冲突的“正确答案”。你只需要解释这个答案为什么成立，以及其他选项为什么不是正确答案。') : '\n\n【系统提示】当前没有锁定答案，你只能翻译结构和选项作用方向，不要替用户下最终答案。'
+    const user = '请帮我彻底读懂这道题：\n\n' + q + locked + '\n\n按下面格式输出：\n① 题干大白话：分别说清“事实是什么”和“最后想证明什么”\n② 论证结构：结论 / 论据 / 隐藏前提，用箭头标出推理方向\n③ 题型判定：削弱/加强/前提/解释/推出/评价\n④ 选项翻译：逐个用一句话翻译它的作用方向\n⑤ 锁定答案核对：如果系统锁定答案，只解释该答案为什么成立；如果未锁定，不输出最终答案'
+    let out = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1400, 60000)
+    if (logicExpectedAnswer.value) {
+      out = String(out || '').replace(/正确答案\s*[:：]?\s*[A-D]/g, '错题集原始答案：' + logicExpectedAnswer.value + '（以错题集为准）')
+    }
+    logicOut.value = out
   } catch (e) { logicOut.value = '生成失败：' + e.message } finally { logicBusy.value = false }
 }
 function goPractice() { emit('close'); window.dispatchEvent(new CustomEvent('xc-open-exam', { detail: { src: 'single' } })) }
@@ -236,6 +246,7 @@ onUnmounted(() => { clearTimer(); stopVoice() })
           <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="recognizeImage" />
           <select v-model="wrongPick" class="tb-sel" @change="pickWrong()"><option value="">📋 从错题集选择</option><option v-for="q in wrongs" :key="q.id" :value="q.id">{{ (q.subject || '错题') + ' · ' + String(q.question || '').slice(0, 34) }}</option></select>
         </div>
+        <div v-if="logicExpectedAnswer" class="at-locked">🔒 {{ logicSource }}：{{ logicExpectedAnswer }} · 翻译只解释该答案，不会重新判题或改写错题集正确答案</div>
         <textarea v-model="logicText" rows="8" class="pv-edit" placeholder="粘贴逻辑判断题：题干 + 选项，或导入截图/从错题集选择"></textarea>
         <div class="at-logic-acts"><button class="btn btn-pri" :disabled="logicBusy" @click="translate()">{{ logicBusy ? '⏳ 正在翻译…' : '🧭 开始大白话翻译' }}</button></div>
         <div v-if="logicOut" class="at-logic-out" v-html="md(logicOut)"></div>
@@ -307,6 +318,7 @@ onUnmounted(() => { clearTimer(); stopVoice() })
 .at-title { font-size: calc(17px * var(--ui-fs-scale, 1)); color: var(--accent); }
 .at-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
 .at-logic-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.at-locked { margin: 6px 0; padding: 7px 9px; border: 1px solid rgba(251,191,36,.45); background: rgba(251,191,36,.1); color: #fbbf24; border-radius: 8px; font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.6; }
 .at-logic textarea, .at-logic .pv-edit { width: 100%; resize: vertical; }
 .at-logic-acts { margin: 8px 0; }
 .at-logic-out { margin-top: 10px; border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; background: var(--glass-bg); line-height: 1.85; font-size: calc(13px * var(--ui-fs-scale, 1)); }

@@ -87,7 +87,7 @@ function openLogicTranslate() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q) return
   const text = String(q.question || q.q || q.stem || '') + (q.answer ? '\n\n参考答案：' + q.answer : '')
-  window.dispatchEvent(new CustomEvent('xc-open-ai-teach', { detail: { tab: 'logic', text } }))
+  window.dispatchEvent(new CustomEvent('xc-open-ai-teach', { detail: { tab: 'logic', text, answer: q.answer || '' } }))
   store.tab = 'kb'
   show.value = false
 }

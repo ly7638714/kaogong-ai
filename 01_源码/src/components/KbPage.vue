@@ -10,6 +10,7 @@ import AiTeach from './AiTeach.vue'
 window.addEventListener('xc-open-ai-teach', (e) => {
   const d = (e && e.detail) || {}
   teachInitialText.value = String(d.text || '')
+  teachInitialAnswer.value = String(d.answer || '')
   teachTab.value = d.tab || 'logic'
   teachShow.value = true
 })
@@ -27,6 +28,7 @@ const activeShelf = ref('all')
 const teachShow = ref(false)
 const teachTab = ref('logic')
 const teachInitialText = ref('')
+const teachInitialAnswer = ref('')
 const view = ref('quick') // quick=核心速查 | cards=理论技巧卡 | graph=神经网络图谱
 
 const shelvesList = [
@@ -379,7 +381,7 @@ function startRandom() {
       <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" @ask-example="askExample" />
     </div>
   </div>
-<AiTeach v-if="teachShow" :initial-tab="teachTab" :initial-text="teachInitialText" @close="teachShow = false" />
+<AiTeach v-if="teachShow" :initial-tab="teachTab" :initial-text="teachInitialText" :initial-answer="teachInitialAnswer" @close="teachShow = false" />
 </template>
 
 <style scoped>
