@@ -6,12 +6,12 @@ import { safeSet, KEYS, migrate } from './utils/storage'
 import { extractChoices, answerLetter } from './utils/quiz'
 import { addWrongDeleted, filterDeletedWrongs, loadWrongDeleted } from './utils/wrongDelete'
 const D = () => ({
-  text: { prov: 'ds', key: '', url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' },
+  text: { prov: 'ds', key: '', url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash' },
   vision: {
     prov: 'ds',
     key: '',
     url: 'https://api.deepseek.com/chat/completions',
-    model: 'deepseek-v4-flash-vision-exp'
+    model: 'deepseek-flash'
   },
   sys: '',
   kb: true,
@@ -93,7 +93,7 @@ const D = () => ({
     prov: 'ds',
     key: '',
     url: 'https://api.deepseek.com/chat/completions',
-    model: 'deepseek-v4-flash'
+    model: 'deepseek-flash'
   }
 })
 export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null, examMgr: false }, pendingAsk: '', pendingOpenPaper: null, pendingFocus: false })

@@ -2,6 +2,15 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.301] — 2026-09-11 · 跟进 DeepSeek 2026-09-10 发布：模型名统一 deepseek-flash（V4.1-Flash）
+- 官方 2026-09-10 发布 **DeepSeek-V4.1-Flash**：对外模型名统一为 `deepseek-flash`；旧名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 对应模型已下线（仅靠官方临时路由兼容）；`deepseek-v4-pro` 将于 2026-09-14 12:00 后被路由到 V4.1-Flash 并按 Flash 计费。
+- 默认模型更新：文字模型、视觉模型、讲稿改写模型的默认值统一改为 `deepseek-flash`。
+- 修复“改名即失效”的思考模式 bug：V4.1-Flash **默认走思考模式**，但原代码只把 `deepseek-v4` 系列识别为推理模型；改名后会带上 `temperature` 且输出上限不足，思考过程吃满 max_tokens → 正式回答为空。现已在流式与非流式两条链路都按推理模型处理（不传 temperature、放大输出上限）。
+- 修复视觉误判：V4.1-Flash **原生支持图像理解**（1M 上下文），但原判定只认模型名带 `vision/vl`；改名后会被判成“不能识图”，发图题退化为文字兜底。现按 Flash 档正确识别可识图（V4-Pro 仍判为不支持视觉）。
+- 兼容映射补齐：`deepseek-v4.1-flash` / `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 请求前一律映射为官方名 `deepseek-flash`。
+- 计价表与官方价格页逐项核对：Flash 空闲档 输入 1（缓存命中 0.02）/ 输出 4 元每百万、高峰×2；V4-Pro 4.5/13.5 —— 数值与官方一致，本次仅更新说明、来源与旧名标注。
+- 网页、安卓正式版/试用版、iOS 试用 PWA 同步更新。
+
 ## [3.8.300] — 2026-09-11 · 免费开源 TTS 落地：自建 CosyVoice2 / GPT-SoVITS（可克隆 · 0 费用）
 - 新增「🆓 一键接入本机免费开源 TTS（可克隆）」：在「设置 → 语音 → OpenAI 兼容」点一下即填好本机适配服务地址，配合自建开源模型使用——模型免费、支持你自己的音色克隆、中文质量接近商用 TTS。
 - 新增项目自带适配服务 `tools/free-tts-server`：把 **CosyVoice2（Apache-2.0，阿里 FunAudioLLM）** 与 **GPT-SoVITS（MIT）** 的原生接口包成项目已支持的 OpenAI 兼容格式（`/v1/audio/speech` + `/v1/uploads/audio/voice`），全程本地运行、不经过任何第三方，按字付费彻底归零。

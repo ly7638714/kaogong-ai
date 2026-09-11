@@ -3,12 +3,15 @@ import { supportsVision, activeCfg, imgRoute, chatOnce } from '../api/client'
 import { store } from '../store'
 
 describe('supportsVision 识别可识图模型', () => {
-  it('DeepSeek 视觉模型可识图（deepseek-v4-flash-vision-exp）', () => {
+  it('DeepSeek V4.1-Flash（deepseek-flash）原生支持图像理解', () => {
+    expect(supportsVision({ prov: 'ds', model: 'deepseek-flash' })).toBe(true)
+    // 旧视觉实验名与新 Flash 同款模型，也应判为可识图
     expect(supportsVision({ prov: 'ds', model: 'deepseek-v4-flash-vision-exp' })).toBe(true)
-    expect(supportsVision({ prov: 'ds', model: 'deepseek-v4-flash' })).toBe(false)
+    // 旧 v4-flash 名已被官方路由到 V4.1-Flash，同样可识图
+    expect(supportsVision({ prov: 'ds', model: 'deepseek-v4-flash' })).toBe(true)
   })
-  it('DeepSeek 纯文本模型不可识图', () => {
-    expect(supportsVision({ prov: 'ds', model: 'deepseek-v4-flash' })).toBe(false)
+  it('DeepSeek V4-Pro 不支持图像理解', () => {
+    expect(supportsVision({ prov: 'ds', model: 'deepseek-v4-pro' })).toBe(false)
   })
   it('智谱含 v 或 vision 可识图', () => {
     expect(supportsVision({ prov: 'zhipu', model: 'glm-5v-turbo' })).toBe(true)
@@ -131,5 +134,20 @@ describe('DeepSeek 旧模型名兼容映射', () => {
     const body = await bodyFor({ model: 'deepseek-v4-flash', noThink: true })
     expect(body.model).toBe('deepseek-flash')
     expect(body.thinking).toEqual({ type: 'disabled' })
+  })
+  it('deepseek-v4-flash-vision-exp 也映射为 deepseek-flash', async () => {
+    const body = await bodyFor({ model: 'deepseek-v4-flash-vision-exp' })
+    expect(body.model).toBe('deepseek-flash')
+  })
+  it('deepseek-flash 默认走思考模式：不带 temperature 且放大输出上限', async () => {
+    const body = await bodyFor({ model: 'deepseek-flash' })
+    expect(body.model).toBe('deepseek-flash')
+    expect(body.temperature).toBeUndefined()
+    expect(body.max_tokens).toBeGreaterThanOrEqual(8192)
+  })
+  it('deepseek-flash 标记 noThink 时关闭思考并恢复 temperature', async () => {
+    const body = await bodyFor({ model: 'deepseek-flash', noThink: true })
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(typeof body.temperature).toBe('number')
   })
 })

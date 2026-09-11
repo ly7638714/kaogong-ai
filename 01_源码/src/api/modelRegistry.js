@@ -72,11 +72,12 @@ export const PROVIDERS = {
 export const MODELS = {
   // ========== ① 文本大模型 ==========
   text: {
-    // DeepSeek（2026-04-24 V4 发布；chat/reasoner 旧名已于 2026-07-24 停用；V4.1-Flash 按平台可选模型列入，官方未公布前不设为默认）
+    // DeepSeek（2026-09-10 V4.1-Flash 正式发布：请求名统一用 deepseek-flash；旧名 v4-flash / v4-flash-vision-exp
+    // 对应模型已下线，仅靠官方临时路由兼容；V4-Pro 将于 2026-09-14 12:00 后路由到 V4.1-Flash）
     ds: [
-      { id: 'deepseek-v4.1-flash', label: 'DeepSeek-V4.1-Flash（快·推荐）', pub: '2026-09', tag: 'fast', note: '官方请求名：deepseek-flash' },
-      { id: 'deepseek-v4-flash', label: 'DeepSeek V4-Flash（旧展示名·兼容）', pub: '2026-04', tag: 'fast', note: '请求时自动映射为 deepseek-flash' },
-      { id: 'deepseek-v4-pro',   label: 'DeepSeek-V4-Pro（强推理·Agent）', pub: '2026-04', tag: 'think', note: '对标顶级闭源' }
+      { id: 'deepseek-flash',   label: 'DeepSeek-V4.1-Flash（快·推荐）', pub: '2026-09', tag: 'fast vision', note: '官方请求名；原生多模态，能看图；1M 上下文' },
+      { id: 'deepseek-v4-pro',  label: 'DeepSeek-V4-Pro（强推理·Agent）', pub: '2026-04', tag: 'think', note: '不支持图像理解；2026-09-14 12:00 后官方路由到 V4.1-Flash' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4-Flash（旧名·兼容）', pub: '2026-04', tag: 'fast', note: '模型已下线，请求时自动映射为 deepseek-flash' }
     ],
     // 智谱 GLM（2026：GLM-5.2→GLM-5→GLM-5-Turbo→GLM-4.7-Flash）
     zhipu: [
@@ -160,7 +161,8 @@ export const MODELS = {
   // ========== ② 视觉大模型 ==========
   vision: {
     ds: [
-      { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek-V4-Flash-Vision（视觉·默认）', pub: '2026-08', tag: 'vision', note: '2026-08-21 上线·1M 上下文' }
+      { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash（原生多模态·推荐）', pub: '2026-09', tag: 'vision', note: '原生支持图像理解；文字/图片同一个模型、同一个 Key' },
+      { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek-V4-Flash-Vision（旧名·兼容）', pub: '2026-08', tag: 'vision', note: '模型已下线，请求时自动映射为 deepseek-flash' }
     ],
     zhipu: [
       { id: 'glm-5v-turbo', label: 'GLM-5V-Turbo（视觉·Agent）', pub: '2026-04', tag: 'vision', note: '项目默认视觉' },
@@ -302,7 +304,7 @@ export function mergedModelsOf(prov, cat, customModels) {
 // 诚实说明：各家"非思考"实现不同（DeepSeek/Gemini 靠参数关思考；智谱/千问 flash 档默认思考但更快、
 // 成本低），以下均为已确认可用的轻量/极速档；不确认的不上。
 const FAST_CANDS = {
-  ds:        [ { id: 'deepseek-v4-flash', pub: '2026-04', note: 'V4 双模·非思考模式极速' } ],
+  ds:        [ { id: 'deepseek-flash', pub: '2026-09', note: 'V4.1-Flash·可关思考走极速' } ],
   zhipu:     [ { id: 'glm-4.7-flash', pub: '2026-01', note: '轻量免费' } ],
   openai:    [ { id: 'gpt-5.6-luna', pub: '2026-06', note: 'Luna 轻量档' }, { id: 'gpt-5.4-mini', pub: '2026-03', note: 'Mini 档' }, { id: 'gpt-5-mini', pub: '2025-08', note: '旧 Mini 档' } ],
   qwen:      [ { id: 'qwen3.7-flash', pub: '2026-05', note: '快' }, { id: 'qwen3.6-flash', pub: '2026-04', note: '快' }, { id: 'qwen3.5-flash', pub: '2026-02', note: '快' }, { id: 'qwen-turbo', pub: '', note: '历史·非思考' }, { id: 'qwen-flash', pub: '', note: '历史·非思考' } ],

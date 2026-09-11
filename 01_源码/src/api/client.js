@@ -35,8 +35,9 @@ export function supportsVision(c) {
   if (p === 'openai' || p === 'anthropic' || p === 'gemini' || p === 'openrouter' || p === 'custom') return true
   if (p === 'zhipu') return m.includes('v') || m.includes('vision')
   if (p === 'qwen') return m.includes('vl') || m.includes('vision')
-  // DeepSeek 已发布视觉模型（deepseek-v4-flash-vision-exp 等，OpenAI 兼容格式）
-  if (p === 'ds') return m.includes('vision') || m.includes('vl')
+  // DeepSeek V4.1-Flash（请求名 deepseek-flash）原生支持图像理解；旧的 -vision-exp 同名兼容也仍可识图。
+  // 注意：只有 Flash 档支持视觉，deepseek-v4-pro 不支持，别误判。
+  if (p === 'ds') return m.includes('vision') || m.includes('vl') || isDsFlash(m)
   // 豆包/月之暗面/阶跃：视觉模型名带 vision 或 v 标识
   if (p === 'doubao' || p === 'moonshot' || p === 'stepfun') return m.includes('vision') || m.includes('1v') || m.includes('vl')
   return false
@@ -53,23 +54,27 @@ function hds(c) {
   return h
 }
 
-// DeepSeek 官方当前接受的最新文本模型名为 deepseek-flash 与 deepseek-v4-pro。
-// 站内保留 V4.1-Flash/V4-Flash 等展示名，但请求前统一映射到官方实际模型名，
+// DeepSeek 官方当前对外模型名只有两个：deepseek-flash（V4.1-Flash）与 deepseek-v4-pro。
+// 2026-09-10 起 V4.1-Flash 正式发布：旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp
+// 对应的模型已下线，仅靠官方临时路由兼容；因此这里统一映射到官方实际模型名，
 // 避免出现“supported API model names are deepseek-flash, deepseek-v4-pro”的报错。
+function isDsFlash(model) {
+  const m = String(model || '').trim().toLowerCase()
+  return m === 'deepseek-flash' || m === 'deepseek-v4-flash' || m === 'deepseek-v4.1-flash' || m === 'deepseek-v4-flash-vision-exp'
+}
 function dsRequest(c) {
   const m = String((c && c.model) || '').trim()
   const out = { model: m, thinking: null }
   if ((c && c.prov) === 'ds') {
-    if (m === 'deepseek-v4.1-flash' || m === 'deepseek-v4-flash') {
-      out.model = 'deepseek-flash'
-    }
+    // 展示名/旧名统一映射到官方请求名 deepseek-flash
+    if (isDsFlash(m)) out.model = 'deepseek-flash'
     if (m === 'deepseek-chat') {
       out.model = 'deepseek-flash'
       out.thinking = 'disabled'
     } else if (m === 'deepseek-reasoner') {
       out.model = 'deepseek-flash'
       out.thinking = 'enabled'
-    } else if (c.noThink && /deepseek-v4/i.test(m)) {
+    } else if (c.noThink && (isDsFlash(m) || /deepseek-v4/i.test(m))) {
       out.thinking = 'disabled'
     }
   }
@@ -102,7 +107,9 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
   // 且「思考过程 + 图片 + 正文」会大量占用 max_tokens：必须给足输出上限并去掉 temperature，
   // 否则思考没写完 max_tokens 就耗尽，正式回答(content)为空（表现为"只出思考过程"）。
   const ds = dsRequest(c)
-  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
+  // deepseek-flash（V4.1-Flash）默认走思考模式，必须按推理模型处理：去掉 temperature、给足输出上限，
+  // 否则思考过程会吃满 max_tokens，正式回答为空。
+  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|deepseek-flash|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
   const isReasoner = ds.thinking === 'enabled' || (ds.thinking !== 'disabled' && lookReasoner)
   const body = { model: ds.model, messages, max_tokens: isReasoner ? 20000 : 10000, stream: true }
   if (ds.thinking) body.thinking = { type: ds.thinking }
@@ -211,7 +218,7 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
   if (!full) {
     if (think)
       throw new Error(
-        '模型只输出了思考过程、未生成正式回答（多为思考占满输出上限所致）。请重试，或检查识图用视觉模型（如 DeepSeek deepseek-v4-flash-vision-exp / 智谱 GLM-5V / 通义 Qwen-VL）的 API Key 是否有效。'
+        '模型只输出了思考过程、未生成正式回答（多为思考占满输出上限所致）。请重试，或检查识图用视觉模型（如 DeepSeek deepseek-flash / 智谱 GLM-5V / 通义 Qwen-VL）的 API Key 是否有效。'
       )
     throw new Error('模型未返回任何内容，请重试。')
   }
@@ -226,7 +233,8 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
 export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000, signal) {
   assertBudget()
   const ds = dsRequest(c)
-  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
+  // deepseek-flash（V4.1-Flash）默认走思考模式，必须按推理模型处理（去掉 temperature、给足输出上限）
+  const lookReasoner = /(reasoner|deepseek-r1|deepseek-v4|deepseek-flash|kimi|k2|o1|o3|thinking)/i.test(ds.model || '')
   const isReasoner = ds.thinking === 'enabled' || (ds.thinking !== 'disabled' && lookReasoner)
   const body = {
     model: ds.model,

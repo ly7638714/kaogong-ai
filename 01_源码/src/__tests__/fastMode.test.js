@@ -64,7 +64,8 @@ describe('pickGenCfg 快模型生成路由（单题快练/错题变式共用）'
   it('未配快模型时自动使用服务商快模型并标记非思考', () => {
     const c = pickGenCfg()
     expect(c.key).toBe('k')
-    expect(c.model).toBe('deepseek-v4-flash')
+    // 2026-09-10 起 DeepSeek 官方快模型请求名统一为 deepseek-flash（V4.1-Flash）
+    expect(c.model).toBe('deepseek-flash')
     expect(c.noThink).toBe(true)
   })
 

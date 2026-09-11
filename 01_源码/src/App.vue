@@ -1107,7 +1107,7 @@ function toggleBgAuto() {
 // ===== 设置引导（逐项讲解）=====
 const SET_GUIDE = [
   { id: 'set-api', t: '💬 文本大模型', d: '纯文字题的 AI 大脑：下拉选服务商 + 下拉选模型（新→旧），填 Key 即可。', tips: '推荐 DeepSeek（便宜中文好）；换服务商自动带官方 API 地址与最新模型；卡片内「🧪 测试连通性」一键验证。' },
-  { id: 'set-vision', t: '👁️ 视觉大模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek 可用同一个 Key（deepseek-v4-flash-vision-exp）；不配则发图题无法识别。' },
+  { id: 'set-vision', t: '👁️ 视觉大模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek-V4.1-Flash 原生多模态，用同一个 Key、模型填 deepseek-flash 即可识图；不配则发图题无法识别。' },
   { id: 'set-fig', t: '🖼 图像增强大模型（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
   { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
@@ -2591,7 +2591,7 @@ onUnmounted(() => {
               <select v-else v-model="store.cfg.vision.model" @change="saveCfg()">
                 <option v-for="m in catModels('vision')" :key="m.id" :value="m.id">{{ m.label }}{{ m.pub ? ' · 发布 ' + m.pub : '' }}{{ m.tag && String(m.tag).indexOf('free') >= 0 ? ' · 免费' : '' }}{{ m.note ? ' · ' + m.note : '' }}</option>
               </select>
-              <span class="ep-hint">DeepSeek 用「同一个 DeepSeek Key」，模型自动带 deepseek-v4-flash-vision-exp。</span>
+              <span class="ep-hint">DeepSeek 用「同一个 DeepSeek Key」，模型填 deepseek-flash（V4.1-Flash 原生支持图像理解）。</span>
             </div>
           </div>
           <div class="fld-row">
@@ -3733,8 +3733,8 @@ onUnmounted(() => {
         <div class="sec-t">ℹ️ 模型说明</div>
         <div style="font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text3); line-height: 1.7">
           文字题（纯文字）走「文字模型」，默认 DeepSeek
-          deepseek-v4-flash（便宜、中文好）；带图/公式题走「视觉模型」，默认 DeepSeek
-          deepseek-v4-flash-vision-exp（能看图、识别公式符号），也可在设置里换智谱
+          deepseek-flash（V4.1-Flash，便宜、中文好、原生多模态）；带图/公式题走「视觉模型」，
+          默认同样是 deepseek-flash（同一个模型就能看图），也可在设置里换智谱
           GLM-5V。截图提问需配置并勾选视觉模型。
         </div>
         <div class="sec-t">🛠 最近错误日志（本地调试）</div>
@@ -3965,7 +3965,7 @@ onUnmounted(() => {
         <template v-else-if="obStep === 2">
           <h3>② 配置视觉模型（图片/截图题）</h3>
           <div class="ob-body">
-            <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>（deepseek-v4-flash-vision-exp）：</p>
+            <p>图推图形、资料表格、数学公式需要视觉模型。用 DeepSeek 时可直接用 <b>同一个 Key</b>（模型填 deepseek-flash，V4.1-Flash 原生多模态）：</p>
             <div class="ob-prov">
               <button v-for="p in [['ds','DeepSeek(推荐)'],['zhipu','智谱'],['openai','OpenAI'],['qwen','通义']]" :key="p[0]" class="fp-b" :class="{ on: store.cfg.vision.prov === p[0] }" @click="store.cfg.vision.prov = p[0]; onCatProv('vision')">{{ p[1] }}</button>
             </div>
