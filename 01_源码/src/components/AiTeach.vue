@@ -5,6 +5,7 @@ import { chatOnce, activeCfg } from '../api'
 import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { store } from '../store'
+import { pickGenCfg } from '../utils/fastMode'
 
 const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' } })
 const emit = defineEmits(['close'])
@@ -17,12 +18,32 @@ const imageBusy = ref(false)
 const wrongPick = ref('')
 const fileInput = ref(null)
 const wrongs = computed(() => (store.wqs || []).slice(0, 80))
-const topics = computed(() => {
-  const map = new Map()
-  for (const c of CARDS || []) if (c && c.plate && !map.has(c.plate)) map.set(c.plate, c)
-  return Array.from(map.entries()).map(([plate, c]) => ({ plate, card: c }))
-})
+const coursePlate = ref('all')
+const courseTeacher = ref('all')
+const courseKw = ref('')
+const allTopics = computed(() => (CARDS || []).filter((c) => c && c.plate && c.type).map((c) => ({ plate: c.plate, card: c, id: c.id })))
+const coursePlates = computed(() => [...new Set(allTopics.value.map((t) => t.plate))])
+const courseTeachers = computed(() => [...new Set(allTopics.value.map((t) => t.card.source).filter(Boolean))])
+const topics = computed(() => allTopics.value.filter((t) => {
+  if (coursePlate.value !== 'all' && t.plate !== coursePlate.value) return false
+  if (courseTeacher.value !== 'all' && t.card.source !== courseTeacher.value) return false
+  const k = courseKw.value.trim()
+  if (k && !JSON.stringify(t.card).includes(k)) return false
+  return true
+}))
 const topic = ref(null)
+const teacherStyle = computed(() => {
+  const plate = topic.value && topic.value.plate
+  const map = {
+    判断推理: { robe: '#2563eb', accent: '#93c5fd', badge: '逻辑' },
+    言语理解: { robe: '#059669', accent: '#6ee7b7', badge: '言语' },
+    数量关系: { robe: '#d97706', accent: '#fcd34d', badge: '数量' },
+    资料分析: { robe: '#7c3aed', accent: '#c4b5fd', badge: '资料' },
+    常识判断: { robe: '#0891b2', accent: '#67e8f9', badge: '常识' },
+    政治理论: { robe: '#dc2626', accent: '#fca5a5', badge: '政治' }
+  }
+  return map[plate] || map['判断推理']
+})
 const lesson = ref(null)
 const lessonBusy = ref(false)
 const sceneIdx = ref(0)
@@ -49,6 +70,25 @@ function speak(text) {
   } catch (e) {}
 }
 function sceneNarration(sc) { return sc ? sc.title + '。' + sc.body + (sc.points || []).join('；') : '' }
+async function callText(messages, maxTokens, timeoutMs) {
+  const seen = new Set()
+  const list = [pickGenCfg(), activeCfg()].filter((c) => {
+    if (!c || !c.key) return false
+    const k = (c.url || '') + '|' + (c.model || '') + '|' + (c.key || '').slice(0, 8)
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+  let last = null
+  for (const c of list) {
+    try {
+      const out = await chatOnce(c, messages, maxTokens, timeoutMs)
+      if (out && String(out).trim()) return String(out).trim()
+      last = new Error('模型返回为空')
+    } catch (e) { last = e }
+  }
+  throw last || new Error('未配置可用文字模型')
+}
 function playScene() { if (currentScene.value) speak(sceneNarration(currentScene.value)) }
 function play() {
   if (!scenes.value.length) { showToast('先生成一节微课', 'info'); return }
@@ -116,11 +156,9 @@ async function buildLesson() {
   checkpointOk.value = false
   const card = topic.value.card
   try {
-    const c = activeCfg()
-    if (!c || !c.key) throw new Error('未配置文字模型，使用本地课程')
     const sys = '你是行测动画微课导演。把知识卡设计成一节真正能教会考生的动画微课，不要PPT提纲。只输出 JSON。'
     const user = '请围绕：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail }) + '\n输出：{"title":"课程名","scenes":[...]}，共 7-9 个场景。每个场景字段：type(hook|flow|process|compare|checkpoint|trap|summary|apply), icon, title, body, points(数组), options(可选数组{k,t}), answer(可选), explain(可选)。要求：先讲怎么识别，再讲怎么操作，再放一个交互检查点，再讲陷阱，最后给可执行动作。语言必须具体，禁止空话。'
-    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 1800, 60000)
+    const reply = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1800, 60000)
     const m = String(reply || '').match(/\{[\s\S]*\}/)
     const parsed = m ? JSON.parse(m[0]) : null
     lesson.value = parsed && Array.isArray(parsed.scenes) && parsed.scenes.length ? parsed : localLesson(card)
@@ -169,11 +207,9 @@ async function translate() {
   logicBusy.value = true
   logicOut.value = ''
   try {
-    const c = activeCfg()
-    if (!c || !c.key) throw new Error('请先配置文字模型')
     const sys = '你是行测逻辑判断名师，最擅长把抽象题干翻译成大白话。你只做结构翻译，不直接替用户选答案。'
     const user = '请帮我彻底读懂这道题：\n\n' + q + '\n\n按下面格式输出：\n① 题干大白话：分别说清“事实是什么”和“最后想证明什么”\n② 论证结构：结论 / 论据 / 隐藏前提，用箭头标出推理方向\n③ 题型判定：削弱/加强/前提/解释/推出/评价\n④ 选项翻译：逐个用一句话翻译它的作用方向\n⑤ 我自己先做什么：给用户一个可执行动作，不要直接给最终答案'
-    logicOut.value = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 1400, 60000)
+    logicOut.value = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1400, 60000)
   } catch (e) { logicOut.value = '生成失败：' + e.message } finally { logicBusy.value = false }
 }
 function goPractice() { emit('close'); window.dispatchEvent(new CustomEvent('xc-open-exam', { detail: { src: 'single' } })) }
@@ -206,8 +242,14 @@ onUnmounted(() => { clearTimer(); stopVoice() })
       </div>
 
       <div v-else class="at-video">
+        <div class="at-course-filters">
+          <select v-model="coursePlate" class="tb-sel"><option value="all">全部板块</option><option v-for="p in coursePlates" :key="p" :value="p">{{ p }}</option></select>
+          <select v-model="courseTeacher" class="tb-sel"><option value="all">全部老师/来源</option><option v-for="t in courseTeachers" :key="t" :value="t">{{ t }}</option></select>
+          <input v-model="courseKw" class="pv-edit" placeholder="搜索知识点 / 题型 / 口诀 / 步骤…" />
+          <span class="at-count">共 {{ topics.length }} / {{ allTopics.length }} 个知识点</span>
+        </div>
         <div class="at-topics">
-          <button v-for="t in topics" :key="t.plate" class="shelf-tab" :class="{ on: topic && topic.plate === t.plate }" @click="selectTopic(t)">{{ t.plate }} · {{ t.card.type }}</button>
+          <button v-for="t in topics" :key="t.id || t.plate + t.card.type" class="shelf-tab" :class="{ on: topic && topic.id === t.id }" @click="selectTopic(t)">{{ t.plate }} · {{ t.card.type }}<small v-if="t.card.source"> · {{ t.card.source }}</small></button>
         </div>
         <div v-if="topic" class="at-course-head">
           <div><b>{{ topic.card.type }}</b><span>{{ topic.card.tip }}</span></div>
@@ -217,6 +259,15 @@ onUnmounted(() => { clearTimer(); stopVoice() })
           <div class="at-stage">
             <div class="at-stage-hd"><b>{{ lessonTitle }}</b><span>{{ sceneIdx + 1 }} / {{ scenes.length }}</span></div>
             <div v-if="currentScene" :key="sceneIdx" class="at-scene at-in">
+              <div class="at-teacher" :style="{ '--robe': teacherStyle.robe, '--accent2': teacherStyle.accent }">
+                <div class="at-teacher-hair"></div>
+                <div class="at-teacher-head"><span class="at-eye left"></span><span class="at-eye right"></span><span class="at-mouth"></span></div>
+                <div class="at-teacher-body"></div>
+                <div class="at-teacher-arm left"></div>
+                <div class="at-teacher-arm right"></div>
+                <div class="at-teacher-badge">{{ teacherStyle.badge }}</div>
+                <div class="at-teacher-name">{{ topic.card.source || 'AI 名师' }}</div>
+              </div>
               <div class="at-scene-i">{{ currentScene.icon }}</div>
               <div class="at-scene-t">{{ currentScene.title }}</div>
               <div class="at-scene-d">{{ currentScene.body }}</div>
@@ -263,6 +314,27 @@ onUnmounted(() => { clearTimer(); stopVoice() })
 .at-course-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-bottom: 10px; padding: 9px 11px; border: 1px solid var(--glass-border); border-radius: 10px; }
 .at-course-head div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .at-course-head span { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
+.at-course-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.at-course-filters .pv-edit { flex: 1; min-width: 190px; }
+.at-count { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
+.at-topics { max-height: 150px; overflow: auto; }
+.at-topics small { opacity: .65; }
+.at-teacher { position: relative; width: 126px; height: 128px; margin: 0 auto 8px; animation: teacherFloat 2.4s ease-in-out infinite; }
+.at-teacher-head { position: absolute; left: 39px; top: 18px; width: 48px; height: 50px; border-radius: 45% 45% 48% 48%; background: #f3c7a7; border: 2px solid rgba(30,41,59,.35); z-index: 2; }
+.at-teacher-hair { position: absolute; left: 35px; top: 8px; width: 56px; height: 33px; border-radius: 50% 50% 35% 35%; background: #263244; z-index: 3; }
+.at-eye { position: absolute; top: 20px; width: 6px; height: 8px; border-radius: 50%; background: #263244; animation: teacherBlink 3.2s infinite; }
+.at-eye.left { left: 11px; } .at-eye.right { right: 11px; }
+.at-mouth { position: absolute; left: 18px; top: 34px; width: 12px; height: 7px; border-bottom: 2px solid #9f1239; border-radius: 0 0 12px 12px; animation: teacherTalk .45s ease-in-out infinite alternate; }
+.at-teacher-body { position: absolute; left: 26px; top: 64px; width: 74px; height: 54px; border-radius: 22px 22px 10px 10px; background: linear-gradient(135deg, var(--robe), color-mix(in srgb, var(--robe) 65%, #fff)); border: 2px solid rgba(30,41,59,.3); }
+.at-teacher-arm { position: absolute; top: 70px; width: 18px; height: 46px; border-radius: 12px; background: #f3c7a7; border: 2px solid rgba(30,41,59,.25); transform-origin: 50% 8px; z-index: 1; }
+.at-teacher-arm.left { left: 14px; transform: rotate(20deg); animation: teacherArm 2.8s ease-in-out infinite; }
+.at-teacher-arm.right { right: 14px; transform: rotate(-20deg); animation: teacherArm 2.8s ease-in-out infinite reverse; }
+.at-teacher-badge { position: absolute; left: 48px; top: 75px; z-index: 4; color: #fff; background: rgba(15,23,42,.72); border-radius: 10px; padding: 2px 6px; font-size: calc(11px * var(--ui-fs-scale, 1)); }
+.at-teacher-name { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: var(--text3); font-size: calc(10.5px * var(--ui-fs-scale, 1)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes teacherFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes teacherTalk { from { height: 3px; } to { height: 8px; } }
+@keyframes teacherBlink { 0%,46%,50%,100% { transform: scaleY(1); } 48% { transform: scaleY(.12); } }
+@keyframes teacherArm { 0%,100% { transform: rotate(20deg); } 50% { transform: rotate(42deg); } }
 .at-stage { min-height: 320px; border: 1px solid var(--glass-border); border-radius: 14px; background: linear-gradient(135deg, rgba(34,211,238,.12), rgba(167,139,250,.1)); padding: 15px 18px; display: flex; flex-direction: column; }
 .at-stage-hd { display: flex; justify-content: space-between; gap: 8px; color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .at-scene { flex: 1; display: flex; flex-direction: column; justify-content: center; text-align: center; padding: 18px 0; }
