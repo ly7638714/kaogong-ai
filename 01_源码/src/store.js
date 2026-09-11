@@ -122,6 +122,10 @@ export function load() {
       localStorage.setItem('xc_tts_migrated', '1')
     }
   } catch (e) {}
+  // 自动朗读开关统一成严格布尔：老配置里可能没有这个键（undefined），
+  // 以前设置页按「!== false」显示“已开启”，而朗读触发处按真值判断 → 显示已开启却不朗读。
+  // 归一化后两处判定完全一致。
+  store.cfg.ttsOn = store.cfg.ttsOn === true
   // v3.7.1+ 清理：删除已从智谱账号移除的旧克隆声线绑定（用户要求只保留四个内置角色声线）
   try {
     const DELETED_VOICES = new Set([

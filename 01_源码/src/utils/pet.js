@@ -1,7 +1,7 @@
 // ===== 养成系萌宠：靠刷题/问答成长，知学习状态、有情绪与作息 =====
 import { ref, computed, reactive } from 'vue'
 import { store } from '../store'
-import { speak, stopSpeak, speaking } from './tts'
+import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused } from './tts'
 import { chatOnce, supportsVision, setCostCtx } from '../api/client'
 import { SYS, KB } from '../kb'
 import { petFeatureText, petDetectUi, DATA_TRAIN_INDEX } from './petKnowledge'
@@ -473,6 +473,8 @@ export function petRead(text, opts = {}) {
   const t = String(text || '').trim()
   if (!t) { petBubbleTip('没有可朗读的内容哦～'); return false }
   if (!petVoiceOn.value) { petBubbleTip('我的语音被静音了，去设置里打开吧 🔇'); return false }
+  _lastReadText = t
+  _restartOnResume = false
   const speed = opts.speed != null ? opts.speed : Number(store.cfg.ttsRate) || 1
   petBubbleTip('📖 我在帮你读～（' + Math.round(speed * 100) + '% 倍速）')
   // 关键：朗读时实时带上「当前萌宠」的专属声线，不再依赖切换角色时改写全局语音设置。
@@ -496,11 +498,38 @@ export function petSpeakOpts() {
   return out
 }
 export function petStop() {
+  _lastReadText = ''
+  _restartOnResume = false
   stopSpeak()
   if (bubble.value && /我在帮你读|朗读/.test(bubble.value)) bubble.value = ''
 }
 export function petSpeaking() {
   return speaking()
+}
+export function petReadPaused() {
+  return speakPaused()
+}
+// 悬浮面板的「暂停 / 继续」：暂停=整条时间轴冻结，继续=从原位置无缝接着读；
+// 若暂停期间调过倍速，则继续时用新倍速从本段开头重读（保证倍速真的生效）。
+let _lastReadText = ''
+let _restartOnResume = false
+export function petPauseToggle() {
+  if (!speaking()) { petBubbleTip('现在没有在朗读哦～'); return false }
+  if (speakPaused()) {
+    if (_restartOnResume && _lastReadText) {
+      const t = _lastReadText
+      _restartOnResume = false
+      stopSpeak()
+      petRead(t, { speed: Number(store.cfg.ttsRate) || 1 })
+      return true
+    }
+    resumeSpeak()
+    petBubbleTip('▶️ 继续朗读')
+    return true
+  }
+  pauseSpeak()
+  petBubbleTip('⏸ 已暂停（悬浮面板点 ▶️ 继续）')
+  return true
 }
 // 记录当前页面可朗读内容（刷题/错题/资料等），供萌宠「朗读当前内容」
 export function petReadCtx(ctx) {
@@ -514,7 +543,14 @@ export function petNextSpeed() {
   const next = SPEEDS[i >= 0 ? (i + 1) % SPEEDS.length : 1]
   store.cfg.ttsRate = next
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
-  petBubbleTip('⏱ 朗读倍速 ' + Math.round(next * 100) + '%')
+  if (speaking()) {
+    // 朗读中改倍速：已排好的音频无法原地变速（会破坏无缝时间轴），
+    // 标记为「继续时按新倍速重读本段」，保证倍速真实生效。
+    _restartOnResume = true
+    petBubbleTip('⏱ 已设为 ' + Math.round(next * 100) + '%，继续播放时按新倍速朗读')
+  } else {
+    petBubbleTip('⏱ 朗读倍速 ' + Math.round(next * 100) + '%')
+  }
   return next
 }
 // 读当前页面内容（刷题题干/错题复盘等）

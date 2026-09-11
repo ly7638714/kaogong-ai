@@ -1388,11 +1388,40 @@ async function finishSpeak(r, opts) {
   return { ok: played }
 }
 export function stopSpeakPro() {
+  _speakPaused = false
   stopPlayback()
   spStop()
   gaplessStop()
   sysStop()
 }
 export function speakingPro() {
-  return playing() || spPlaying() || gaplessPlaying() || sysSpeaking()
+  return _speakPaused || playing() || spPlaying() || gaplessPlaying() || sysSpeaking()
+}
+// ============ 朗读暂停 / 继续（萌宠悬浮面板用）============
+// 无缝播放器走 Web Audio：暂停 = 挂起 AudioContext，整条已排好的时间轴一起冻结，续播无缝隙、不重头；
+// 单段/队列播放器走 <audio>：直接 pause / play；系统语音走 speechSynthesis.pause / resume。
+let _speakPaused = false
+export function isSpeakPaused() { return _speakPaused }
+export function pauseSpeakPro() {
+  let ok = false
+  _speakPaused = true
+  try { if (_gap.ctx && _gap.ctx.state === 'running') { _gap.ctx.suspend(); ok = true } } catch (e) {}
+  try { if (_player.audio && !_player.audio.paused) { _player.audio.pause(); ok = true } } catch (e) {}
+  try { if (_sp.audio && !_sp.audio.paused) { _sp.audio.pause(); ok = true } } catch (e) {}
+  try {
+    if (window.speechSynthesis && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause(); ok = true
+    }
+  } catch (e) {}
+  if (!ok) _speakPaused = false
+  return ok
+}
+export function resumeSpeakPro() {
+  let ok = false
+  _speakPaused = false
+  try { if (_gap.ctx && _gap.ctx.state === 'suspended') { _gap.ctx.resume(); ok = true } } catch (e) {}
+  try { if (_player.audio && _player.audio.paused && _player.audio.src) { _player.audio.play().catch(() => {}); ok = true } } catch (e) {}
+  try { if (_sp.audio && _sp.audio.paused) { _sp.audio.play().catch(() => {}); ok = true } } catch (e) {}
+  try { if (window.speechSynthesis && window.speechSynthesis.paused) { window.speechSynthesis.resume(); ok = true } } catch (e) {}
+  return ok
 }

@@ -35,7 +35,7 @@ import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { renderMd } from './utils/renderMd'
-import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
+import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petPauseToggle, petReadPaused, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
 import { petBatchCollectTodayWrong } from './utils/petBatch'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
@@ -1834,10 +1834,10 @@ function clearChat() {
   showToast('已清空对话', 'success')
 }
 function toggleTtsSetting() {
-  store.cfg.ttsOn = store.cfg.ttsOn === false
+  store.cfg.ttsOn = !(store.cfg.ttsOn === true)
   saveCfg()
-  if (store.cfg.ttsOn === false) stopSpeak()
-  showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
+  if (store.cfg.ttsOn !== true) stopSpeak()
+  showToast(store.cfg.ttsOn === true ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
 }
 function ttsTest() {
   speak('你好，我是你的行测智能助教。接下来这道题，我来帮你讲透。', {
@@ -2792,7 +2792,7 @@ onUnmounted(() => {
         <div class="sec-desc">真人级朗读统一管理：引擎 / 音色市场 / 克隆原声 / 本机语音；全局音色 = 萌宠音色。</div>
         <div class="fld" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
           <label style="font-size: calc(13px * var(--ui-fs-scale, 1)); font-weight: 700">自动朗读 AI 回复</label>
-          <button class="btn" :class="store.cfg.ttsOn !== false ? 'btn-pri' : 'btn-gh'" @click="toggleTtsSetting()">{{ store.cfg.ttsOn !== false ? '🔊 已开启' : '🔇 已关闭' }}</button>
+          <button class="btn" :class="store.cfg.ttsOn === true ? 'btn-pri' : 'btn-gh'" @click="toggleTtsSetting()">{{ store.cfg.ttsOn === true ? '🔊 已开启' : '🔇 已关闭' }}</button>
           <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">开启后 AI 回复完成自动朗读；对话里每条消息也有 🔊 朗读按钮。</span>
         </div>
 
@@ -4145,6 +4145,7 @@ onUnmounted(() => {
       <span class="pet-mood">{{ petMood.emoji }}</span>
       <div class="pet-act" @click.stop @pointerdown.stop>
         <button class="pa-btn" title="朗读当前页面内容（题干/错题等）" @click="petReadCurrent()">🔊</button>
+        <button class="pa-btn" :title="petReadPaused() ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="petPauseToggle()">{{ petReadPaused() ? '▶️' : '⏸' }}</button>
         <button class="pa-btn" :title="'朗读倍速：' + Math.round((store.cfg.ttsRate || 1) * 100) + '%（点击切换）'" @click="petNextSpeed()">⏱</button>
         <button class="pa-btn" title="停止朗读" @click="petStop()">⏹</button>
       </div>
@@ -4169,6 +4170,7 @@ onUnmounted(() => {
         </div>
         <div class="pp-acts">
           <button class="btn btn-gh pp-act" @click="petReadCurrent()">🔊 读题</button>
+          <button class="btn btn-gh pp-act" @click="petPauseToggle()">{{ petReadPaused() ? '▶️ 继续' : '⏸ 暂停' }}</button>
           <button class="btn btn-gh pp-act" @click="petAnalyzeCurrent()">🧠 错因</button>
           <button class="btn btn-gh pp-act" @click="petNextSpeed()">⏱ {{ Math.round((store.cfg.ttsRate || 1) * 100) }}%</button>
           <button class="btn btn-gh pp-act" @click="doPetAsk('给我安排今天的高效学习计划')">📋 计划</button>

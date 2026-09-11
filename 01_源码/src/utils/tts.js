@@ -8,6 +8,9 @@ import {
   speakPro,
   stopSpeakPro,
   speakingPro,
+  pauseSpeakPro,
+  resumeSpeakPro,
+  isSpeakPaused,
   listGmVoices,
   listEdgeVoices,
   gmCfg,
@@ -143,6 +146,10 @@ export function stopSpeak() {
 export function speaking() {
   return speakingPro()
 }
+// 暂停 / 继续朗读（集成到萌宠悬浮面板）
+export function pauseSpeak() { return pauseSpeakPro() }
+export function resumeSpeak() { return resumeSpeakPro() }
+export function speakPaused() { return isSpeakPaused() }
 
 // ===== 真人引擎辅助（设置页「音色市场」用）=====
 export { TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, gmCfg, openaiCfg, dashSynthesize, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, detectAudioFormat, resampleAudio, speechStartOffset, audioBufferToWavBytes }

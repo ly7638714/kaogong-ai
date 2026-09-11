@@ -796,7 +796,7 @@ addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     if (!hasRealSvg && _isTutu && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
       drawTutuAnno(lastAi2, curTxt)
     }
-    if (store.cfg.ttsOn) autoSpeak(finalContent)
+    if (store.cfg.ttsOn === true) autoSpeak(finalContent)
   } catch (e) {
     live.value = null
     if (e.name === 'AbortError') {
@@ -1605,7 +1605,7 @@ async function train(kind, opts = {}) {
     live.value = null
     addMsg({ role: 'assistant', content: full })
     if (kind === 'variant') { const vm = store.msgs[store.msgs.length - 1]; if (vm) vm.variantPrev = String(opts.prev || '').slice(0, 1600) }
-    if (store.cfg.ttsOn) autoSpeak(full)
+    if (store.cfg.ttsOn === true) autoSpeak(full)
   } catch (e) {
     live.value = null
     if (e.name === 'AbortError') {
@@ -1638,13 +1638,13 @@ function trainWeak() {
   train('quiz', { plate: w.plate, mode: w.mode, difficulty: 'mid' })
 }
 async function autoSpeak(t) {
-  if (store.cfg.ttsOn !== false && t) await speakWithScript(t, null)
+  if (store.cfg.ttsOn === true && t) await speakWithScript(t, null)
 }
 function toggleTts() {
-  store.cfg.ttsOn = store.cfg.ttsOn === false
+  store.cfg.ttsOn = !(store.cfg.ttsOn === true)
   saveCfg()
-  if (store.cfg.ttsOn === false) stopSpeak()
-  showToast(store.cfg.ttsOn ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
+  if (store.cfg.ttsOn !== true) stopSpeak()
+  showToast(store.cfg.ttsOn === true ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
 }
 // v3.8.225：自动朗读与手动「🔊 朗读消息」统一走讲稿链路；
 // 启用语音阅读大模型 → 先改口语讲稿再朗读；未启用/失败 → 原文直读
