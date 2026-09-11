@@ -1405,10 +1405,13 @@ function petCloneVoiceList() {
     if (v && v.cloned && v.voice) {
       const userBound = !!(store.cfg.skinVoices && store.cfg.skinVoices[sk.id])
       out.push({ skinId: sk.id, char: sk.char, name: v.name || '克隆音色', engine: v.engine, voice: v.voice, locked: petIsLocked(sk.id) && !userBound, userBound })
+    } else if (petSkinSampleOf(sk.id)) {
+      out.push({ skinId: sk.id, char: sk.char, name: '待克隆', engine: '', voice: '', pending: true, locked: true })
     }
   }
   return out
 }
+const pendingBuiltinCloneCount = computed(() => petCloneVoiceList().filter((x) => x.pending).length)
 async function loadGmVoices() {
   gmVoiceStat.value = '正在拉取官方音色…'
   const list = await listGmVoices()
@@ -1589,6 +1592,17 @@ async function autoCloneBuiltinPetVoice(skinId, opts = {}) {
   } finally {
     petVoiceCloningId.value = ''
   }
+}
+async function cloneAllBuiltinPetVoices() {
+  const pending = petCloneVoiceList().filter((x) => x.pending).map((x) => x.skinId)
+  if (!pending.length) { showToast('五个内置角色都已克隆', 'success'); return }
+  if (!builtinCloneBackend()) { showToast('请先配置智谱或 CosyVoice2 Key，再一键克隆', 'info'); return }
+  let ok = 0
+  for (const id of pending) {
+    const r = await autoCloneBuiltinPetVoice(id, { silent: true })
+    if (r) ok++
+  }
+  showToast('🧬 内置声线克隆完成：成功 ' + ok + ' / ' + pending.length + (ok < pending.length ? '，失败项可在列表重试' : ''), ok === pending.length ? 'success' : 'info')
 }
 function doUnbindSkinVoice(skinId) {
   const ok = petUnbindCloneVoice(skinId)
@@ -2839,8 +2853,14 @@ onUnmounted(() => {
         <button v-if="voiceUndo" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-bottom: 8px" @click="undoHideVoice()">↩️ 撤销上一步隐藏（{{ voiceUndo.id }}）</button>
         <div class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px; margin-bottom: 8px">
           <label style="font-weight: 700">🧬 我的克隆音色（自定义名称 · 可删除/保留）</label>
+          <button v-if="pendingBuiltinCloneCount" class="btn btn-pri" style="font-size:calc(11px*var(--ui-fs-scale,1));margin-left:8px" :disabled="!!petVoiceCloningId" @click="cloneAllBuiltinPetVoices()">{{ petVoiceCloningId ? '⏳ 克隆中…' : '🧬 一键克隆全部内置声线（' + pendingBuiltinCloneCount + '）' }}</button>
           <div v-if="petCloneVoiceList().length" style="margin-top: 6px">
             <div v-for="cv in petCloneVoiceList()" :key="cv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(12px * var(--ui-fs-scale, 1))">
+              <template v-if="cv.pending">
+                <span>{{ cv.char }} · <b style="color:var(--text3)">待克隆</b></span>
+                <button class="btn btn-pri" style="font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="!!petVoiceCloningId" @click="autoCloneBuiltinPetVoice(cv.skinId)">{{ petVoiceCloningId === cv.skinId ? '⏳ 克隆中…' : '🧬 克隆' }}</button>
+              </template>
+              <template v-else>
               <span>{{ cv.char }} · <b>{{ cv.name }}</b> <span style="color: var(--text3)">({{ cv.engine === 'glm' ? '智谱' : 'CosyVoice2' }})</span></span>
               <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="ttsPreviewBound(cv.skinId)">▶️ 试听</button>
               <button v-if="cv.locked" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" disabled title="内置锁定，不可删除/改名">🔒 内置</button>
@@ -2852,6 +2872,7 @@ onUnmounted(() => {
               <template v-else>
                 <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" title="重命名" @click="doRenameCloneVoice(cv.skinId)">✏️</button>
                 <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doUnbindSkinVoice(cv.skinId)">🗑 删除</button>
+              </template>
               </template>
             </div>
           </div>
