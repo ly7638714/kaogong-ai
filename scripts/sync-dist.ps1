@@ -43,14 +43,16 @@ foreach ($d in $deployDirs) {
   foreach ($pat in $webFiles) {
     Get-ChildItem $dist -File -Filter $pat | ForEach-Object { Copy-Item $_.FullName (Join-Path $d $_.Name) -Force }
   }
-  # 2) assets 整目录同步（先清空目标 assets 内 index-*，避免残留旧 hash）
+  # 2) assets 整目录同步：目标 assets 精确镜像 dist\assets
+  #    以「源目录文件名为白名单」删除一切多余文件 —— 比逐个通配符黑名单（index/three/pdf/SolidTrain…）
+  #    更稳：Vite 任何分包（如 YanTrain-*）的旧 hash 都不会残留。历史黑名单曾漏掉 YanTrain-*，
+  #    导致 02_发布物\assets 累积了 40 个失效分片。
   $dstAssets = Join-Path $d 'assets'
   New-Item -ItemType Directory -Force -Path $dstAssets | Out-Null
-  Get-ChildItem $dstAssets -Filter 'index-*' -ErrorAction SilentlyContinue | Remove-Item -Force
-  # 同时清理旧 hash 的 three/pdf 分包（Vite 分包产物），避免残留旧版本
-  Get-ChildItem $dstAssets -Filter 'three-*' -ErrorAction SilentlyContinue | Remove-Item -Force
-  Get-ChildItem $dstAssets -Filter 'pdf-*' -ErrorAction SilentlyContinue | Remove-Item -Force
-  Get-ChildItem $dstAssets -Filter 'SolidTrain-*' -ErrorAction SilentlyContinue | Remove-Item -Force
+  $srcAssetNames = @(Get-ChildItem (Join-Path $dist 'assets') -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+  Get-ChildItem $dstAssets -File -ErrorAction SilentlyContinue |
+    Where-Object { $srcAssetNames -notcontains $_.Name } |
+    Remove-Item -Force
   Copy-Item (Join-Path $dist 'assets\*') $dstAssets -Recurse -Force
   foreach ($dirName in @('pet-avatars','pet-voices')) {
     $srcDir = Join-Path $dist $dirName

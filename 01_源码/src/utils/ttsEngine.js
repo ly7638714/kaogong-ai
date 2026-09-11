@@ -238,133 +238,181 @@ async function gapDecode(bytes, mime) {
 }
 // 开头提示音处理总入口：
 //   · cfg.ttsTrimLead === false → 不处理（用户主动关闭）
-//   · cfg.ttsTrimLeadMs > 0     → 强制裁掉开头 N 毫秒（智能识别不干净时的兜底，保证一定能删掉“嘟”）
-//   · 否则                      → 智能识别并裁掉前导提示音/静音
+//   · cfg.ttsTrimLeadMs > 0     → 强制裁掉开头 N 毫秒（兜底，保证一定能删掉“嘟”）
+//   · 否则                      → 智能识别 + 「同引擎提示音长度记忆」双重保障
+function leadMemoKey() {
+  const cfg = store.cfg || {}
+  return [cfg.ttsMode || '', cfg.ttsVoice || '', cfg.ttsEdgeVoice || ''].join('|')
+}
+// 同一次朗读内，同一引擎/音色的开头提示音长度是固定的：
+// 第一块高置信度识别到提示音后记住长度，后续分块据此确定性裁剪，避免「有的块删干净、有的块漏掉」。
+const _leadMemo = { key: '', ms: 0 }
+export function resetLeadMemo() {
+  _leadMemo.key = ''
+  _leadMemo.ms = 0
+}
+function sliceFrom(ctx, buf, cut) {
+  const out = ctx.createBuffer(buf.numberOfChannels, buf.length - cut, buf.sampleRate)
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    out.getChannelData(c).set(buf.getChannelData(c).subarray(cut))
+  }
+  return out
+}
+function keepEnough(buf, cut) {
+  return cut > 0 && buf.length - cut > Math.floor(buf.sampleRate * 0.15)
+}
 function applyLeadTrim(ctx, decoded) {
   try {
     if (!decoded) return decoded
     const cfg = store.cfg || {}
     if (cfg.ttsTrimLead === false) return decoded
-    const hardMs = Math.min(2000, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
+    // ① 手动兜底：强制裁掉开头 N 毫秒
+    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
     if (hardMs > 0) {
       const cut = Math.min(decoded.length - 1, Math.floor(decoded.sampleRate * hardMs / 1000))
-      // 至少保留 0.15s 正文，避免参数填太大把整段裁没
-      if (cut > 0 && decoded.length - cut > Math.floor(decoded.sampleRate * 0.15)) {
-        const out = ctx.createBuffer(decoded.numberOfChannels, decoded.length - cut, decoded.sampleRate)
-        for (let c = 0; c < decoded.numberOfChannels; c++) {
-          out.getChannelData(c).set(decoded.getChannelData(c).subarray(cut))
-        }
-        return out
-      }
+      if (keepEnough(decoded, cut)) return sliceFrom(ctx, decoded, cut)
+    }
+    // ② 智能识别；识别到后就记住该引擎的提示音长度
+    const info = detectLeadArtifact(decoded)
+    const key = leadMemoKey()
+    if (info.lead > 0 && info.confident) {
+      _leadMemo.key = key
+      _leadMemo.ms = info.lead / decoded.sampleRate * 1000
+    }
+    // ③ 检测到前导但触发不了高置信度 → 用记忆值兜底（长度是引擎固定的），保证每块都删干净
+    if (info.lead > 0 && !info.confident && _leadMemo.key === key && _leadMemo.ms >= LEAD_MIN_MS) {
+      const cut = Math.floor(decoded.sampleRate * _leadMemo.ms / 1000)
+      if (keepEnough(decoded, cut) && cut > info.lead) return sliceFrom(ctx, decoded, cut)
     }
     return trimLeadingAudioArtifacts(ctx, decoded)
   } catch (e) {
     return decoded
   }
 }
-// 统一清理解码后的 PCM：识别分块开头很短的“提示音/点击音 + 静音”，只裁掉疑似非语音前导。
-// 覆盖 MP3/WAV 及所有 TTS 引擎，避免只在 WAV 字节层面处理时漏掉 MP3 的滴滴声。
+// ============ 开头提示音识别（纯函数，只读 PCM）============
+// 现象：智谱 GLM / 阿里百炼等真人 TTS 每返回一个分块，开头都自带一小段「嘟嘟」提示音；
+//       分块朗读时如果这段没删掉，就会在每一句之间听到提示音，且分块听感断裂。
+// 判据（确定性，不依赖音量大小与频率高低）：
+//   · 提示音是「稳态单音」→ 波峰因子 crest = peak/rms ≈ 1.41（正弦），且过零率几乎不变；
+//   · 人声一开口就是多谐波 + 换字换韵 → crest ≈ 1.8 以上，过零率持续漂移。
+//   两者在 5ms 窗口上的差异非常稳定，所以「crest 低 + 过零率稳」的前缀就是提示音。
+// 覆盖场景：等幅/带包络（渐强渐弱）的提示音、低频与高频、20ms~3s、后面紧跟人声或短静音。
+export const LEAD_MIN_MS = 20
+export const LEAD_MAX_MS = 3000
+const TONAL_CREST = 1.62 // 小于此值视为「稳态单音」；正弦 1.41，人声通常 1.7+（取两者之间留足余量）
+const ZCR_DRIFT = 0.45 // 过零率相对漂移超过此比例 → 判为人声
+const SILENT_KEEP_MS = 30 // 裁块尾静音时至少保留的收尾长度
+const TAIL_SILENCE_MAX_MS = 1000
+
+function medianOf(arr) {
+  if (!arr.length) return 0
+  const s = arr.slice().sort((a, b) => a - b)
+  return s[Math.floor(s.length / 2)]
+}
+// 一次性分析开头 LEAD_MAX_MS 的 5ms 窗口特征，供前后端裁剪共用
+function analyzeAudio(input) {
+  const sr = input.sampleRate
+  const total = input.length
+  const win = Math.max(8, Math.floor(sr * 0.005))
+  const scanFrames = Math.min(total, Math.floor(sr * (LEAD_MAX_MS / 1000)))
+  const winCount = Math.max(1, Math.floor(scanFrames / win))
+  const c0 = input.getChannelData(0)
+  const stats = []
+  for (let w = 0; w < winCount; w++) {
+    const s0 = w * win
+    const s1 = Math.min(scanFrames, s0 + win)
+    let sum = 0, peak = 0, zc = 0
+    for (let i = s0; i < s1; i++) {
+      const v = c0[i]
+      const a = v < 0 ? -v : v
+      sum += v * v
+      if (a > peak) peak = a
+      if (i > s0 && ((c0[i - 1] < 0) !== (v < 0))) zc++
+    }
+    const n = Math.max(1, s1 - s0)
+    const rms = Math.sqrt(sum / n)
+    stats.push({ rms, peak, zcr: zc / n, crest: rms > 1e-6 ? peak / rms : 9 })
+  }
+  const peakAll = stats.reduce((m, x) => Math.max(m, x.peak), 0)
+  return { sr, total, win, scanFrames, c0, stats, peakAll, floor: Math.max(0.006, peakAll * 0.03) }
+}
+// 识别开头「静音 + 提示音 + 紧跟的短静音」总长度；返回 { lead, confident }
+export function detectLeadArtifact(input) {
+  try {
+    if (!input || input.numberOfChannels < 1 || input.length < 32) return { lead: 0, confident: false }
+    const an = analyzeAudio(input)
+    const { sr, total, win, stats, peakAll, floor } = an
+    if (peakAll < 0.02) return { lead: 0, confident: false }
+    const isSilent = (st) => st.rms < floor
+    // ① 跳过开头静音
+    let i = 0
+    while (i < stats.length && isSilent(stats[i])) i++
+    // ② 跳过提示音：crest 低（稳态单音）且过零率稳定
+    let j = i
+    let tonal = 0
+    const zcrs = []
+    while (j < stats.length) {
+      const st = stats[j]
+      if (isSilent(st)) break
+      if (st.crest >= TONAL_CREST) break
+      if (tonal >= 2) {
+        const med = medianOf(zcrs)
+        const dev = med > 1e-6 ? Math.abs(st.zcr - med) / med : 0
+        if (dev > ZCR_DRIFT) break
+      }
+      zcrs.push(st.zcr)
+      tonal++
+      j++
+    }
+    // ③ 提示音后面紧跟的短静音一起裁掉（最多 400ms），让声音从正文第一个音开始
+    let end = j
+    let trail = 0
+    const maxTrail = Math.floor(0.4 / 0.005)
+    while (end < stats.length && trail < maxTrail && isSilent(stats[end])) { end++; trail++ }
+    let lead = end * win
+    if (lead > Math.floor(sr * (LEAD_MAX_MS / 1000))) lead = Math.floor(sr * (LEAD_MAX_MS / 1000))
+    const confident = tonal >= 3 && end - i >= 3
+    if (lead < Math.floor(sr * (LEAD_MIN_MS / 1000))) return { lead: 0, confident: false }
+    // 安全阀：正文至少留 80ms、且至少留 45%（宁可漏删也不要裁掉正文）
+    if (total - lead < Math.floor(sr * 0.08)) return { lead: 0, confident: false }
+    if (total - lead < total * 0.45) return { lead: 0, confident: false }
+    return { lead, confident }
+  } catch (e) {
+    return { lead: 0, confident: false }
+  }
+}
+// 裁掉块尾静音（最多 1s），让每一块的「尾巴」长度一致 → 分块之间的停顿听起来均匀、不掉帧
+function detectTailEnd(input, floor) {
+  const sr = input.sampleRate
+  const total = input.length
+  const win = Math.max(8, Math.floor(sr * 0.005))
+  const keep = Math.max(win, Math.floor(sr * (SILENT_KEEP_MS / 1000)))
+  const c0 = input.getChannelData(0)
+  const maxWin = Math.min(Math.floor(total / win) - 1, Math.floor(sr * (TAIL_SILENCE_MAX_MS / 1000) / win))
+  for (let w = 0; w < maxWin; w++) {
+    const s1 = total - w * win
+    const s0 = Math.max(0, s1 - win)
+    let sum = 0
+    for (let i = s0; i < s1; i++) { const v = c0[i]; sum += v * v }
+    const rms = Math.sqrt(sum / Math.max(1, s1 - s0))
+    if (rms >= floor) return Math.min(total, s1 + keep)
+  }
+  return total
+}
+// 统一清理解码后的 PCM：裁掉开头提示音/静音 + 块尾静音。覆盖 MP3/WAV 与所有 TTS 引擎。
 export function trimLeadingAudioArtifacts(ctx, input) {
   if (!ctx || !input || input.numberOfChannels < 1 || input.length < 32) return input
   try {
-    const sr = input.sampleRate
-    const ch = input.numberOfChannels
-    const total = input.length
-    const scanFrames = Math.min(total, Math.floor(sr * 1.6))
-    const win = Math.max(8, Math.floor(sr * 0.005))
-    const winCount = Math.max(1, Math.floor(scanFrames / win))
-    const stats = []
-    const channel0 = input.getChannelData(0)
-    for (let w = 0; w < winCount; w++) {
-      const s0 = w * win
-      const s1 = Math.min(scanFrames, s0 + win)
-      let sum = 0, peak = 0, zc = 0, maxJump = 0
-      for (let i = s0; i < s1; i++) {
-        const v = channel0[i]
-        const a = Math.abs(v)
-        sum += v * v
-        if (a > peak) peak = a
-        if (i > s0) {
-          const prev = channel0[i - 1]
-          const jump = Math.abs(v - prev)
-          if (jump > maxJump) maxJump = jump
-          if ((prev < 0) !== (v < 0)) zc++
-        }
-      }
-      const n = Math.max(1, s1 - s0)
-      stats.push({ rms: Math.sqrt(sum / n), peak, zcr: zc / n, jump: maxJump / Math.max(1e-6, peak) })
+    const an = analyzeAudio(input)
+    if (an.peakAll < 0.02) return input
+    const { lead } = detectLeadArtifact(input)
+    const tail = detectTailEnd(input, an.floor)
+    if (lead <= 0 && tail >= input.length) return input
+    if (tail - lead < Math.floor(input.sampleRate * 0.05)) return input
+    const out = ctx.createBuffer(input.numberOfChannels, tail - lead, input.sampleRate)
+    for (let c = 0; c < input.numberOfChannels; c++) {
+      out.getChannelData(c).set(input.getChannelData(c).subarray(lead, tail))
     }
-    const peakAll = stats.reduce((m, x) => Math.max(m, x.peak), 0)
-    if (peakAll < 0.02) return input
-    const floor = Math.max(0.008, peakAll * 0.035)
-    let firstLoud = -1
-    for (let i = 0; i < stats.length; i++) {
-      if (stats[i].rms > floor && stats[i].peak > floor * 1.6) { firstLoud = i; break }
-    }
-    if (firstLoud < 0 || firstLoud > Math.floor(0.35 / 0.005)) return input
-    let gapStart = -1
-    for (let i = firstLoud + 1; i < stats.length; i++) {
-      if (stats[i].rms <= floor * 0.72 && stats[i].peak <= floor * 1.25) {
-        let gapEnd = i
-        while (gapEnd + 1 < stats.length && stats[gapEnd + 1].rms <= floor * 0.72 && stats[gapEnd + 1].peak <= floor * 1.25) gapEnd++
-        if ((gapEnd - i + 1) * win >= sr * 0.025) { gapStart = i; break }
-      }
-      if (i - firstLoud > Math.floor(0.85 / 0.005)) break
-    }
-    if (gapStart < 0) {
-      // 策略二（确定性·不再依赖过零率，低频“嘟”也不会误判成人声）：
-      //   提示音 = 等幅单音 → 包络几乎不变；人声一开口就有明显的音节起落。
-      //   所以从头扫，找第一段「持续起伏」的语音起点，把它之前的等幅/静音前导整体裁掉。
-      // 前置门禁：提示音/静音是「等幅」的。若开头 60ms 就已经有明显起伏，
-      // 说明第一句人声从 0 就开始了 → 一律不裁，绝不吃掉第一个音。
-      const headN = Math.max(2, Math.round(0.06 * sr / win))
-      const head = stats.slice(0, Math.min(headN, stats.length))
-      const hMax = head.reduce((m, x) => Math.max(m, x.rms), 0)
-      const hMin = head.reduce((m, x) => Math.min(m, x.rms), Infinity)
-      const headFlat = hMax <= 0 ? true : (hMax - hMin) / hMax < 0.2
-      if (!headFlat) return input
-      const sorted = head.map((x) => x.rms).slice().sort((a, b) => a - b)
-      const headLevel = sorted[Math.floor(sorted.length / 2)] || hMax
-      const zSorted = head.map((x) => x.zcr).slice().sort((a, b) => a - b)
-      const headZcr = zSorted[Math.floor(zSorted.length / 2)] || 0
-      // 找「等幅段」在哪结束：包络明显偏离头部水平（>30%）或过零率明显变化（>60%）
-      let onset = -1
-      for (let i = headN; i < stats.length; i++) {
-        if (i * win > sr * 1.5) break
-        const st = stats[i]
-        const dev = headLevel > 0 ? Math.abs(st.rms - headLevel) / headLevel : 1
-        const zdev = headZcr > 0 ? Math.abs(st.zcr - headZcr) / headZcr : 0
-        if (dev > 0.3 || zdev > 0.6) { onset = i; break }
-      }
-      if (onset <= 0) return input
-      const leadMs = onset * win / sr * 1000
-      if (leadMs < 40) return input
-      let cut2 = Math.max(0, onset * win - Math.floor(sr * 0.006))
-      // 落到波形过零附近再切，避免从半个周期中间切开产生“咔哒”
-      let guard = 0
-      while (cut2 < scanFrames && Math.abs(channel0[cut2] || 0) > floor * 1.1 && guard++ < Math.floor(sr * 0.03)) cut2++
-      cut2 = Math.min(cut2, Math.floor(sr * 0.5))
-      if (cut2 < Math.floor(sr * 0.03)) return input
-      if (total - cut2 < Math.floor(sr * 0.05)) return input
-      if (total - cut2 < total * 0.35) return input // 保守：裁掉超过 65% 就不动，绝不裁掉正文
-      const out2 = ctx.createBuffer(ch, total - cut2, sr)
-      for (let c = 0; c < ch; c++) out2.getChannelData(c).set(input.getChannelData(c).subarray(cut2))
-      return out2
-    }
-    const run = stats.slice(firstLoud, gapStart)
-    const runDuration = run.length * win / sr
-    const avgZcr = run.reduce((s, x) => s + x.zcr, 0) / Math.max(1, run.length)
-    const maxJump = run.reduce((m, x) => Math.max(m, x.jump), 0)
-    const shortArtifact = runDuration <= 0.55
-    const tonal = avgZcr < 0.022 || avgZcr > 0.055
-    const clicky = maxJump > 1.25 || run.some((x) => x.peak > 0.42)
-    if (!(shortArtifact && (tonal || clicky || runDuration <= 0.13))) return input
-    let trim = (gapStart * win)
-    while (trim < scanFrames && Math.abs(channel0[trim] || 0) > floor * 1.4) trim++
-    trim = Math.min(trim + Math.floor(sr * 0.006), Math.floor(sr * 1.35))
-    if (trim < Math.floor(sr * 0.012) || total - trim < Math.floor(sr * 0.02)) return input
-    const out = ctx.createBuffer(ch, total - trim, sr)
-    for (let c = 0; c < ch; c++) out.getChannelData(c).set(input.getChannelData(c).subarray(trim))
     return out
   } catch (e) {
     return input
@@ -389,7 +437,12 @@ function gapStart(audioBuf, meta) {
     src.connect(gain)
     gain.connect(ctx.destination)
     _gap.sources.push(src)
-    const start = _gap.nextAt
+    // 严格串行衔接：若上一块结束时已经过了预定时刻（解码/分配耗时），
+    // 把起点夹到「当前时间之后」再排，避免起点落在过去被 Web Audio 立即播放，
+    // 造成两块重叠（叠音）或被截断（听起来像断开、像又响了一声提示音）。
+    let start = _gap.nextAt
+    const earliest = ctx.currentTime + 0.004
+    if (!(start > earliest)) start = earliest
     const end = start + audioBuf.duration
     // 每个分块只做约 8ms 微淡化，消除“每句开头一声嘟”的硬切爆音；足够短，不会听成忽大忽小。
     const fade = Math.min(0.012, Math.max(0.004, audioBuf.duration / 6))
@@ -432,6 +485,7 @@ export function gaplessStop() {
   _gap.errCb = null
   _gap.stopping = false
   _gap.fallback = false
+  resetLeadMemo() // 新一轮朗读重新识别提示音长度，不把上一次的结论带到别的引擎/音色
 }
 export function gaplessPlaying() {
   return !!(_gap.ctx && _gap.ctx.state === 'running' && _gap.active > 0)
