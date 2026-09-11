@@ -24,6 +24,8 @@ const D = () => ({
   ttsPitch: null,
   ttsMode: 'edge', // 真人朗读引擎默认 edge=Edge免费神经语音（免key）；glm=智谱超拟人(收费) / openai=OpenAI兼容CosyVoice / sys=系统语音(完全免费本地)
   ttsGuard: true, // 真人朗读「省钱护栏」（v3.8.90）：真人引擎每日免费字符额度用完自动退回免费 Edge；Edge/系统语音永不被拦
+  ttsTrimLead: true, // 朗读开头提示音：自动识别并裁掉（TTS 每个分块响应开头自带的“嘟”声）
+  ttsTrimLeadMs: 0, // 强制裁掉开头毫秒数：0=只做智能识别；识别不干净时可手动设 120~300 强制裁
   ttsDayCap: 20000, // 真人引擎每日免费字符额度（约 3-4 千字中文量级；超出自动退回 Edge）
   ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
   ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },

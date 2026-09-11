@@ -231,9 +231,35 @@ async function gapDecode(bytes, mime) {
     if (ctx.state !== 'running') { _gap.fallback = true; return null }
     const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes, { fade: false }) : bytes
     const decoded = await ctx.decodeAudioData(gapBytes(data).slice(0))
-    return trimLeadingAudioArtifacts(ctx, decoded)
+    return applyLeadTrim(ctx, decoded)
   } catch (e) {
     return null
+  }
+}
+// 开头提示音处理总入口：
+//   · cfg.ttsTrimLead === false → 不处理（用户主动关闭）
+//   · cfg.ttsTrimLeadMs > 0     → 强制裁掉开头 N 毫秒（智能识别不干净时的兜底，保证一定能删掉“嘟”）
+//   · 否则                      → 智能识别并裁掉前导提示音/静音
+function applyLeadTrim(ctx, decoded) {
+  try {
+    if (!decoded) return decoded
+    const cfg = store.cfg || {}
+    if (cfg.ttsTrimLead === false) return decoded
+    const hardMs = Math.min(2000, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
+    if (hardMs > 0) {
+      const cut = Math.min(decoded.length - 1, Math.floor(decoded.sampleRate * hardMs / 1000))
+      // 至少保留 0.15s 正文，避免参数填太大把整段裁没
+      if (cut > 0 && decoded.length - cut > Math.floor(decoded.sampleRate * 0.15)) {
+        const out = ctx.createBuffer(decoded.numberOfChannels, decoded.length - cut, decoded.sampleRate)
+        for (let c = 0; c < decoded.numberOfChannels; c++) {
+          out.getChannelData(c).set(decoded.getChannelData(c).subarray(cut))
+        }
+        return out
+      }
+    }
+    return trimLeadingAudioArtifacts(ctx, decoded)
+  } catch (e) {
+    return decoded
   }
 }
 // 统一清理解码后的 PCM：识别分块开头很短的“提示音/点击音 + 静音”，只裁掉疑似非语音前导。
@@ -285,7 +311,34 @@ export function trimLeadingAudioArtifacts(ctx, input) {
       }
       if (i - firstLoud > Math.floor(0.85 / 0.005)) break
     }
-    if (gapStart < 0) return input
+    if (gapStart < 0) {
+      // 策略二（补漏）：不少引擎的提示音后面紧跟着就是人声、并没有明显静音间隔，
+      // 上面基于「响度 → 静音间隙」的判断会直接失败，于是"嘟嘟"就漏进朗读里。
+      // 这里改为找「连续 3 个窗口都像语音」的起点：起点之前那段短暂非语音前导即提示音。
+      const speechLike = (x) => x.rms > floor && x.zcr >= 0.012 && x.zcr <= 0.09 && x.jump < 1.8
+      let speechStart = -1
+      for (let i = 1; i + 2 < stats.length; i++) {
+        if (i * win > sr * 0.35) break
+        if (speechLike(stats[i]) && speechLike(stats[i + 1]) && speechLike(stats[i + 2])) { speechStart = i; break }
+      }
+      if (speechStart <= 0 || speechStart * win > sr * 0.3) return input
+      const pre = stats.slice(0, speechStart)
+      const preDur = pre.length * win / sr
+      const preAvgZcr = pre.reduce((s, x) => s + x.zcr, 0) / Math.max(1, pre.length)
+      const preMaxJump = pre.reduce((m, x) => Math.max(m, x.jump), 0)
+      const prePeak = pre.reduce((m, x) => Math.max(m, x.peak), 0)
+      const preQuiet = pre.every((x) => x.rms <= floor * 1.2)
+      const preLooksArtifact = preDur <= 0.3 && (preQuiet || preAvgZcr < 0.022 || preAvgZcr > 0.055 || preMaxJump > 1.25 || prePeak > 0.42)
+      if (!preLooksArtifact) return input
+      let cut2 = Math.max(0, speechStart * win - Math.floor(sr * 0.004))
+      while (cut2 < scanFrames && Math.abs(channel0[cut2] || 0) > floor * 1.4) cut2++
+      cut2 = Math.min(cut2 + Math.floor(sr * 0.004), Math.floor(sr * 0.32))
+      if (cut2 < Math.floor(sr * 0.012) || total - cut2 < Math.floor(sr * 0.02)) return input
+      if (total - cut2 < total * 0.4) return input // 保守：裁掉超过四成就不动，宁可留一点提示音也不裁掉正文
+      const out2 = ctx.createBuffer(ch, total - cut2, sr)
+      for (let c = 0; c < ch; c++) out2.getChannelData(c).set(input.getChannelData(c).subarray(cut2))
+      return out2
+    }
     const run = stats.slice(firstLoud, gapStart)
     const runDuration = run.length * win / sr
     const avgZcr = run.reduce((s, x) => s + x.zcr, 0) / Math.max(1, run.length)

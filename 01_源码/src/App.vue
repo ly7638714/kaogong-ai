@@ -2841,6 +2841,24 @@ onUnmounted(() => {
           </ul>
         </div>
 
+        <!-- 🔇 朗读开头提示音处理 -->
+        <div style="border: 1px dashed rgba(148, 163, 184, 0.45); background: rgba(148, 163, 184, 0.05); border-radius: 10px; padding: 10px 12px; margin: 8px 0">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center">
+            <b style="font-size: calc(12.5px * var(--ui-fs-scale, 1))">🔇 朗读开头提示音</b>
+            <label style="display: flex; gap: 5px; align-items: center; font-size: calc(12px * var(--ui-fs-scale, 1))">
+              <input v-model="store.cfg.ttsTrimLead" type="checkbox" @change="saveCfg()" /> 自动识别并裁掉开头的“嘟”声（推荐）
+            </label>
+            <label style="display: flex; gap: 5px; align-items: center; font-size: calc(12px * var(--ui-fs-scale, 1))">
+              强制裁掉开头
+              <input v-model.number="store.cfg.ttsTrimLeadMs" type="number" min="0" max="2000" step="20" style="width: 84px" @change="saveCfg()" />
+              毫秒（0 = 只做智能识别）
+            </label>
+          </div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 5px">
+            提示音是 TTS 每个分块响应自带的，长文分块合成时会出现在每一段开头。默认智能识别即可裁掉；若仍能听到，把「强制裁掉开头」设为 120~300 毫秒即可彻底删掉。
+          </div>
+        </div>
+
         <!-- 💰 真人朗读·省钱护栏（语音系统重构 v3.8.90） -->
         <div style="border: 1px dashed rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.05); border-radius: 10px; padding: 10px 12px; margin: 10px 0 4px">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
