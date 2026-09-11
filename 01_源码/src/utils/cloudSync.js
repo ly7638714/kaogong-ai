@@ -423,11 +423,31 @@ export function applyLocalMerge(localAll, remoteRaw, baseline = {}, opts = {}) {
 }
 
 export function hydrateStoreFromPlan(plan) {
-  if (!plan || !plan.merged || !plan.merged.xc_wqs) return
-  try {
-    store.wqs = filterDeletedWrongs(JSON.parse(plan.merged.xc_wqs), plan.merged[WRONG_DELETED_KEY])
-  } catch (e) {
-    try { store.wqs = JSON.parse(plan.merged.xc_wqs) } catch (e) {}
+  if (!plan || !plan.merged) return
+  const m = plan.merged
+  const parseArr = (k) => {
+    if (!(k in m) || m[k] == null) return null
+    try {
+      const v = JSON.parse(m[k])
+      return Array.isArray(v) ? v : null
+    } catch (e) { return null }
+  }
+  // 对话记录：以前这里只回填错题——同步虽然已经把合并结果写进了 localStorage，
+  // 但对话页用的还是内存里的旧数组（store.msgs），表现为「另一端的聊天记录没同步」。
+  // 现在把主要集合一起回填到界面，同步完成后无需刷新即可看到。
+  const msgs = parseArr('xc_msgs')
+  if (msgs) store.msgs = msgs.slice(-200)
+  const wqs = parseArr('xc_wqs')
+  if (wqs) {
+    try { store.wqs = filterDeletedWrongs(wqs, parseWrongDeleted(m[WRONG_DELETED_KEY])) }
+    catch (e) { store.wqs = wqs }
+  }
+  const notes = parseArr('xc_notes')
+  if (notes) store.notes = notes
+  const mem = parseArr('xc_my_mem')
+  if (mem) store.myMem = mem
+  if (typeof m.xc_mode === 'string' && m.xc_mode) {
+    try { store.mode = JSON.parse(m.xc_mode) } catch (e) { store.mode = m.xc_mode }
   }
 }
 

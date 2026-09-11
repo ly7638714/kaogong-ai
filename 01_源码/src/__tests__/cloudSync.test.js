@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { applyLocalMerge, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncOverview, saveSyncState } from '../utils/cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncOverview, saveSyncState } from '../utils/cloudSync'
 import { webdavFileUrl, webdavSyncUrl, describeWebdavHttp } from '../utils/webdav'
+import { store } from '../store'
 
 const testMem = new Map()
 globalThis.localStorage = {
@@ -96,6 +97,18 @@ describe('cloudSync 多端安全合并', () => {
     expect(localItems.map((x) => x.id)).toEqual(['m1', 'm2'])
     expect(plan.sameAsRemote).toBe(false)
     expect(localStorage.getItem('xc_cfg')).toBeNull()
+  })
+
+  it('同步合并后把对话记录回填到界面（此前只回填错题，导致“另一端对话没同步”）', () => {
+    testMem.clear()
+    const local = { id: 'm1', t: 1690000000100, role: 'user', content: '本机消息' }
+    const remote = { id: 'm2', t: 1690000000200, role: 'assistant', content: '云端消息' }
+    testMem.set('xc_msgs', JSON.stringify([local]))
+    const backup = { data: { xc_msgs: JSON.stringify([remote]) } }
+    const plan = applyLocalMerge({ data: { xc_msgs: testMem.get('xc_msgs') } }, backup, {})
+    store.msgs = []
+    hydrateStoreFromPlan(plan)
+    expect(store.msgs.map((m) => m.id)).toEqual(['m1', 'm2'])
   })
 
   it('坚果云根地址/目录地址自动补齐成可写的 JSON 文件地址', () => {

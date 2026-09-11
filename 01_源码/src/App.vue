@@ -1937,9 +1937,10 @@ async function runWdAuto(manual) {
   try {
     const r = await runCloudSync()
     wdStat.value = '✅ ' + (r.changed ? '已合并并更新当前界面' : '两端一致') + '（' + new Date(r.ts).toLocaleString() + '）'
+    // 无论本次是否有改动都刷新一次界面：避免「数据早已写进 localStorage、界面却还是旧的内存数组」
+    scheduleCloudApply()
     if (r.changed) {
       showToast('☁️ 云端新数据已安全合并，界面已自动更新', 'success')
-      scheduleCloudApply()
     } else if (manual) {
       showToast('☁️ 已同步，两端一致', 'success')
     }
@@ -1998,9 +1999,10 @@ async function runGhSync(manual) {
     const where = r.repo ? '（' + r.repo + '）' : ''
     ghStat.value = (r.created ? '✅ 已自动创建私人仓库并上传 ' : '✅ ') + (r.changed ? '已合并并更新当前界面' : '两端一致') + where + ' ' + new Date(r.ts).toLocaleString()
     if (r.created) showToast('🔐 已创建私人同步仓库，学习数据不会公开', 'success')
+    // 无论是否有改动都刷新界面，保证对话记录等集合与云端合并结果一致
+    scheduleCloudApply()
     if (r.changed) {
       showToast('☁️ 云端新数据已安全合并，界面已自动更新', 'success')
-      scheduleCloudApply()
     } else if (manual) {
       showToast('☁️ GitHub 已同步，两端一致', 'success')
     }
@@ -2041,9 +2043,10 @@ async function runGeSync(manual) {
     const where = r.repo ? '（' + r.repo + '）' : ''
     geStat.value = (r.created ? '✅ 已自动创建私人仓库并上传 ' : '✅ ') + (r.changed ? '已合并并更新当前界面' : '两端一致') + where + ' ' + new Date(r.ts).toLocaleString()
     if (r.created) showToast('🔐 已创建 Gitee 私人同步仓库，学习数据不会公开', 'success')
+    // 无论是否有改动都刷新界面，保证对话记录等集合与云端合并结果一致
+    scheduleCloudApply()
     if (r.changed) {
       showToast('☁️ 云端新数据已安全合并，界面已自动更新', 'success')
-      scheduleCloudApply()
     } else if (manual) {
       showToast('☁️ Gitee 已同步，两端一致', 'success')
     }
