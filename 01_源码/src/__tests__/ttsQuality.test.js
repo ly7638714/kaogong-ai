@@ -129,23 +129,49 @@ describe('trimLeadingAudioArtifacts 解码后 PCM 清杂', () => {
     expect(out.length).toBeGreaterThan(sr)
   })
 
-  it('提示音后面紧跟人声、没有静音间隔时也能裁掉（策略二补漏）', () => {
-    const sr = 16000
-    const total = sr * 2
+  // 构造「等幅提示音 + 紧跟有音节起伏的人声（无静音间隔）」的测试信号
+  function beepThenSpeech(sr, beepHz, beepSec, speechSec = 1.0) {
+    const total = Math.floor(sr * (beepSec + speechSec + 0.3))
     const data = new Float32Array(total)
-    // 0~120ms：880Hz 纯提示音（过零率高，不是语音）
-    for (let i = 0; i < sr * 0.12; i++) data[i] = 0.25 * Math.sin(2 * Math.PI * 880 * i / sr)
-    // 120ms 起：直接接上类语音的浊音（基频 180Hz + 谐波），中间没有任何静音
-    for (let i = Math.floor(sr * 0.12); i < sr * 1.2; i++) {
-      const t = i / sr
-      data[i] = 0.2 * Math.sin(2 * Math.PI * 180 * t) + 0.1 * Math.sin(2 * Math.PI * 360 * t) + 0.05 * Math.sin(2 * Math.PI * 540 * t)
+    const beepEnd = Math.floor(sr * beepSec)
+    for (let i = 0; i < beepEnd; i++) data[i] = 0.25 * Math.sin(2 * Math.PI * beepHz * i / sr)
+    const speechEnd = Math.min(total, beepEnd + Math.floor(sr * speechSec))
+    for (let i = beepEnd; i < speechEnd; i++) {
+      const t = (i - beepEnd) / sr
+      // 音节包络（4Hz 起伏）→ 人声特征：包络持续变化；提示音是等幅的
+      // 真实人声不会每 250ms 出现 30ms 的绝对静音，这里用 0.44~1.0 的音节包络
+      const env2 = 0.72 + 0.28 * Math.sin(2 * Math.PI * 4 * t)
+      data[i] = env2 * (0.2 * Math.sin(2 * Math.PI * 180 * t) + 0.1 * Math.sin(2 * Math.PI * 360 * t) + 0.05 * Math.sin(2 * Math.PI * 540 * t))
     }
+    return { total, data }
+  }
+  const makeCtx = (sr) => ({
+    createBuffer: (ch, len) => ({ numberOfChannels: ch, length: len, sampleRate: sr, _d: [new Float32Array(len)], getChannelData(i) { return this._d[i] } })
+  })
+
+  it('高频提示音（880Hz）+ 紧跟人声、无静音间隔：裁掉提示音', () => {
+    const sr = 16000
+    const { total, data } = beepThenSpeech(sr, 880, 0.12)
     const input = { numberOfChannels: 1, length: total, sampleRate: sr, getChannelData: () => data }
-    const ctx = {
-      createBuffer: (ch, len) => ({ numberOfChannels: ch, length: len, sampleRate: sr, _d: [new Float32Array(len)], getChannelData(i) { return this._d[i] } })
-    }
-    const out = trimLeadingAudioArtifacts(ctx, input)
+    const out = trimLeadingAudioArtifacts(makeCtx(sr), input)
     expect(out.length).toBeLessThan(total)
     expect(out.length).toBeGreaterThan(sr)
+  })
+
+  it('低频提示音（400Hz）+ 紧跟人声：同样能裁掉（不依赖过零率）', () => {
+    const sr = 16000
+    const { total, data } = beepThenSpeech(sr, 400, 0.2)
+    const input = { numberOfChannels: 1, length: total, sampleRate: sr, getChannelData: () => data }
+    const out = trimLeadingAudioArtifacts(makeCtx(sr), input)
+    expect(out.length).toBeLessThan(total)
+    expect(out.length).toBeGreaterThan(sr)
+  })
+
+  it('开头就是人声（无提示音）时不裁，避免吃掉第一个音', () => {
+    const sr = 16000
+    const { total, data } = beepThenSpeech(sr, 400, 0) // beepSec=0 → 直接人声
+    const input = { numberOfChannels: 1, length: total, sampleRate: sr, getChannelData: () => data }
+    const out = trimLeadingAudioArtifacts(makeCtx(sr), input)
+    expect(out).toBe(input)
   })
 })

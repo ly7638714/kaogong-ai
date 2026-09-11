@@ -312,29 +312,41 @@ export function trimLeadingAudioArtifacts(ctx, input) {
       if (i - firstLoud > Math.floor(0.85 / 0.005)) break
     }
     if (gapStart < 0) {
-      // 策略二（补漏）：不少引擎的提示音后面紧跟着就是人声、并没有明显静音间隔，
-      // 上面基于「响度 → 静音间隙」的判断会直接失败，于是"嘟嘟"就漏进朗读里。
-      // 这里改为找「连续 3 个窗口都像语音」的起点：起点之前那段短暂非语音前导即提示音。
-      const speechLike = (x) => x.rms > floor && x.zcr >= 0.012 && x.zcr <= 0.09 && x.jump < 1.8
-      let speechStart = -1
-      for (let i = 1; i + 2 < stats.length; i++) {
-        if (i * win > sr * 0.35) break
-        if (speechLike(stats[i]) && speechLike(stats[i + 1]) && speechLike(stats[i + 2])) { speechStart = i; break }
+      // 策略二（确定性·不再依赖过零率，低频“嘟”也不会误判成人声）：
+      //   提示音 = 等幅单音 → 包络几乎不变；人声一开口就有明显的音节起落。
+      //   所以从头扫，找第一段「持续起伏」的语音起点，把它之前的等幅/静音前导整体裁掉。
+      // 前置门禁：提示音/静音是「等幅」的。若开头 60ms 就已经有明显起伏，
+      // 说明第一句人声从 0 就开始了 → 一律不裁，绝不吃掉第一个音。
+      const headN = Math.max(2, Math.round(0.06 * sr / win))
+      const head = stats.slice(0, Math.min(headN, stats.length))
+      const hMax = head.reduce((m, x) => Math.max(m, x.rms), 0)
+      const hMin = head.reduce((m, x) => Math.min(m, x.rms), Infinity)
+      const headFlat = hMax <= 0 ? true : (hMax - hMin) / hMax < 0.2
+      if (!headFlat) return input
+      const sorted = head.map((x) => x.rms).slice().sort((a, b) => a - b)
+      const headLevel = sorted[Math.floor(sorted.length / 2)] || hMax
+      const zSorted = head.map((x) => x.zcr).slice().sort((a, b) => a - b)
+      const headZcr = zSorted[Math.floor(zSorted.length / 2)] || 0
+      // 找「等幅段」在哪结束：包络明显偏离头部水平（>30%）或过零率明显变化（>60%）
+      let onset = -1
+      for (let i = headN; i < stats.length; i++) {
+        if (i * win > sr * 1.5) break
+        const st = stats[i]
+        const dev = headLevel > 0 ? Math.abs(st.rms - headLevel) / headLevel : 1
+        const zdev = headZcr > 0 ? Math.abs(st.zcr - headZcr) / headZcr : 0
+        if (dev > 0.3 || zdev > 0.6) { onset = i; break }
       }
-      if (speechStart <= 0 || speechStart * win > sr * 0.3) return input
-      const pre = stats.slice(0, speechStart)
-      const preDur = pre.length * win / sr
-      const preAvgZcr = pre.reduce((s, x) => s + x.zcr, 0) / Math.max(1, pre.length)
-      const preMaxJump = pre.reduce((m, x) => Math.max(m, x.jump), 0)
-      const prePeak = pre.reduce((m, x) => Math.max(m, x.peak), 0)
-      const preQuiet = pre.every((x) => x.rms <= floor * 1.2)
-      const preLooksArtifact = preDur <= 0.3 && (preQuiet || preAvgZcr < 0.022 || preAvgZcr > 0.055 || preMaxJump > 1.25 || prePeak > 0.42)
-      if (!preLooksArtifact) return input
-      let cut2 = Math.max(0, speechStart * win - Math.floor(sr * 0.004))
-      while (cut2 < scanFrames && Math.abs(channel0[cut2] || 0) > floor * 1.4) cut2++
-      cut2 = Math.min(cut2 + Math.floor(sr * 0.004), Math.floor(sr * 0.32))
-      if (cut2 < Math.floor(sr * 0.012) || total - cut2 < Math.floor(sr * 0.02)) return input
-      if (total - cut2 < total * 0.4) return input // 保守：裁掉超过四成就不动，宁可留一点提示音也不裁掉正文
+      if (onset <= 0) return input
+      const leadMs = onset * win / sr * 1000
+      if (leadMs < 40) return input
+      let cut2 = Math.max(0, onset * win - Math.floor(sr * 0.006))
+      // 落到波形过零附近再切，避免从半个周期中间切开产生“咔哒”
+      let guard = 0
+      while (cut2 < scanFrames && Math.abs(channel0[cut2] || 0) > floor * 1.1 && guard++ < Math.floor(sr * 0.03)) cut2++
+      cut2 = Math.min(cut2, Math.floor(sr * 0.5))
+      if (cut2 < Math.floor(sr * 0.03)) return input
+      if (total - cut2 < Math.floor(sr * 0.05)) return input
+      if (total - cut2 < total * 0.35) return input // 保守：裁掉超过 65% 就不动，绝不裁掉正文
       const out2 = ctx.createBuffer(ch, total - cut2, sr)
       for (let c = 0; c < ch; c++) out2.getChannelData(c).set(input.getChannelData(c).subarray(cut2))
       return out2
