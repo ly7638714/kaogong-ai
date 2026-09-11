@@ -16,7 +16,7 @@ import { scheduleAfter } from '../utils/reviewSchedule' // R1/R2 复习调度与
 import { questionMastery } from '../utils/mastery' // R3 evidence-based 单题掌握度
 import { absorbState } from '../utils/wrongAbsorb' // 错题吸收度闭环
 import { reasonProfile, wqsOfReason } from '../utils/reasonProfile' // R4 错因画像
-import { canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, CANON_TYPE_ORDER } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
+import { canonicalSubOf, canonicalGroupOf, typeLabelOf, isRealSub, CANON_TYPE_ORDER, sameWrongTaxon, typeOrderOfSub } from '../utils/wrongTaxonomy' // v3.8.207 板块→细分→题型归一
 import { genTutuQuestion } from '../utils/tutuGen' // 图推缺失图形时的本地确定性重建
 import { BATCH_MAX, batchReviewSys, batchReviewUser, parseBatchText, batchReviewMd } from '../utils/batchReview' // AI 批量复盘
 import { weakCandidates } from '../utils/weakTask' // 补弱任务（答错>=3同类自动进今日目标）
@@ -47,6 +47,9 @@ const frm = ref({ answer: '', method: '', note: '', analysis: '', sel: [] })
 const editQShow = ref(false)
 const editQText = ref('')
 const editQAnswer = ref('')
+const editQGroup = ref('')
+const editQSub = ref('')
+const editQType = ref('')
 // ===== 卷库：全部历史卷子 + 出题集（查看/重做/导出/删除） =====
 const vaultOpen = ref(false)
 const qcPapers = ref([])
@@ -149,12 +152,32 @@ const stats = computed(() => {
 // ===== 板块→细分→题型 归一（v3.8.207）=====
 // 细分板块 = 真细分（图推/定义/类比/逻辑/片段/篇章/数量/资料/常识/政治）；
 // 组名“判断推理/言语理解”不再作为细分出现，历史 subject=判断推理 的题按正文/题型归到 逻辑判断 等。
+function wrongGroupOf(q) {
+  try { return canonicalGroupOf(q) } catch (e) { return '未分类' }
+}
 function wrongSubOf(q) {
   try { return canonicalSubOf(q) } catch (e) { return String((q && (q.subject || q.plate)) || '') || '未分类' }
 }
 // 题型 = canonical 名称（优先存值 q.sub/q.variant，其次按正确板块词表识别正文）；识别不到归 未分类
 function wrongTypeOf(q) {
   try { return typeLabelOf(q) } catch (e) { return '未分类' }
+}
+const editSubOptions = computed(() => {
+  const g = WRONG_GROUPS.find((x) => x.label === editQGroup.value)
+  return (g && g.subs) || []
+})
+const editGroupOptions = computed(() => WRONG_GROUPS.map((g) => g.label))
+const editTypeOptions = computed(() => {
+  const sub = editQSub.value || editQGroup.value
+  return sub ? typeOrderOfSub(sub) : CANON_TYPE_ORDER.slice()
+})
+function onEditGroupChange() {
+  const subs = editSubOptions.value
+  editQSub.value = subs.length === 1 ? subs[0] : ''
+  editQType.value = ''
+}
+function onEditSubChange() {
+  if (editQType.value && !editTypeOptions.value.includes(editQType.value)) editQType.value = ''
 }
 // 聚合（v3.8.207 归一）：先归 六大板块组 → 细分板块 → canonical 题型 再统计；
 // 输出 plates=[{plate(组),total,subs:[{sub(细分),name(题型),count,pct,t}]}]，杜绝“判断推理/逻辑判断”双行分裂
@@ -813,7 +836,7 @@ const reviewGaps = computed(() => {
   if (!String(f.analysis || '').trim()) gaps.push('解析拆解')
   return gaps
 })
-// ② 同类错题联动：同板块且共享任一错因的其他错题，一键连看吃透
+// ② 同类错题联动：必须同时满足“大板块 + 细分板块 + 题型”完全一致，错因只用于排序，不能代替分类。
 const relatedQs = computed(() => {
   if (cur.value < 0) return []
   const q = store.wqs[cur.value]
@@ -821,7 +844,7 @@ const relatedQs = computed(() => {
   const mine = (q.reasons || []).filter(Boolean)
   return store.wqs
     .map((x, i) => ({ x, i, share: mine.filter((r) => (x.reasons || []).includes(r)).length }))
-    .filter(({ x, i }) => i !== cur.value && canonicalGroupOf(x) === canonicalGroupOf(q)) // v3.8.208 按 canonical 组判同类（避免 判断推理/逻辑判断 分裂）
+    .filter(({ x, i }) => i !== cur.value && sameWrongTaxon(x, q))
     .sort((a, b) => b.share - a.share)
     .slice(0, 6)
 })
@@ -1210,8 +1233,12 @@ function save() {
 }
 function openEditQ() {
   if (cur.value < 0 || !store.wqs[cur.value]) return
-  editQText.value = String(store.wqs[cur.value].question || store.wqs[cur.value].q || store.wqs[cur.value].stem || '')
-  editQAnswer.value = String(store.wqs[cur.value].answer || '')
+  const q = store.wqs[cur.value]
+  editQText.value = String(q.question || q.q || q.stem || '')
+  editQAnswer.value = String(q.answer || '')
+  editQGroup.value = wrongGroupOf(q)
+  editQSub.value = wrongSubOf(q)
+  editQType.value = wrongTypeOf(q) === '未分类' ? '' : wrongTypeOf(q)
   editQShow.value = true
 }
 function saveEditQ() {
@@ -1219,9 +1246,15 @@ function saveEditQ() {
   const q = store.wqs[cur.value]
   q.question = editQText.value.trim()
   q.answer = editQAnswer.value.trim()
+  const sub = editQSub.value || editQGroup.value
+  q.subject = sub || editQGroup.value || '未分类'
+  q.plate = q.subject
+  q.subx = isRealSub(sub) ? sub : ''
+  q.sub = editQType.value || ''
+  q.variant = editQType.value || ''
   saveWqs()
   editQShow.value = false
-  showToast('✅ 错题题目与答案已保存', 'success')
+  showToast('✅ 错题题目、答案与分类已保存', 'success')
 }
 function del() {
   if (cur.value < 0) return
@@ -1494,7 +1527,8 @@ const wrongCtx = reactive({
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
   cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
-  cur, customReason, dedupeNow, del, delPermanent, delVaultPaper, delVaultQuiz, editQShow, editQText, editQAnswer, openEditQ, saveEditQ,
+  cur, customReason, dedupeNow, del, delPermanent, delVaultPaper, delVaultQuiz, editQShow, editQText, editQAnswer,
+  editQGroup, editQSub, editQType, editGroupOptions, editSubOptions, editTypeOptions, onEditGroupChange, onEditSubChange, openEditQ, saveEditQ,
   downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat, gotoDeepChat, gotoWrongExam,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,
@@ -1511,7 +1545,7 @@ const wrongCtx = reactive({
   vtGo, vtIdx, vtMax, vtMode, vtNav, vtOpen,
   vtPick, vtQ, vtQueue, vtResultOf, vtScore, vtShow, vtSource, vtDifficulty, vtLibMax,
   chooseVtSource, chooseVtDiff,
-vtStartDo, vtSubmit, vtToggleOpen, wrongSubOf, wrongTypeOf,
+vtStartDo, vtSubmit, vtToggleOpen, wrongGroupOf, wrongSubOf, wrongTypeOf,
 fState, reasonTop, setReasonFilter, startReasonPractice, openHub,
   brBusy, brCancel, brDone, brErr, brLog, brN, brRows, brShow, brPick, brStart, brStop, brExportMd, brSpeakAll,
   brGroup, brSub, brType, brGroupOptions, brSubOptions, brTypeOptions, brSyncN, brOpenQ,

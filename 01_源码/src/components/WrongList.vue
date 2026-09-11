@@ -100,7 +100,9 @@ const {
   openBatchReview,
   openRecall,
   startReasonPractice,
+  wrongGroupOf,
   wrongSubOf,
+  wrongTypeOf,
   archiveWrong,
   unarchiveWrong
 } = props.ctx
@@ -230,7 +232,7 @@ function dueTipLater() {
         <div v-for="(q, i) in shown" :key="q.id" class="wi" @click="openIdx(i)">
           <span class="wi-no">{{ (pageN - 1) * PAGE + i + 1 }}</span>
           <div class="wi-top">
-            <span class="ws">{{ wrongSubOf(q) || '未分类' }}</span>
+            <span class="ws" :title="'大板块 / 细分板块 / 题型'">{{ wrongGroupOf(q) }} · {{ wrongSubOf(q) || '未分类' }} · {{ wrongTypeOf(q) }}</span>
             <span class="rv" :class="{ ok: q.reviewed }">{{ q.reviewed ? '✅ 已复盘' : '⏳ 待复盘' }}</span>
             <span class="ms" :class="{ dig: q.digested }">{{ q.digested ? (dueOf(q) ? '🔔 到期' : '✅ 已消化') : '掌握 ' + masteryOf(q) + '%' }}</span>
             <span class="as" :class="{ ok: absorbOf1(q).score >= 85, warn: absorbOf1(q).score < 40 }">吸收 {{ absorbOf1(q).score }}%</span>

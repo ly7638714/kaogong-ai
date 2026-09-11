@@ -29,6 +29,12 @@ const {
   editQShow,
   editQText,
   editQAnswer,
+  editQGroup,
+  editQSub,
+  editQType,
+  editGroupOptions,
+  editSubOptions,
+  editTypeOptions,
   guideText,
   imgView,
   origStem,
@@ -275,6 +281,8 @@ const {
   copyObsidianWrong,
   del,
   openEditQ,
+  onEditGroupChange,
+  onEditSubChange,
   saveEditQ,
   downloadImg,
   gotoChat,
@@ -284,7 +292,9 @@ const {
   unarchiveWrong,
   openRecall,
   openRedo,
+  wrongGroupOf,
   wrongSubOf,
+  wrongTypeOf,
   repairFig,
   openRelated,
   openRename,
@@ -361,7 +371,7 @@ function capWrongExplain() {
         <h3>📋 错题详情</h3>
         <template v-if="cur >= 0 && store.wqs[cur]">
           <div class="pnl-sub">
-            {{ wrongSubOf(store.wqs[cur]) || '未分类' }}
+            {{ wrongGroupOf(store.wqs[cur]) }} · {{ wrongSubOf(store.wqs[cur]) || '未分类' }} · {{ wrongTypeOf(store.wqs[cur]) }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
             <span class="wq-goto" @click.self.stop="openEditQ()">✏️ 编辑题目</span>
             <span class="wq-goto" title="打开逻辑题干翻译，把题干和选项翻译成大白话" @click.self.stop="openLogicTranslate()">🧭 去白话翻译题干选项</span>
@@ -579,7 +589,7 @@ function capWrongExplain() {
               <button class="btn btn-gh" :disabled="vtBusy" @click="startVariant()">{{ vtBusy ? '⏳ 找同类/出变式…' : '🔁 变式训练' }}</button>
             </div>
             <div v-if="relatedQs.length" class="related-box">
-              <div class="related-hd">🔗 同类错题（同板块·同错因 {{ relatedQs.length }}）—— 连看吃透</div>
+              <div class="related-hd">🔗 同类错题（大板块·细分·题型完全一致 {{ relatedQs.length }}）—— 连看吃透</div>
               <div v-for="(rq, ri) in relatedQs" :key="ri" class="related-it" @click="openRelated(rq.i)">
                 <span class="related-sub">{{ rq.x.subject }}</span>
                 <span class="related-q">{{ snippet((rq.x.question || ''), 60) }}</span>
@@ -807,6 +817,21 @@ function capWrongExplain() {
     <div v-if="editQShow" class="ov show" @click.self="editQShow = false">
       <div class="pnl idiom-pnl">
         <h3>✏️ 编辑错题原文与答案</h3>
+        <div class="id-row"><b>分类（大板块 → 细分 → 题型）</b></div>
+        <div class="id-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px">
+          <select v-model="editQGroup" class="pv-edit" @change="onEditGroupChange()">
+            <option value="">选择大板块</option>
+            <option v-for="g in editGroupOptions" :key="g" :value="g">{{ g }}</option>
+          </select>
+          <select v-model="editQSub" class="pv-edit" :disabled="!editQGroup" @change="onEditSubChange()">
+            <option value="">选择细分板块</option>
+            <option v-for="s in editSubOptions" :key="s" :value="s">{{ s }}</option>
+          </select>
+          <select v-model="editQType" class="pv-edit" :disabled="!editQSub && !editQGroup">
+            <option value="">选择题型</option>
+            <option v-for="t in editTypeOptions" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </div>
         <div class="id-row"><b>题干 / 选项</b><textarea v-model="editQText" rows="8" class="pv-edit" style="width:100%;min-height:170px;resize:vertical"></textarea></div>
         <div class="id-row"><b>正确答案</b><input v-model="editQAnswer" class="pv-edit" style="width:100%" placeholder="如：正确答案 B，或填 B" /></div>
         <div class="pnl-btns">

@@ -1,6 +1,6 @@
 // wrongTaxonomy（六大板块→细分→题型归一）回归
 import { describe, it, expect } from 'vitest'
-import { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, typeOrderOfSub, groupLabelOf, fullGroupOfToken, canonicalSubjectOf } from '../utils/wrongTaxonomy'
+import { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, typeOrderOfSub, groupLabelOf, fullGroupOfToken, canonicalSubjectOf, sameWrongTaxon, wrongTaxonKey } from '../utils/wrongTaxonomy'
 describe('wrongTaxonomy 基础映射', () => {
   it('判断推理组细分只有 图推/定义/类比/逻辑；组名不作为细分', () => {
     const g = WRONG_GROUPS.find((x) => x.label === '判断推理')
@@ -40,6 +40,27 @@ describe('wrongTaxonomy 基础映射', () => {
   it('typeOrderOfSub：片段/篇章共用言语题型表；逻辑判断有自己的表', () => {
     expect(typeOrderOfSub('片段阅读').length).toBeGreaterThan(5)
     expect(typeOrderOfSub('逻辑判断')).toContain('削弱型')
+  })
+  it('跨板块脏字段不能覆盖正确板块：资料题带逻辑 subx/variant 仍归资料分析', () => {
+    const q = { subject: '资料分析', subx: '逻辑判断', sub: '削弱型', variant: '削弱型', question: '根据材料，2025年营业收入同比增长率约为多少？' }
+    expect(canonicalGroupOf(q)).toBe('资料分析')
+    expect(canonicalSubOf(q)).toBe('资料分析')
+    expect(canonicalTypeOf(q)).toBe('增长率')
+  })
+  it('旧错题 subject 串板时会用正文校正到明确板块', () => {
+    const q = { subject: '逻辑判断', question: '根据以下饼图，2025年出口额占进出口总额的比重约为多少？' }
+    expect(canonicalGroupOf(q)).toBe('资料分析')
+    expect(canonicalSubOf(q)).toBe('资料分析')
+  })
+  it('同类错题必须同时满足大板块、细分板块、题型一致', () => {
+    const a = { subject: '逻辑判断', sub: '削弱型', question: '以下哪项最能削弱上述论证？' }
+    const b = { subject: '逻辑判断', sub: '削弱型', question: '以下哪项最能削弱上述结论？' }
+    const c = { subject: '逻辑判断', sub: '加强型', question: '以下哪项最能加强上述论证？' }
+    const d = { subject: '资料分析', sub: '增长率', question: '2025年同比增长率约为多少？' }
+    expect(sameWrongTaxon(a, b)).toBe(true)
+    expect(sameWrongTaxon(a, c)).toBe(false)
+    expect(sameWrongTaxon(a, d)).toBe(false)
+    expect(wrongTaxonKey(a)).toBe('判断推理|逻辑判断|削弱型')
   })
 })
 describe('大板块全称（消除与细分歧义）', () => {

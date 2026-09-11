@@ -29,6 +29,15 @@ describe('detectBanKuai 板块识别', () => {
   })
   it('识别资料分析', () => {
     expect(detectBanKuai('2023年同比增长率是多少')).toBe('资料分析')
+    expect(detectBanKuai('根据材料，2025年茶叶产量的同比增长率约为多少？')).toBe('资料分析')
+    expect(detectBanKuai('根据以下饼图，2025年该指标占比较上年上升多少个百分点？')).toBe('资料分析')
+  })
+  it('资料分析不被“结论/说法正确/图形材料”误判成逻辑或图推', () => {
+    expect(detectBanKuai('根据上述数据，下列说法正确的是：2024年营业收入同比增长12%，利润总额为3.8亿元')).toBe('资料分析')
+    expect(detectBanKuai('根据下面图形材料，2025年出口额占进出口总额的比重约为多少？')).toBe('资料分析')
+  })
+  it('带统计数字的逻辑题仍按明确逻辑问法识别', () => {
+    expect(detectBanKuai('某市公交客流下降9.8%，共享单车增长40%。以下哪项如果为真，最能解释上述现象？')).toBe('判断推理')
   })
   it('识别数量关系', () => {
     expect(detectBanKuai('甲乙合作完成工程需要几天')).toBe('数量关系')
