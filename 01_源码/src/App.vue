@@ -1266,6 +1266,17 @@ function pickVoice(engine, voiceId) {
   saveCfg()
   savePetGlobalVoice()
 }
+// 🆓 一键接入「本机/局域网免费开源 TTS」（CosyVoice2 / GPT-SoVITS 适配服务，见 tools/free-tts-server）
+// 模型自建 → 0 费用、支持音色克隆；比浏览器端免费模型（无克隆、中文质量一般）高一个档次。
+function useLocalFreeTts() {
+  store.cfg.ttsOpenAI.url = 'http://127.0.0.1:9099/v1'
+  if (!String(store.cfg.ttsOpenAI.key || '').trim()) store.cfg.ttsOpenAI.key = 'local'
+  store.cfg.ttsOpenAI.model = 'cosyvoice2'
+  store.cfg.ttsMode = 'openai'
+  saveCfg()
+  savePetGlobalVoice()
+  showToast('🆓 已填入本机免费 TTS 地址；请确认 tools/free-tts-server 已启动', 'success')
+}
 // ===== 音色市场管理：隐藏/重命名/恢复已有音色 =====
 function vcNames(engine) {
   const vc = store.cfg.voiceCustom || {}
@@ -2924,6 +2935,15 @@ onUnmounted(() => {
 
         <div v-if="store.cfg.ttsMode === 'openai'">
           <div class="sec-t" style="font-size: calc(13px * var(--ui-fs-scale, 1))">🎨 OpenAI 兼容引擎（CosyVoice2 真人级）</div>
+          <div class="fld" style="border: 1px dashed rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.06); border-radius: 10px; padding: 10px">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+              <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="useLocalFreeTts()">🆓 一键接入本机免费开源 TTS（可克隆）</button>
+              <span style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3)">模型自建 → 0 费用，中文质量接近商用 TTS，支持你自己的音色克隆</span>
+            </div>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">
+              在本机/服务器跑开源模型 <b>CosyVoice2</b>（Apache-2.0）或 <b>GPT-SoVITS</b>（MIT），再启动项目自带的适配服务 <code>tools/free-tts-server</code>（内含完整说明），然后点上面按钮自动填好地址。手机用安卓版时，把地址里的 <code>127.0.0.1</code> 换成电脑的局域网 IP（如 <code>192.168.1.8</code>）。
+            </div>
+          </div>
           <div class="fld">
             <label>API Key</label>
             <input v-model="store.cfg.ttsOpenAI.key" type="password" placeholder="粘贴 OpenAI 兼容 TTS 的 Key" @change="saveCfg()" />
