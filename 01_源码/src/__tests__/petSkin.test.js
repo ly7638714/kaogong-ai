@@ -1,6 +1,23 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
-import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
+import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petVoiceBindings, petBindCloneVoice, petBindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
+
+const petSkinTestMem = new Map()
+if (!globalThis.localStorage) {
+  globalThis.localStorage = {
+    getItem: (k) => (petSkinTestMem.has(k) ? petSkinTestMem.get(k) : null),
+    setItem: (k, v) => petSkinTestMem.set(k, String(v)),
+    removeItem: (k) => petSkinTestMem.delete(k),
+    clear: () => petSkinTestMem.clear(),
+    key: (i) => [...petSkinTestMem.keys()][i] ?? null,
+    get length() { return petSkinTestMem.size }
+  }
+}
+
+beforeEach(() => {
+  try { localStorage.clear() } catch (e) {}
+  for (const k of Object.keys(petVoiceBindings)) delete petVoiceBindings[k]
+})
 
 describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
   it('九个内置锁定角色 + 自定义：原有四人 + 花生十三/小P/小黑/文姐/巾神 + 自定义', () => {
@@ -94,6 +111,9 @@ describe('内置角色锁定：形象/声线不可改', () => {
     const v = petSkinVoiceOf('huasheng13')
     expect(v.cloned).toBe(true)
     expect(v.voice).toBe('real-clone-id')
+    expect(petVoiceBindingOf('huasheng13').voice).toBe('real-clone-id')
+    const persisted = JSON.parse(localStorage.getItem('xc_voice_bindings') || '{}')
+    expect(persisted.huasheng13.voice).toBe('real-clone-id')
   })
 })
 

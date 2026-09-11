@@ -35,7 +35,7 @@ import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { renderMd } from './utils/renderMd'
-import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
+import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
 import { petBatchCollectTodayWrong } from './utils/petBatch'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
@@ -1403,15 +1403,12 @@ function petCloneVoiceList() {
   for (const sk of petAllSkins.value) {
     const v = petSkinVoiceOf(sk.id)
     if (v && v.cloned && v.voice) {
-      const userBound = !!(store.cfg.skinVoices && store.cfg.skinVoices[sk.id])
+      const userBound = !!petVoiceBindingOf(sk.id)
       out.push({ skinId: sk.id, char: sk.char, name: v.name || '克隆音色', engine: v.engine, voice: v.voice, locked: petIsLocked(sk.id) && !userBound, userBound })
-    } else if (petSkinSampleOf(sk.id)) {
-      out.push({ skinId: sk.id, char: sk.char, name: '待克隆', engine: '', voice: '', pending: true, locked: true })
     }
   }
   return out
 }
-const pendingBuiltinCloneCount = computed(() => petCloneVoiceList().filter((x) => x.pending).length)
 async function loadGmVoices() {
   gmVoiceStat.value = '正在拉取官方音色…'
   const list = await listGmVoices()
@@ -1501,8 +1498,6 @@ async function ttsPreviewBound(skinId) {
   return r
 }
 let petSampleAudio = null
-const petVoiceCloningId = ref('')
-const petVoiceCloneStatus = ref({})
 function previewPetSample(skinId) {
   const src = petSkinSampleOf(skinId)
   if (!src) { showToast('该角色暂无内置参考原声', 'info'); return }
@@ -1517,93 +1512,6 @@ function previewPetSample(skinId) {
     showToast('试听失败：' + String(e.message || e).slice(0, 60), 'error')
   }
 }
-function builtinCloneBackend() {
-  const gmKey = String((store.cfg.ttsGm && store.cfg.ttsGm.key) || (store.cfg.fig && store.cfg.fig.key) || '').trim()
-  if (gmKey) return 'zhipu'
-  if (String((store.cfg.ttsOpenAI && store.cfg.ttsOpenAI.key) || '').trim()) return 'cosy'
-  return ''
-}
-async function loadPetSampleFile(sample, fileName) {
-  const href = new URL(sample, window.location.href).href
-  try {
-    const res = await fetch(href)
-    if (res.ok) {
-      const blob = await res.blob()
-      return new window.File([blob], fileName, { type: blob.type || 'audio/mpeg' })
-    }
-  } catch (e) {}
-  // 安卓 file:// WebView 下 fetch 可能被拦截，改用 XHR 读取本地随包资源。
-  return await new Promise((resolve, reject) => {
-    try {
-      const xhr = new window.XMLHttpRequest()
-      xhr.open('GET', href, true)
-      xhr.responseType = 'blob'
-      xhr.onload = () => {
-        const ok = xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)
-        if (ok && xhr.response) resolve(new window.File([xhr.response], fileName, { type: xhr.response.type || 'audio/mpeg' }))
-        else reject(new Error('参考音频读取失败：HTTP ' + xhr.status))
-      }
-      xhr.onerror = () => reject(new Error('参考音频读取失败'))
-      xhr.send()
-    } catch (e) { reject(e) }
-  })
-}
-// 选中内置公考角色后，用随包参考音频自动生成真正属于自己的克隆 voice ID；成功后立即用于朗读。
-async function autoCloneBuiltinPetVoice(skinId, opts = {}) {
-  const s = petAllSkins.value.find((x) => x.id === skinId)
-  const sample = petSkinSampleOf(skinId)
-  if (!s || !s.locked || !sample) return false
-  if (petSkinVoiceOf(skinId).cloned) return true
-  if (petVoiceCloningId.value) return false
-  const backend = builtinCloneBackend()
-  if (!backend) {
-    petVoiceCloneStatus.value = { ...petVoiceCloneStatus.value, [skinId]: '未配置克隆 Key，当前先使用内置近似声线；配置智谱或 CosyVoice2 Key 后会自动克隆参考原声。' }
-    if (!opts.silent) showToast('未配置克隆 Key，暂时使用内置声线；配置后可自动克隆参考原声', 'info')
-    return false
-  }
-  petVoiceCloningId.value = skinId
-  petVoiceCloneStatus.value = { ...petVoiceCloneStatus.value, [skinId]: '⏳ 正在用内置参考音频克隆「' + s.char + '」的真实声线…' }
-  try {
-    const file = await loadPetSampleFile(sample, skinId + '.mp3')
-    const pre = await prepareCloneAudio(file, { maxSeconds: 20 })
-    if (!pre || pre.error) throw new Error(pre && pre.error || '参考音频预处理失败')
-    const name = s.char + '内置原声'
-    const r = backend === 'zhipu'
-      ? await cloneZhipuVoice(pre.file, { name })
-      : await cloneCosyVoice(pre.file, {
-          key: store.cfg.ttsOpenAI.key,
-          url: store.cfg.ttsOpenAI.url,
-          model: store.cfg.ttsOpenAI.model,
-          name
-        })
-    if (!r || !r.ok) throw new Error((r && r.msg) || '克隆接口未返回声音')
-    const engine = backend === 'zhipu' ? 'glm' : 'openai'
-    const model = backend === 'cosy' ? store.cfg.ttsOpenAI.model : ''
-    petBindBuiltinVoice(skinId, { engine, voice: r.voice, name: r.name || name, model })
-    if (petSkin.value.id === skinId) applyPetSkin(skinId)
-    petVoiceCloneStatus.value = { ...petVoiceCloneStatus.value, [skinId]: '✅ 已生成并启用真实克隆原声：' + (r.name || name) }
-    showToast('🧬 「' + s.char + '」内置原声克隆完成，已立即用于朗读', 'success')
-    return true
-  } catch (e) {
-    const msg = String((e && e.message) || e).slice(0, 120)
-    petVoiceCloneStatus.value = { ...petVoiceCloneStatus.value, [skinId]: '❌ 自动克隆失败，暂时使用内置声线：' + msg }
-    if (!opts.silent) showToast('「' + s.char + '」自动克隆失败：' + msg, 'error')
-    return false
-  } finally {
-    petVoiceCloningId.value = ''
-  }
-}
-async function cloneAllBuiltinPetVoices() {
-  const pending = petCloneVoiceList().filter((x) => x.pending).map((x) => x.skinId)
-  if (!pending.length) { showToast('五个内置角色都已克隆', 'success'); return }
-  if (!builtinCloneBackend()) { showToast('请先配置智谱或 CosyVoice2 Key，再一键克隆', 'info'); return }
-  let ok = 0
-  for (const id of pending) {
-    const r = await autoCloneBuiltinPetVoice(id, { silent: true })
-    if (r) ok++
-  }
-  showToast('🧬 内置声线克隆完成：成功 ' + ok + ' / ' + pending.length + (ok < pending.length ? '，失败项可在列表重试' : ''), ok === pending.length ? 'success' : 'info')
-}
 function doUnbindSkinVoice(skinId) {
   const ok = petUnbindCloneVoice(skinId)
   const sk = petAllSkins.value.find((x) => x.id === skinId)
@@ -1612,7 +1520,7 @@ function doUnbindSkinVoice(skinId) {
 }
 const cloneRename = ref(null) // { skinId, name }
 function doRenameCloneVoice(skinId) {
-  const bv = store.cfg.skinVoices && store.cfg.skinVoices[skinId]
+  const bv = petVoiceBindingOf(skinId)
   if (!bv || !bv.voice) { showToast('🔒 内置克隆音色不可重命名', 'error'); return }
   cloneRename.value = { skinId, name: bv.name || '' }
 }
@@ -1679,7 +1587,6 @@ async function applySkin(id) {
   applyPetSkin(id)
   const sk = petAllSkins.value.find((s) => s.id === id)
   showToast('🎭 已切换角色：' + (sk ? sk.char : id), 'success')
-  await autoCloneBuiltinPetVoice(id)
 }
 // 自定义角色字段读写（名字/人设），支持 自定义2/3/4…
 function cusField(key) {
@@ -2369,7 +2276,6 @@ onMounted(() => {
   window.addEventListener('xc-export-kb', () => openExp('kb'))
   window.addEventListener('popstate', onPopState)
   window.addEventListener('hashchange', onHashChange)
-  if (petSkinSampleOf(petSkin.value.id)) autoCloneBuiltinPetVoice(petSkin.value.id, { silent: true }).catch(() => {})
 })
 onUnmounted(() => {
   if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
@@ -2853,14 +2759,8 @@ onUnmounted(() => {
         <button v-if="voiceUndo" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1)); margin-bottom: 8px" @click="undoHideVoice()">↩️ 撤销上一步隐藏（{{ voiceUndo.id }}）</button>
         <div class="fld" style="border: 1px solid var(--line, rgba(128,128,128,.3)); border-radius: 10px; padding: 10px; margin-bottom: 8px">
           <label style="font-weight: 700">🧬 我的克隆音色（自定义名称 · 可删除/保留）</label>
-          <button v-if="pendingBuiltinCloneCount" class="btn btn-pri" style="font-size:calc(11px*var(--ui-fs-scale,1));margin-left:8px" :disabled="!!petVoiceCloningId" @click="cloneAllBuiltinPetVoices()">{{ petVoiceCloningId ? '⏳ 克隆中…' : '🧬 一键克隆全部内置声线（' + pendingBuiltinCloneCount + '）' }}</button>
           <div v-if="petCloneVoiceList().length" style="margin-top: 6px">
             <div v-for="cv in petCloneVoiceList()" :key="cv.skinId" style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(12px * var(--ui-fs-scale, 1))">
-              <template v-if="cv.pending">
-                <span>{{ cv.char }} · <b style="color:var(--text3)">待克隆</b></span>
-                <button class="btn btn-pri" style="font-size: calc(11px * var(--ui-fs-scale, 1))" :disabled="!!petVoiceCloningId" @click="autoCloneBuiltinPetVoice(cv.skinId)">{{ petVoiceCloningId === cv.skinId ? '⏳ 克隆中…' : '🧬 克隆' }}</button>
-              </template>
-              <template v-else>
               <span>{{ cv.char }} · <b>{{ cv.name }}</b> <span style="color: var(--text3)">({{ cv.engine === 'glm' ? '智谱' : 'CosyVoice2' }})</span></span>
               <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="ttsPreviewBound(cv.skinId)">▶️ 试听</button>
               <button v-if="cv.locked" class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" disabled title="内置锁定，不可删除/改名">🔒 内置</button>
@@ -2872,7 +2772,6 @@ onUnmounted(() => {
               <template v-else>
                 <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" title="重命名" @click="doRenameCloneVoice(cv.skinId)">✏️</button>
                 <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doUnbindSkinVoice(cv.skinId)">🗑 删除</button>
-              </template>
               </template>
             </div>
           </div>
@@ -3556,13 +3455,10 @@ onUnmounted(() => {
           <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">
             当前角色：<b>{{ petSkin.name }}</b>（{{ petSkin.desc }}）；
             <button v-if="petSkinSampleOf(petSkin.id)" class="btn btn-gh" style="padding:1px 7px;font-size:calc(11px*var(--ui-fs-scale,1));margin-left:4px" @click="previewPetSample(petSkin.id)">🔊 试听参考原声</button>
-            <button v-if="petSkinSampleOf(petSkin.id) && !petSkinVoiceOf(petSkin.id).cloned && petVoiceCloningId !== petSkin.id" class="btn btn-gh" style="padding:1px 7px;font-size:calc(11px*var(--ui-fs-scale,1));margin-left:4px" @click="autoCloneBuiltinPetVoice(petSkin.id)">🧬 生成真实克隆原声</button>
-            <span v-if="petVoiceCloningId === petSkin.id" style="margin-left:4px">⏳ 正在克隆内置原声…</span>
             <span v-if="petIsLocked(petSkin.id)">🔒 形象与声音<b>内置锁定</b>（{{ petSkinVoiceOf(petSkin.id).name }}），不可更改。</span>
             <span v-else-if="petSkinVoiceOf(petSkin.id).cloned">已启用克隆原声「<b>{{ petSkinVoiceOf(petSkin.id).name }}</b>」🧬</span>
             <span v-else>声音跟随「🗣️ 语音」里的<b>全局音色</b>（想给 TA 专属原声，用下方「🎤 克隆角色原声」）</span>
           </div>
-          <div v-if="petVoiceCloneStatus[petSkin.id]" style="font-size:calc(11px*var(--ui-fs-scale,1));color:var(--text3);margin-top:5px">{{ petVoiceCloneStatus[petSkin.id] }}</div>
         </div>
         <div v-if="!petIsLocked(petSkin.id)" class="fld" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
           <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="$refs.setPetImgInput.click()">📷 上传形象</button>

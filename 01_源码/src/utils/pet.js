@@ -1,5 +1,5 @@
 // ===== 养成系萌宠：靠刷题/问答成长，知学习状态、有情绪与作息 =====
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { store } from '../store'
 import { speak, stopSpeak, speaking } from './tts'
 import { chatOnce, supportsVision, setCostCtx } from '../api/client'
@@ -70,6 +70,8 @@ export function petRemoveCustomSkin(id) {
   store.cfg.customSkins = (store.cfg.customSkins || []).filter((s) => s.id !== id)
   if (store.cfg.skinImgs) delete store.cfg.skinImgs[id]
   if (store.cfg.skinVoices) delete store.cfg.skinVoices[id]
+  if (petVoiceBindings[id]) delete petVoiceBindings[id]
+  try { localStorage.setItem(VOICE_BINDINGS_KEY, JSON.stringify(petVoiceBindings)) } catch (e) {}
   if (store.cfg.petSkin === id) store.cfg.petSkin = PET_SKINS[0].id
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
   return true
@@ -153,12 +155,42 @@ function presetEngineReady(engine) {
   if (engine === 'dash') return !!(store.cfg.ttsDash && store.cfg.ttsDash.key)
   return false
 }
+// 角色声线绑定独立于 xc_cfg：xc_cfg 含密钥且不参与云同步；voiceBindings 只含克隆 voice ID，可随学习数据同步，
+// 保证同一账号在手机/网页/iPad 上复用同一套克隆结果，不再每台设备重复克隆。
+const VOICE_BINDINGS_KEY = 'xc_voice_bindings'
+function loadVoiceBindings() {
+  let saved = {}
+  try { saved = JSON.parse(localStorage.getItem(VOICE_BINDINGS_KEY) || '{}') || {} } catch (e) {}
+  const legacy = (store.cfg && store.cfg.skinVoices) || {}
+  const merged = { ...legacy, ...saved }
+  try { localStorage.setItem(VOICE_BINDINGS_KEY, JSON.stringify(merged)) } catch (e) {}
+  return merged
+}
+export const petVoiceBindings = reactive(loadVoiceBindings())
+export function petVoiceBindingOf(skinId) {
+  return (skinId && petVoiceBindings[skinId]) || (store.cfg && store.cfg.skinVoices && store.cfg.skinVoices[skinId]) || null
+}
+function setPetVoiceBinding(skinId, bind) {
+  if (!skinId) return null
+  if (bind && bind.voice) {
+    const value = { engine: bind.engine, voice: bind.voice, name: bind.name || '', model: bind.model || '', voiceCustom: bind.voiceCustom || '', builtinAuto: !!bind.builtinAuto, at: Date.now() }
+    petVoiceBindings[skinId] = value
+    if (!store.cfg.skinVoices) store.cfg.skinVoices = {}
+    store.cfg.skinVoices[skinId] = value
+  } else {
+    delete petVoiceBindings[skinId]
+    if (store.cfg.skinVoices) delete store.cfg.skinVoices[skinId]
+  }
+  try { localStorage.setItem(VOICE_BINDINGS_KEY, JSON.stringify(petVoiceBindings)) } catch (e) {}
+  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
+  return petVoiceBindings[skinId] || null
+}
 // 每个角色可绑定「大模型克隆声线」：store.cfg.skinVoices[skinId] = { engine:'glm'|'openai'|'dash', voice, name, model?, voiceCustom? }
 // 绑定后一键切换角色即用对应声线；未绑定则保持全局音色（与「语音」设置完全一致）
 export function petSkinVoiceOf(skinId, engine) {
   const s = petAllSkins.value.find((x) => x.id === skinId)
   const eng = engine || store.cfg.ttsMode || 'glm'
-  const bv = store.cfg.skinVoices && store.cfg.skinVoices[skinId]
+  const bv = petVoiceBindingOf(skinId)
   if (bv && bv.voice) {
     // 已绑定的声线优先（含 dash 自定义/预设音色的绑定），并附 voiceCustom（百炼自然语言音色）
     const out = { engine: bv.engine, voice: bv.voice, name: bv.name || '', model: bv.model || '', cloned: true }
@@ -183,44 +215,30 @@ export function petSkinVoiceOf(skinId, engine) {
 // 把克隆成功的声线绑定到指定角色（bind 为空则解绑）
 export function petBindCloneVoice(skinId, bind) {
   if (petIsLocked(skinId)) return null // 锁定角色不允许更改声线
-  if (!store.cfg.skinVoices) store.cfg.skinVoices = {}
-  if (bind && bind.voice) {
-    store.cfg.skinVoices[skinId] = { engine: bind.engine, voice: bind.voice, name: bind.name || '', model: bind.model || '', at: Date.now() }
-  } else {
-    delete store.cfg.skinVoices[skinId]
-  }
-  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
-  return store.cfg.skinVoices[skinId]
+  return setPetVoiceBinding(skinId, bind)
 }
 // 内置角色自动克隆专用：允许给 locked 角色写入一次自动生成的真实克隆声线。
 export function petBindBuiltinVoice(skinId, bind) {
   if (!skinId || !bind || !bind.voice) return null
-  if (!store.cfg.skinVoices) store.cfg.skinVoices = {}
-  store.cfg.skinVoices[skinId] = {
-    engine: bind.engine,
-    voice: bind.voice,
-    name: bind.name || '',
-    model: bind.model || '',
-    builtinAuto: true,
-    at: Date.now()
-  }
-  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
-  return store.cfg.skinVoices[skinId]
+  return setPetVoiceBinding(skinId, { ...bind, builtinAuto: true })
 }
 export function petUnbindCloneVoice(skinId) { return petBindCloneVoice(skinId, null) }
 // 重命名用户绑定的克隆音色（内置克隆不可改）
 export function petRenameCloneVoice(skinId, name) {
   const n = String(name || '').trim()
-  const bv = store.cfg.skinVoices && store.cfg.skinVoices[skinId]
+  const bv = petVoiceBindingOf(skinId)
   if (!bv || !bv.voice) return false
   bv.name = n
+  if (petVoiceBindings[skinId]) petVoiceBindings[skinId].name = n
+  if (store.cfg.skinVoices && store.cfg.skinVoices[skinId]) store.cfg.skinVoices[skinId].name = n
+  try { localStorage.setItem(VOICE_BINDINGS_KEY, JSON.stringify(petVoiceBindings)) } catch (e) {}
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
   return true
 }
 // 已绑定的克隆声线清单（设置页展示用）
 export function petBoundVoices() {
   const out = []
-  const bv = store.cfg.skinVoices || {}
+  const bv = { ...(store.cfg.skinVoices || {}), ...petVoiceBindings }
   for (const id of Object.keys(bv)) {
     if (!bv[id] || !bv[id].voice) continue
     const s = petAllSkins.value.find((x) => x.id === id)
