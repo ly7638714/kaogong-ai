@@ -16,7 +16,7 @@ export { smoothWavBytes } from './tts/wav'
 // ============ 引擎元信息 ============
 // free=true 表示完全免费、无需任何 Key；其余为真人级付费引擎（按字符计费，新用户通常有免费额度）
 export const TTS_ENGINES = [
-  { id: 'glm', name: '🎙️ 智谱 GLM-TTS', tag: '超拟人·真人级（推荐）', free: false, desc: '新一代语音大模型，情绪/语气随内容起伏，几乎听不出合成感；用你已有的智谱 Key 即可（open.bigmodel.cn 注册有免费额度）。单价约 ¥0.02/次。' },
+  { id: 'glm', name: '🎙️ 智谱 GLM-TTS', tag: '超拟人·真人级（推荐）', free: false, desc: '新一代语音大模型，情绪/语气随内容起伏，几乎听不出合成感；用你已有的智谱 Key 即可（open.bigmodel.cn 注册有免费额度）。官方价 ¥2/万字符（≈0.2 元/千字，按输入字数计费）；同一内容重复朗读走本地缓存，不再扣费。' },
   { id: 'dash', name: '🍊 阿里百炼 Qwen3-TTS', tag: '廉价真人·实测可用', free: false, desc: '官方 ¥0.8/万字符（≈0.08 元/千字），中文自然、支持自然语言"自定义音色"；用通义 DashScope Key 即可（bailian.console.aliyun.com 新用户有试用额度）。' },
   { id: 'openai', name: '🎨 OpenAI 兼容', tag: 'CosyVoice2 等', free: false, desc: '任意 OpenAI 兼容 TTS 接口（如硅基流动 CosyVoice2、本地 vLLM），支持上传音频克隆你的专属音色；需自备对应 Key/服务地址。' },
   { id: 'edge', name: '🚀 Edge 免费神经', tag: '微软 Neural · 免费', free: true, desc: '完全免费、无需任何 Key！微软神经网络音色（含晓晓/云扬等 200+ 种），音质够用；缺点是部分网络会拦截微软服务器，此时会自动回退系统语音。' },
@@ -461,6 +461,8 @@ export async function glmSynthesize(text, opts = {}) {
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
   try { beginCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', kind: 'audio' }) } catch (e) {}
+  // 统计本次「真正请求」与「缓存命中」的字数：只有真正请求的字数需要付费，缓存命中的不再计费
+  const stats = { hitChars: 0, missChars: 0 }
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
@@ -475,17 +477,21 @@ export async function glmSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    }, 'audio/wav'),
+    }, 'audio/wav', stats),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   const total = bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll)
   const chars = chunks.join('').length
-  try {
-    recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((chars / 1000) * getTtsPrice('glm') * 100000) / 100000, note: chars + ' 字' })
-  } catch (e) {}
-  ttsAddForEngine(chars)
-  return { ok: true, bytes: total, mime: 'audio/wav' }
+  const billChars = Math.max(0, Math.min(chars, stats.missChars))
+  const savedChars = Math.max(0, chars - billChars)
+  if (billChars > 0) {
+    try {
+      recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((billChars / 1000) * getTtsPrice('glm') * 100000) / 100000, note: billChars + ' 字' + (savedChars > 0 ? '（缓存命中 ' + savedChars + ' 字，未重复计费）' : '') })
+    } catch (e) {}
+    ttsAddForEngine(billChars)
+  }
+  return { ok: true, bytes: total, mime: 'audio/wav', billChars, cachedChars: savedChars }
 }
 function concatBuffers(buffs) {
   const n = buffs.reduce((a, b) => a + b.byteLength, 0)
@@ -501,17 +507,68 @@ function concatBuffers(buffs) {
 function ttsChunkKey(engine, cfg, voice, speed, text) {
   return ttsCacheKey(engine + ':' + String((cfg && cfg.model) || ''), voice, speed, 0, text)
 }
-async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime) {
+// 同一分块并发请求去重：多个入口同时朗读同一段内容时只发一次请求，避免重复计费
+const _ttsInflight = new Map()
+// stats: { hitChars, missChars } —— 只对「真正发起请求」的字数计费，缓存命中的字数省下来
+async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, stats) {
   const ck = ttsChunkKey(engine, cfg, voice, speed, text)
   try {
     const hit = await ttsCacheGet(ck)
-    if (hit && hit.bytes) return hit.bytes
+    if (hit && hit.bytes) {
+      if (stats) stats.hitChars += String(text || '').length
+      return hit.bytes
+    }
   } catch (e) {}
-  const bytes = await fetchFn()
-  if (bytes && bytes.byteLength > 0) {
-    try { ttsCacheSet(ck, bytes, mime) } catch (e) {}
+  const pending = _ttsInflight.get(ck)
+  if (pending) {
+    const bytes = await pending
+    if (stats) stats.hitChars += String(text || '').length
+    return bytes
   }
-  return bytes
+  const task = (async () => {
+    const bytes = await fetchFn()
+    if (bytes && bytes.byteLength > 0) {
+      try { ttsCacheSet(ck, bytes, mime) } catch (e) {}
+    }
+    return bytes
+  })()
+  _ttsInflight.set(ck, task)
+  try {
+    const bytes = await task
+    if (stats) stats.missChars += String(text || '').length
+    return bytes
+  } finally {
+    _ttsInflight.delete(ck)
+  }
+}
+// 预估一段文本能否「完整命中本地缓存」：用于省钱护栏——
+// 全命中时本次朗读本来就不花钱，不应占用付费额度、也不该降级到 Edge（保住智谱原声音质）。
+export async function ttsCacheCoverage(text, opts = {}) {
+  const t = cleanSpeechText(text)
+  const mode = String(opts.mode || (store.cfg && store.cfg.ttsMode) || 'glm')
+  if (!t) return { total: 0, cached: 0, full: false }
+  const chunks = chunkForTts(t, Number(opts.chunkSize) || 240, Number(opts.firstChunkSize) || 42)
+  if (!chunks.length) return { total: 0, cached: 0, full: false }
+  let makeKey = null
+  if (mode === 'glm') {
+    const cfg = gmCfg()
+    if (cfg) makeKey = (c) => ttsChunkKey('glm', cfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+  } else if (mode === 'openai') {
+    const cfg = openaiCfg()
+    if (cfg) makeKey = (c) => ttsChunkKey('openai', cfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+  } else if (mode === 'dash') {
+    const cfg = dashCfg()
+    if (cfg) makeKey = (c) => ttsChunkKey('dash', cfg, opts.voice != null ? opts.voice : cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+  }
+  if (!makeKey) return { total: chunks.length, cached: 0, full: false }
+  let cached = 0
+  for (const c of chunks) {
+    try {
+      const hit = await ttsCacheGet(makeKey(c))
+      if (hit && hit.bytes) cached++
+    } catch (e) {}
+  }
+  return { total: chunks.length, cached, full: cached > 0 && cached === chunks.length }
 }
 export function clampSpeed(r) {
   const n = Number(r)
@@ -554,6 +611,7 @@ export async function openaiSynthesize(text, opts = {}) {
   const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
+  const stats = { hitChars: 0, missChars: 0 }
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
@@ -568,13 +626,15 @@ export async function openaiSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    }, 'audio/mpeg'),
+    }, 'audio/mpeg', stats),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   const chars = chunks.join('').length
-  ttsAddForEngine(chars)
-  return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg' }
+  const billChars = Math.max(0, Math.min(chars, stats.missChars))
+  const savedChars = Math.max(0, chars - billChars)
+  if (billChars > 0) ttsAddForEngine(billChars)
+  return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg', billChars, cachedChars: savedChars }
 }
 
 // ============ ③ 阿里百炼 TTS（Qwen3-TTS·廉价真人，v3.8.91 实测可用）============
@@ -678,6 +738,7 @@ export async function dashSynthesize(text, opts = {}) {
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
   try { beginCost({ feature: 'tts', provider: 'dash', model: cfg.model, kind: 'audio' }) } catch (e) {}
+  const stats = { hitChars: 0, missChars: 0 }
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
     async (c) => synthChunkCached('dash', cfg, voice, speed, c, async () => {
@@ -703,16 +764,20 @@ export async function dashSynthesize(text, opts = {}) {
         return await ar.arrayBuffer()
       }
       throw new Error('音频字段缺失')
-    }, 'audio/mpeg'),
+    }, 'audio/mpeg', stats),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
   const chars = chunks.join('').length
-  try {
-    recordCost({ feature: 'tts', provider: 'dash', model: cfg.model, cost: Math.round((chars / 1000) * getTtsPrice('dash') * 100000) / 100000, note: chars + ' 字' })
-  } catch (e) {}
-  ttsAddForEngine(chars)
-  return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg' }
+  const billChars = Math.max(0, Math.min(chars, stats.missChars))
+  const savedChars = Math.max(0, chars - billChars)
+  if (billChars > 0) {
+    try {
+      recordCost({ feature: 'tts', provider: 'dash', model: cfg.model, cost: Math.round((billChars / 1000) * getTtsPrice('dash') * 100000) / 100000, note: billChars + ' 字' + (savedChars > 0 ? '（缓存命中 ' + savedChars + ' 字，未重复计费）' : '') })
+    } catch (e) {}
+    ttsAddForEngine(billChars)
+  }
+  return { ok: true, bytes: bytesAll.length === 1 ? bytesAll[0] : concatBuffers(bytesAll), mime: 'audio/mpeg', billChars, cachedChars: savedChars }
 }
 function base64ToBytes(b64) {
   const bin = atob(String(b64 || ''))
@@ -1163,9 +1228,17 @@ export async function speakPro(text, opts = {}) {
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
   // 省钱护栏：真人引擎超额度 → 自动退回免费 Edge（Edge/系统永不被拦）
-  if ((mode === 'glm' || mode === 'openai' || mode === 'dash') && paidTtsBlocked(t.length)) {
-    guardToastOnce()
-    mode = 'edge'
+  // 例外：整段都命中本地缓存时本次并不产生费用，保持原声引擎、不降级、也不占额度。
+  if (mode === 'glm' || mode === 'openai' || mode === 'dash') {
+    let fullyCached = false
+    try {
+      const cov = await ttsCacheCoverage(t, Object.assign({}, opts, { mode, chunkSize: 240, firstChunkSize: 42 }))
+      fullyCached = !!(cov && cov.full)
+    } catch (e) {}
+    if (!fullyCached && paidTtsBlocked(t.length)) {
+      guardToastOnce()
+      mode = 'edge'
+    }
   }
   setStatus('speaking', '正在朗读…')
   try {

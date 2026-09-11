@@ -6,7 +6,7 @@ import { reactive } from 'vue'
 
 const KEY = 'xc_cost'
 const MAX_RECORDS = 3000
-const PRICE_SCHEMA = '2026-09-10-deepseek-flash-v1'
+const PRICE_SCHEMA = '2026-09-11-tts-official-prices-v2'
 const DEEPSEEK_FLASH_KEYS = [
   'deepseek-flash',
   'deepseek-v4.1-flash',
@@ -85,10 +85,14 @@ export const DEF_PRICES = {
   'gemini-3.7-flash': { in: 0.00525, out: 0.02625, note: 'Google 官方·Gemini 3.7 Flash 促销 $0.75/$3.75 每百万(≈¥5.25/¥26.25) 2026-08', src: 'https://ai.google.dev/gemini-api/docs/pricing' },
   'gemini-3.1-pro': { in: 0.014, out: 0.084, note: 'Google 官方·Gemini 3.1 Pro $2/$12 每百万(≈¥14/¥84) 2026-02', src: 'https://ai.google.dev/gemini-api/docs/pricing' },
   'doubao-seed-1.6-flash': { in: 0.00015, out: 0.0015, note: '火山官方·Doubao-Seed-1.6-Flash 0-32k 输入¥0.15/输出¥1.5 每百万(官方2026-07)', src: 'https://www.volcengine.com/docs/82379/1544106' },
-  ttsPer1k: 0.002,
-  cloneFee: 0.05,
-  // 各家真人朗读引擎单价（元/千字）：已实测核验的写真实价，未核验走上方 ttsPer1k 兜底（UI 可改）
-  ttsPrices: { dash: 0.08, glm: 0.05, openai: 0.02, edge: 0, sys: 0 }
+  ttsPer1k: 0.2,
+  // 音色克隆：智谱 GLM-TTS-Clone 官方「6 元/次」（2026-09-11 官方价格页核验）
+  cloneFee: 6,
+  // 各家真人朗读引擎单价（元/千字，= 官方「元/万字符」÷ 10）：
+  //   智谱 GLM-TTS 官方 2 元/万字符 → 0.2；阿里百炼 Qwen3-TTS 官方 0.8 元/万字符 → 0.08；
+  //   OpenAI 兼容（硅基流动 CosyVoice2 等）按 0.02 估；Edge / 系统语音免费。
+  //   兜底 ttsPer1k 取智谱价（保守估计，宁可高估不低估）。
+  ttsPrices: { dash: 0.08, glm: 0.2, openai: 0.02, edge: 0, sys: 0 }
 }
 export function getPrices() {
   try {
@@ -106,10 +110,25 @@ export function getPrices() {
             changed = true
           }
         }
+        // 旧版把智谱朗读/克隆单价写得远低于官方价（朗读 0.05 元/千字、克隆 0.05 元/次），
+        // 会把花费显示得比真实偏低：仅当仍是这些旧默认值时才迁移到官方价，用户自己改过的保留。
+        if (saved.ttsPrices && typeof saved.ttsPrices === 'object' && Number(saved.ttsPrices.glm) === 0.05) {
+          saved.ttsPrices.glm = DEF_PRICES.ttsPrices.glm
+          changed = true
+        }
+        if (Number(saved.cloneFee) === 0.05) {
+          saved.cloneFee = DEF_PRICES.cloneFee
+          changed = true
+        }
         if (changed) localStorage.setItem(KEY + '_p', JSON.stringify(saved))
         localStorage.setItem(KEY + '_p_v', PRICE_SCHEMA)
       }
-      return { ...DEF_PRICES, ...saved }
+      // ttsPrices 深度合并：即使老配置只存了部分引擎，也补齐官方默认价，避免朗读按兜底价误算
+      return {
+        ...DEF_PRICES,
+        ...saved,
+        ttsPrices: { ...DEF_PRICES.ttsPrices, ...(saved.ttsPrices || {}) }
+      }
     }
   } catch (e) {}
   return { ...DEF_PRICES }

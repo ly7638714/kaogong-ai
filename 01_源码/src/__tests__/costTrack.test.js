@@ -113,7 +113,9 @@ describe('AI 用量与花费追踪 costTrack', () => {
     savePrices({ ...DEF_PRICES, 'deepseek-chat': { in: 0.001, out: 0.004 } })
     const p = getPrices()
     expect(p['deepseek-chat'].in).toBe(0.001)
-    expect(p.ttsPer1k).toBe(0.002)
+    // 朗读兜底单价随官方价调整（2026-09-11 起取智谱 GLM-TTS 的 0.2 元/千字），这里对齐当前默认值
+    expect(p.ttsPer1k).toBe(DEF_PRICES.ttsPer1k)
+    expect(p.ttsPrices.glm).toBe(DEF_PRICES.ttsPrices.glm)
   })
 })
 

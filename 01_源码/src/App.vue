@@ -3830,7 +3830,7 @@ onUnmounted(() => {
           <div v-if="!costStat.list.length" class="cost-empty">还没有 AI 调用记录，去问答/刷题/朗读试试（实时动态记）</div>
         </div>
         <details class="guide" style="margin-top: 10px">
-          <summary>⚙️ 计价表（2026-09-10 起 DeepSeek Flash 新价：空闲缓存未命中输入1/输出4 元每百万，缓存命中输入0.02，高峰×2；另含智谱/通义/OpenAI/Kimi/Gemini/豆包等官方公开价。单位：输入框=元/千 token = 官方价(元/百万)÷1000。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
+          <summary>⚙️ 计价表（2026-09-11 更新 · 均为官方公开价）。对话/视觉：单位=元/千 token = 官方价(元/百万)÷1000（DeepSeek Flash 自 2026-09-10 起：空闲缓存未命中输入1/输出4 元每百万，缓存命中输入0.02，高峰×2）。朗读：智谱 GLM-TTS 官方 2 元/万字符（=0.2 元/千字）、阿里百炼 Qwen3-TTS 0.8 元/万字符（=0.08 元/千字）、Edge/系统语音免费。音色克隆：智谱 GLM-TTS-Clone 官方 6 元/次。同一内容重复朗读命中本地缓存 → 0 元、不占每日额度。若你账单价不同请直接改；表里没列出的模型按「default」兜底）</summary>
           <div class="guide-body">
             <template v-for="(pr, mk) in costPrices" :key="mk"><div v-if="mk !== 'ttsPrices'" class="cost-price-row">
               <span class="cp-name">{{ mk === 'ttsPer1k' ? '朗读(元/千字)' : mk === 'cloneFee' ? '克隆(元/次)' : mk }}</span>
@@ -3841,6 +3841,22 @@ onUnmounted(() => {
               </template>
               <span class="cp-note">{{ pr.note || pr }}</span>
             </div></template>
+            <div class="cost-price-row">
+              <span class="cp-name">朗读·智谱 GLM-TTS</span>
+              <span class="cp-note">¥{{ (costPrices.ttsPrices || {}).glm }} 元/千字（官方 2 元/万字符，按朗读字数计费）</span>
+            </div>
+            <div class="cost-price-row">
+              <span class="cp-name">朗读·阿里百炼</span>
+              <span class="cp-note">¥{{ (costPrices.ttsPrices || {}).dash }} 元/千字（官方 0.8 元/万字符）</span>
+            </div>
+            <div class="cost-price-row">
+              <span class="cp-name">朗读·OpenAI 兼容 / Edge / 系统</span>
+              <span class="cp-note">¥{{ (costPrices.ttsPrices || {}).openai }} / ¥0 / ¥0 元/千字（Edge、系统语音完全免费）</span>
+            </div>
+            <div class="cost-price-row">
+              <span class="cp-name">音色克隆·智谱</span>
+              <span class="cp-note">GLM-TTS-Clone 官方 6 元/次（对应上方「克隆(元/次)」，可按你账单改）</span>
+            </div>
             <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
               <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costSavePrices()">💾 保存计价表</button>
               <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="costResetPrices()">↩️ 恢复默认</button>
