@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { symbolsToChinese, cleanSpeechText, smoothWavBytes } from '../utils/ttsEngine'
+import { symbolsToChinese, cleanSpeechText, smoothWavBytes, trimLeadingAudioArtifacts } from '../utils/ttsEngine'
 
 describe('symbolsToChinese 符号智能朗读', () => {
   it('箭头 → 推出', () => {
@@ -88,5 +88,22 @@ describe('smoothWavBytes WAV 平滑（去静音/纯音提示声）', () => {
   it('过短音频不处理', () => {
     const wav = makeWav(10, 0.5)
     expect(smoothWavBytes(wav)).toBe(wav)
+  })
+})
+
+describe('trimLeadingAudioArtifacts 解码后 PCM 清杂', () => {
+  it('能裁掉开头的短提示音和其后静音，同时保留正文', () => {
+    const sr = 8000
+    const total = sr * 2
+    const data = new Float32Array(total)
+    for (let i = 0; i < sr * 0.12; i++) data[i] = 0.25 * Math.sin(2 * Math.PI * 880 * i / sr)
+    for (let i = sr * 0.14; i < sr * 0.5; i++) data[i] = 0.03 * Math.sin(2 * Math.PI * 260 * i / sr) + 0.015 * Math.sin(2 * Math.PI * 430 * i / sr)
+    const input = { numberOfChannels: 1, length: total, sampleRate: sr, getChannelData: () => data }
+    const ctx = {
+      createBuffer: (ch, len) => ({ numberOfChannels: ch, length: len, sampleRate: sr, _d: [new Float32Array(len)], getChannelData(i) { return this._d[i] } })
+    }
+    const out = trimLeadingAudioArtifacts(ctx, input)
+    expect(out.length).toBeLessThan(total)
+    expect(out.length).toBeGreaterThan(sr)
   })
 })

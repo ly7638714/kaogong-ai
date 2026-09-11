@@ -230,9 +230,79 @@ async function gapDecode(bytes, mime) {
     if (ctx.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
     if (ctx.state !== 'running') { _gap.fallback = true; return null }
     const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes, { fade: false }) : bytes
-    return await ctx.decodeAudioData(gapBytes(data).slice(0))
+    const decoded = await ctx.decodeAudioData(gapBytes(data).slice(0))
+    return trimLeadingAudioArtifacts(ctx, decoded)
   } catch (e) {
     return null
+  }
+}
+// 统一清理解码后的 PCM：识别分块开头很短的“提示音/点击音 + 静音”，只裁掉疑似非语音前导。
+// 覆盖 MP3/WAV 及所有 TTS 引擎，避免只在 WAV 字节层面处理时漏掉 MP3 的滴滴声。
+export function trimLeadingAudioArtifacts(ctx, input) {
+  if (!ctx || !input || input.numberOfChannels < 1 || input.length < 32) return input
+  try {
+    const sr = input.sampleRate
+    const ch = input.numberOfChannels
+    const total = input.length
+    const scanFrames = Math.min(total, Math.floor(sr * 1.6))
+    const win = Math.max(8, Math.floor(sr * 0.005))
+    const winCount = Math.max(1, Math.floor(scanFrames / win))
+    const stats = []
+    const channel0 = input.getChannelData(0)
+    for (let w = 0; w < winCount; w++) {
+      const s0 = w * win
+      const s1 = Math.min(scanFrames, s0 + win)
+      let sum = 0, peak = 0, zc = 0, maxJump = 0
+      for (let i = s0; i < s1; i++) {
+        const v = channel0[i]
+        const a = Math.abs(v)
+        sum += v * v
+        if (a > peak) peak = a
+        if (i > s0) {
+          const prev = channel0[i - 1]
+          const jump = Math.abs(v - prev)
+          if (jump > maxJump) maxJump = jump
+          if ((prev < 0) !== (v < 0)) zc++
+        }
+      }
+      const n = Math.max(1, s1 - s0)
+      stats.push({ rms: Math.sqrt(sum / n), peak, zcr: zc / n, jump: maxJump / Math.max(1e-6, peak) })
+    }
+    const peakAll = stats.reduce((m, x) => Math.max(m, x.peak), 0)
+    if (peakAll < 0.02) return input
+    const floor = Math.max(0.008, peakAll * 0.035)
+    let firstLoud = -1
+    for (let i = 0; i < stats.length; i++) {
+      if (stats[i].rms > floor && stats[i].peak > floor * 1.6) { firstLoud = i; break }
+    }
+    if (firstLoud < 0 || firstLoud > Math.floor(0.35 / 0.005)) return input
+    let gapStart = -1
+    for (let i = firstLoud + 1; i < stats.length; i++) {
+      if (stats[i].rms <= floor * 0.72 && stats[i].peak <= floor * 1.25) {
+        let gapEnd = i
+        while (gapEnd + 1 < stats.length && stats[gapEnd + 1].rms <= floor * 0.72 && stats[gapEnd + 1].peak <= floor * 1.25) gapEnd++
+        if ((gapEnd - i + 1) * win >= sr * 0.025) { gapStart = i; break }
+      }
+      if (i - firstLoud > Math.floor(0.85 / 0.005)) break
+    }
+    if (gapStart < 0) return input
+    const run = stats.slice(firstLoud, gapStart)
+    const runDuration = run.length * win / sr
+    const avgZcr = run.reduce((s, x) => s + x.zcr, 0) / Math.max(1, run.length)
+    const maxJump = run.reduce((m, x) => Math.max(m, x.jump), 0)
+    const shortArtifact = runDuration <= 0.55
+    const tonal = avgZcr < 0.022 || avgZcr > 0.055
+    const clicky = maxJump > 1.25 || run.some((x) => x.peak > 0.42)
+    if (!(shortArtifact && (tonal || clicky || runDuration <= 0.13))) return input
+    let trim = (gapStart * win)
+    while (trim < scanFrames && Math.abs(channel0[trim] || 0) > floor * 1.4) trim++
+    trim = Math.min(trim + Math.floor(sr * 0.006), Math.floor(sr * 1.35))
+    if (trim < Math.floor(sr * 0.012) || total - trim < Math.floor(sr * 0.02)) return input
+    const out = ctx.createBuffer(ch, total - trim, sr)
+    for (let c = 0; c < ch; c++) out.getChannelData(c).set(input.getChannelData(c).subarray(trim))
+    return out
+  } catch (e) {
+    return input
   }
 }
 // 调度（串行）：按 AudioContext 时间轴首尾精确衔接，像真人说话一样无缝隙
@@ -256,8 +326,8 @@ function gapStart(audioBuf, meta) {
     _gap.sources.push(src)
     const start = _gap.nextAt
     const end = start + audioBuf.duration
-    // 每个分块只做 4ms 微淡化，消除“每句开头一声嘟”的硬切爆音；足够短，不会听成忽大忽小。
-    const fade = Math.min(0.006, Math.max(0.002, audioBuf.duration / 8))
+    // 每个分块只做约 8ms 微淡化，消除“每句开头一声嘟”的硬切爆音；足够短，不会听成忽大忽小。
+    const fade = Math.min(0.012, Math.max(0.004, audioBuf.duration / 6))
     gain.gain.setValueAtTime(0, start)
     gain.gain.linearRampToValueAtTime(1, start + fade)
     gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
