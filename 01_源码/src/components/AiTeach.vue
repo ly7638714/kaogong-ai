@@ -9,7 +9,6 @@ import { answerLetter } from '../utils/quiz'
 import { pickGenCfg } from '../utils/fastMode'
 import { buildPlainTranslationPrompt, sanitizePlainTranslation } from '../utils/plainTranslate'
 import { speak, stopSpeak, primeTts, TTS_ENGINES } from '../utils/tts'
-import { speakReadyText, rdCfg } from '../utils/speechScript'
 import AiLessonStage from './AiLessonStage.vue'
 
 const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' }, initialAnswer: { type: String, default: '' } })
@@ -46,45 +45,88 @@ const playing = ref(false)
 const transcriptOpen = ref(false)
 const checkpointPick = ref('')
 const checkpointOk = ref(false)
-const scriptBusy = ref(false)
 let playToken = 0
+const LESSON_CACHE_KEY = 'xc_micro_lesson_cache_v1'
+const LESSON_CACHE_VERSION = 1
 const scenes = computed(() => (lesson.value && lesson.value.scenes) || [])
 const currentScene = computed(() => scenes.value[sceneIdx.value] || null)
 const progress = computed(() => (scenes.value.length ? ((sceneIdx.value + 1) / scenes.value.length) * 100 : 0))
 const lessonTitle = computed(() => (lesson.value && lesson.value.title) || '未生成课程')
 
-function stopNarration() { playToken++; scriptBusy.value = false; try { stopSpeak() } catch (e) {} }
+function stopNarration() { playToken++; try { stopSpeak() } catch (e) {} }
 function sceneNarration(sc) { return sc ? sc.title + '。' + sc.body + (sc.points || []).join('；') : '' }
-function sceneScriptSource(sc) {
-  const card = (topic.value && topic.value.card) || {}
-  const example = sc && sc.example ? '例题：' + sc.example.q + '；选项：' + (sc.example.opts || []).join('；') + '；答案：' + (sc.example.answer || '') + '；路径：' + (sc.example.path || '') : ''
-  return [
-    '知识点：' + (card.plate || '') + ' · ' + (card.type || '核心方法'),
-    '本幕标题：' + ((sc && sc.title) || ''),
-    '画面讲解：' + ((sc && sc.body) || ''),
-    '画面要点：' + (((sc && sc.points) || []).join('；')),
-    example
-  ].filter(Boolean).join('\n')
+function lessonCacheKey(card) {
+  return String((card && (card.id || card.type + '|' + card.plate)) || 'micro')
 }
-async function lectureScript(sc) {
+function readLessonCache() {
+  try { return JSON.parse(localStorage.getItem(LESSON_CACHE_KEY) || '{}') || {} } catch (e) { return {} }
+}
+function getCachedLesson(card) {
+  const hit = readLessonCache()[lessonCacheKey(card)]
+  if (!hit || hit.v !== LESSON_CACHE_VERSION || !hit.lesson || !Array.isArray(hit.lesson.scenes)) return null
+  return hit.lesson
+}
+function saveLessonCache(card, value) {
+  try {
+    const all = readLessonCache()
+    all[lessonCacheKey(card)] = { v: LESSON_CACHE_VERSION, t: Date.now(), lesson: value }
+    const rows = Object.entries(all).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).slice(0, 30)
+    localStorage.setItem(LESSON_CACHE_KEY, JSON.stringify(Object.fromEntries(rows)))
+  } catch (e) {}
+}
+function ensureCompleteScript(text) {
+  const t = String(text || '').trim()
+  if (!t) return ''
+  return /[。！？…]$/.test(t) ? t : t + '。'
+}
+function localSceneScript(sc, card) {
+  const base = ((sc && sc.body) || '') + ((sc && sc.points && sc.points.length) ? '。' + sc.points.join('；') : '')
+  const points = (sc && sc.points) || []
+  return ensureCompleteScript(
+    '我们先看“' + ((sc && sc.title) || '这一段') + '”。' +
+    base +
+    (points.length > 1 ? '关键要抓住：' + points.slice(0, 3).join('、') + '。' : '') +
+    '把这一步和“' + (card.type || '核心方法') + '”连起来，就能落到做题动作上。'
+  )
+}
+function localLessonScripts(value, card) {
+  return (value.scenes || []).map((sc) => localSceneScript(sc, card))
+}
+function sceneDigest(value) {
+  return (value.scenes || []).map((s, i) => ({
+    i: i + 1,
+    type: s.type || 'flow',
+    title: s.title || '',
+    body: s.body || '',
+    points: s.points || [],
+    example: s.example || null,
+    options: s.options || null,
+    answer: s.answer || '',
+    explain: s.explain || ''
+  }))
+}
+async function buildLessonScripts(value, card) {
+  const scenes = value.scenes || []
+  if (!scenes.length) return []
+  const sys = '你是资深行测名师和讲课稿撰稿人。你的任务不是写提纲，而是为整节动画微课一次性写完整、可直接朗读的教师讲课稿。只输出 JSON，不要 Markdown，不要解释。'
+  const user = '请围绕下面的知识卡和微课场景，一次性生成每一幕的完整教学讲稿。\n' +
+    '知识卡：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail, example: card.example }) + '\n' +
+    '场景列表：' + JSON.stringify(sceneDigest(value)) + '\n' +
+    '返回严格 JSON：{"scripts":["第1幕完整讲稿","第2幕完整讲稿",...]}。要求：scripts 数量必须等于场景数，顺序必须一致；每幕写成真正的老师讲课口播稿，先点明要解决的问题，再讲原理、具体动作、容易错在哪里，最后给一句记忆或动作提示；语言干练准确，短句为主，讲师感强，不要机械复述场景标题；例题场景要带学生走一遍判断路径；检查点场景只引导思考和停顿，不提前泄露答案；所有数字、年份、单位、专业词和逻辑关系必须保留；公式和符号要写成中文口语，例如“除以、根号、平方、推出、小于等于”；不能出现 Markdown、表格、代码、URL、舞台提示；绝不能截断，每幕都要完整收束。'
+  const maxTokens = Math.min(7000, Math.max(2600, scenes.length * 420))
+  const reply = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], maxTokens, 90000)
+  const m = String(reply || '').match(/\{[\s\S]*\}/)
+  const parsed = m ? JSON.parse(m[0]) : null
+  const rows = parsed && Array.isArray(parsed.scripts) ? parsed.scripts : null
+  if (!rows || rows.length !== scenes.length) throw new Error('AI 讲稿不完整')
+  return rows.map((x, i) => ensureCompleteScript(String(x || '').trim() || localSceneScript(scenes[i], card)))
+}
+function lectureScript(sc) {
   const raw = sceneNarration(sc)
   if (store.cfg.microScriptOn === false) return raw
-  scriptBusy.value = true
-  try {
-    if (rdCfg()) {
-      const source = sceneScriptSource(sc)
-      const viaReader = await speakReadyText(source, { kind: 'lesson', maxChars: 1400 })
-      if (viaReader && viaReader.trim() && viaReader.trim() !== source.trim()) return viaReader.trim()
-    }
-    const sys = '你是行测名师的讲课稿撰稿人。把动画微课当前画面写成老师现场讲课的口播稿。只输出讲稿正文，不要标题、Markdown、舞台提示或“以下是讲稿”。'
-    const user = '请紧扣这个知识点和当前画面，写成一段可在几十秒内讲清的教案式讲课稿：先点明要解决的问题，再讲为什么、怎么做、容易错在哪里，最后给一个动作口令。不能泛泛介绍，不能加入画面没有的新结论。\n\n' + sceneScriptSource(sc)
-    const out = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 700, 35000)
-    return String(out || '').trim() || raw
-  } catch (e) {
-    return raw
-  } finally {
-    scriptBusy.value = false
-  }
+  const idx = scenes.value.indexOf(sc)
+  const hit = lesson.value && lesson.value.scripts && lesson.value.scripts[idx]
+  return hit && String(hit).trim() ? String(hit).trim() : raw
 }
 function waitSpeech(text) {
   return new Promise((resolve) => {
@@ -136,7 +178,7 @@ async function play() {
     const cur = currentScene.value
     if (!cur) break
     if (cur.type === 'checkpoint' && !checkpointOk.value) { playing.value = false; break }
-    const text = await lectureScript(cur)
+    const text = lectureScript(cur)
     if (!playing.value || token !== playToken) break
     await waitSpeech(text)
     if (!playing.value || token !== playToken) break
@@ -144,7 +186,7 @@ async function play() {
     sceneIdx.value++
   }
 }
-function pause() { playing.value = false; playToken++; scriptBusy.value = false; try { stopSpeak() } catch (e) {} }
+function pause() { playing.value = false; playToken++; try { stopSpeak() } catch (e) {} }
 function gotoScene(i) {
   if (i < 0 || i >= scenes.value.length) return
   const resume = playing.value
@@ -174,12 +216,13 @@ function checkPoint(k) {
 }
 function selectTopic(t) {
   topic.value = t
-  lesson.value = null
+  lesson.value = getCachedLesson(t.card)
   sceneIdx.value = 0
   playing.value = false
   checkpointPick.value = ''
   checkpointOk.value = false
   stopNarration()
+  if (lesson.value) showToast('已读取本地缓存的完整微课讲稿', 'info')
 }
 function localLesson(card) {
   const plate = card.plate || '行测'
@@ -213,10 +256,24 @@ async function buildLesson() {
     const reply = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1800, 60000)
     const m = String(reply || '').match(/\{[\s\S]*\}/)
     const parsed = m ? JSON.parse(m[0]) : null
-    lesson.value = parsed && Array.isArray(parsed.scenes) && parsed.scenes.length ? parsed : localLesson(card)
+    const course = parsed && Array.isArray(parsed.scenes) && parsed.scenes.length ? parsed : localLesson(card)
+    let scripts = null
+    try {
+      scripts = await buildLessonScripts(course, card)
+    } catch (e) {
+      scripts = localLessonScripts(course, card)
+      showToast('AI 讲稿未能完整返回，已使用本地完整讲稿兜底', 'info')
+    }
+    course.scripts = scripts
+    lesson.value = course
+    saveLessonCache(card, course)
     if (!parsed) showToast('AI 课程未成稿，已使用本地高质量课程', 'info')
+    else showToast('✅ 完整课程与全套教学讲稿已生成并缓存', 'success')
   } catch (e) {
-    lesson.value = localLesson(card)
+    const fallback = localLesson(card)
+    fallback.scripts = localLessonScripts(fallback, card)
+    lesson.value = fallback
+    saveLessonCache(card, fallback)
     showToast('已使用本地课程，零额度也能完整学习', 'info')
   } finally {
     lessonBusy.value = false
@@ -315,8 +372,8 @@ onUnmounted(() => { stopNarration() })
           <button v-for="t in topics" :key="t.id || t.plate + t.card.type" class="shelf-tab" :class="{ on: topic && topic.id === t.id }" @click="selectTopic(t)">{{ t.plate }} · {{ t.card.type }}<small v-if="t.card.source"> · {{ t.card.source }}</small></button>
         </div>
         <div v-if="topic" class="at-course-head">
-          <div><b>{{ topic.card.type }}</b><span>{{ topic.card.tip }}</span></div>
-          <button class="btn btn-pri" :disabled="lessonBusy" @click="buildLesson()">{{ lessonBusy ? '⏳ AI 导演中…' : '✨ 生成深度微课' }}</button>
+          <div><b>{{ topic.card.type }}</b><span>{{ topic.card.tip }}<template v-if="lesson"> · {{ lesson.scripts && lesson.scripts.length ? '✅ 全套讲稿已缓存' : '⚠️ 未生成讲稿' }}</template></span></div>
+          <button class="btn btn-pri" :disabled="lessonBusy" @click="buildLesson()">{{ lessonBusy ? '⏳ AI 一次性生成课程与讲稿…' : lesson ? '🔄 重新生成课程与讲稿' : '✨ 生成深度微课与讲稿' }}</button>
         </div>
         <template v-if="lesson">
           <div class="at-stage">
@@ -338,7 +395,7 @@ onUnmounted(() => { stopNarration() })
             <select v-model="store.cfg.ttsMode" class="tb-sel" title="选择微课朗读音色引擎；与对话/萌宠共用全局语音设置" @change="saveCfg()">
               <option v-for="e in TTS_ENGINES" :key="e.id" :value="e.id">{{ e.name }}</option>
             </select>
-            <span class="at-free">{{ scriptBusy ? '🧠 正在生成讲课稿…' : '🔊 语音读完才进入下一幕' }}</span>
+            <span class="at-free">{{ lesson.scripts && lesson.scripts.length ? '✅ 全套讲稿已缓存 · 语音读完才进入下一幕' : '🔊 语音读完才进入下一幕' }}</span>
           </div>
           <div v-if="transcriptOpen" class="at-transcript"><div v-for="(s, i) in scenes" :key="i" :class="{ cur: i === sceneIdx }" @click="gotoScene(i)"><b>{{ i + 1 }}. {{ s.title }}</b><span>{{ s.body }}</span></div></div>
           <div class="at-actions">
@@ -347,7 +404,7 @@ onUnmounted(() => { stopNarration() })
             <button class="btn btn-gh" @click="goWrong()">📋 去错题集复练</button>
           </div>
         </template>
-        <div v-else class="at-empty">选一个板块主题，再点「生成深度微课」。课程包含识别、拆解、交互检查、陷阱和实战动作，不是简单 PPT 提纲。</div>
+        <div v-else class="at-empty">选一个板块主题，再点「生成深度微课与讲稿」。系统会一次生成全套教师讲稿并缓存，播放时直接读取，不再逐幕临时生成。</div>
       </div>
     </div>
   </div>
