@@ -43,6 +43,9 @@ const cur = ref(-1),
   show = ref(false)
 const rep = ref(false)
 const frm = ref({ answer: '', method: '', note: '', sel: [] })
+const editQShow = ref(false)
+const editQText = ref('')
+const editQAnswer = ref('')
 // ===== 卷库：全部历史卷子 + 出题集（查看/重做/导出/删除） =====
 const vaultOpen = ref(false)
 const qcPapers = ref([])
@@ -1193,6 +1196,21 @@ function save() {
   if (q.reviewed) petAddPoints(5) // 批次8·萌宠成长绑定：完成复盘+5成长值
   showToast('✅ 已保存复盘' + (q.reviewed ? '（萌宠 +5 成长）' : ''), 'success')
 }
+function openEditQ() {
+  if (cur.value < 0 || !store.wqs[cur.value]) return
+  editQText.value = String(store.wqs[cur.value].question || store.wqs[cur.value].q || store.wqs[cur.value].stem || '')
+  editQAnswer.value = String(store.wqs[cur.value].answer || '')
+  editQShow.value = true
+}
+function saveEditQ() {
+  if (cur.value < 0 || !store.wqs[cur.value]) return
+  const q = store.wqs[cur.value]
+  q.question = editQText.value.trim()
+  q.answer = editQAnswer.value.trim()
+  saveWqs()
+  editQShow.value = false
+  showToast('✅ 错题题目与答案已保存', 'success')
+}
 function del() {
   if (cur.value < 0) return
   if (!confirm('永久删除这道错题？\n\n删除后会写入同步墓碑，之后同步、导出和旧备份恢复都不会再把它带回来。')) return
@@ -1479,7 +1497,7 @@ const wrongCtx = reactive({
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
   cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
-  cur, customReason, dedupeNow, del, delPermanent, delVaultPaper, delVaultQuiz,
+  cur, customReason, dedupeNow, del, delPermanent, delVaultPaper, delVaultQuiz, editQShow, editQText, editQAnswer, openEditQ, saveEditQ,
   downloadImg, exportPaperMd, exportQuizMd, fReason, fRev, fSub, fSubj, fGroup,
   fmtT, focusList, focusRedo, focusShow, frm, gotoChat, gotoDeepChat, gotoWrongExam,
   guideText, imgView, jumpN, jumpTo, kw, loadMore,

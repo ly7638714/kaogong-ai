@@ -4,6 +4,7 @@ import { store } from '../store'
 import { CARDS } from '../kb/cards-index'
 import { markLearned } from '../utils/learned'
 import KnowledgeGraph from './KnowledgeGraph.vue'
+import AiTeach from './AiTeach.vue'
 
 // R5：错题详情「🔍 知识库打开」→ 定位到对应方法卡（切 tab + 展开卡 + 标记已学）
 window.addEventListener('xc-open-kb-card', (e) => {
@@ -17,6 +18,8 @@ window.addEventListener('xc-open-kb-card', (e) => {
 })
 
 const activeShelf = ref('all')
+const teachShow = ref(false)
+const teachTab = ref('logic')
 const view = ref('quick') // quick=核心速查 | cards=理论技巧卡 | graph=神经网络图谱
 
 const shelvesList = [
@@ -214,6 +217,8 @@ function startRandom() {
         <button class="btn btn-gh" :class="{ on: view === 'quick' }" @click="view = 'quick'">⭐ 核心速查</button>
         <button class="btn btn-gh" :class="{ on: view === 'cards' }" @click="view = 'cards'">📇 理论技巧卡（{{ cards.length }}）</button>
         <button class="btn btn-gh" :class="{ on: view === 'graph' }" @click="view = 'graph'">🧠 知识图谱</button>
+<button class="btn btn-gh" @click="teachTab = 'logic'; teachShow = true">🧭 逻辑题干翻译</button>
+<button class="btn btn-gh" @click="teachTab = 'video'; teachShow = true">🎬 AI 动画微课</button>
       </div>
       <!-- ========== 核心速查：板块 → 老师 → 核心知识卡（点击即问） ========== -->
       <template v-if="view === 'quick'">
@@ -367,6 +372,7 @@ function startRandom() {
       <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" @ask-example="askExample" />
     </div>
   </div>
+<AiTeach v-if="teachShow" :initial-tab="teachTab" @close="teachShow = false" />
 </template>
 
 <style scoped>

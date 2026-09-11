@@ -25,6 +25,9 @@ const {
   cur,
   customReason,
   frm,
+  editQShow,
+  editQText,
+  editQAnswer,
   guideText,
   imgView,
   origStem,
@@ -97,6 +100,8 @@ const {
   closeImg,
   copyObsidianWrong,
   del,
+  openEditQ,
+  saveEditQ,
   downloadImg,
   gotoChat,
   gotoDeepChat,
@@ -184,6 +189,7 @@ function capWrongExplain() {
           <div class="pnl-sub">
             {{ wrongSubOf(store.wqs[cur]) || '未分类' }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
+            <span class="wq-goto" @click.self.stop="openEditQ()">✏️ 编辑题目</span>
             <span class="wq-goto" title="带着本题去对话页，让 AI 按考点、骨架、陷阱、修正、变式深挖" @click.self.stop="gotoDeepChat()">💬 带去对话深挖</span>
             <span class="wq-goto" title="进入错题集组卷；本场作答结果会自动写回原错题吸收度" @click.self.stop="gotoWrongExam()">🎲 去 AI 出题练</span>
             <span v-if="store.wqs[cur].archived" class="wq-goto" title="移回错题集继续学习" @click.self.stop="unarchiveWrong(store.wqs[cur])">↩ 移回错题集</span>
@@ -564,4 +570,16 @@ function capWrongExplain() {
       </div>
     </div>
   </div>
+
+    <div v-if="editQShow" class="ov show" @click.self="editQShow = false">
+      <div class="pnl idiom-pnl">
+        <h3>✏️ 编辑错题原文与答案</h3>
+        <div class="id-row"><b>题干 / 选项</b><textarea v-model="editQText" rows="8" class="pv-edit" style="width:100%;min-height:170px;resize:vertical"></textarea></div>
+        <div class="id-row"><b>正确答案</b><input v-model="editQAnswer" class="pv-edit" style="width:100%" placeholder="如：正确答案 B，或填 B" /></div>
+        <div class="pnl-btns">
+          <button class="btn btn-gh" @click="editQShow = false">取消</button>
+          <button class="btn btn-pri" @click="saveEditQ()">💾 保存题目</button>
+        </div>
+      </div>
+    </div>
 </template>

@@ -179,6 +179,7 @@ const answeredCount = computed(() => questions.value.filter((qq, i) => marks.val
 const extracting = ref(false)
 const previewList = ref([]) // 识别结果预览（导入校对）
 const previewEdit = ref(-1)
+const previewAiBusy = ref(-1)
 const curPaper = ref(null)
 const questions = ref([])
 const cur = ref(-1)
@@ -368,7 +369,7 @@ async function doExtract() {
             2500
           )
           const m = String(reply || '').match(/\[[\s\S]*\]/)
-          if (m) { try { all.push(...norm(JSON.parse(m[0]))) } catch (e) {} }
+          if (m) { try { const parsed = norm(JSON.parse(m[0])).map((x) => ({ ...x, img: im })); all.push(...parsed) } catch (e) {} }
         }
       }
     }
@@ -856,8 +857,7 @@ function startPreviewExam() {
   papers.value.unshift(paper); savePapers()
   startPaper(paper)
 }
-function savePreviewToWrong() {
-  const qs = previewList.value.filter((q) => q.stem)
+function savePreviewItems(qs) {
   if (!qs.length) { showToast('没有可用的题目', 'info'); return }
   let saved = 0, rejected = 0
   qs.forEach((q) => {
@@ -866,6 +866,7 @@ function savePreviewToWrong() {
       subx: wrongTaxOf(q).subx, vx: wrongTaxOf(q).vx,
       question: q.stem + '\n\n' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n'),
       answer: '正确答案 ' + (q.answer || ''), reasons: ['导入习题集'],
+      explain: q.analysis || '',
       time: new Date().toLocaleString(), at: Date.now(), wrongCount: 0, correctStreak: 0, mastery: 0, digested: false
     }, { silent: true })
     if (r && r.ok) saved++
@@ -874,6 +875,45 @@ function savePreviewToWrong() {
   saveWqs()
   if (rejected) showToast('✅ 已存入 ' + saved + ' 题，' + rejected + ' 条非完整/重复未入库', 'warning')
   else showToast('✅ 已存入错题本 ' + saved + ' 题', 'success')
+}
+function savePreviewToWrong() {
+  savePreviewItems(previewList.value.filter((q) => q.stem))
+}
+function savePreviewItem(i) {
+  const q = previewList.value[i]
+  if (!q || !q.stem) { showToast('该题没有题干，无法保存', 'info'); return }
+  savePreviewItems([q])
+}
+async function aiReviewPreview(i) {
+  const q = previewList.value[i]
+  if (!q) return
+  previewAiBusy.value = i
+  const sys = '你是公考行测题目校对专家。请结合原图和当前识别结果，逐字核对题干、选项与正确答案，修正 OCR 错误；若答案不确定，给出你认为最可能正确的一项并说明依据。只输出 JSON：{"subject":"...","stem":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"answer":"X","analysis":"...或空"}'
+  const prompt = '当前识别结果：' + JSON.stringify({ subject: q.subject, stem: q.stem, options: q.options, answer: q.answer, analysis: q.analysis })
+  try {
+    const c = activeCfg(!!q.img)
+    if (!c || !c.key) throw new Error('请先配置模型 API Key')
+    const messages = q.img
+      ? [{ role: 'system', content: sys }, { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: q.img } }] }]
+      : [{ role: 'system', content: sys }, { role: 'user', content: prompt }]
+    const reply = await chatOnce(c, messages, 1800)
+    const m = String(reply || '').match(/\{[\s\S]*\}/)
+    if (m) {
+      const fixed = norm([JSON.parse(m[0])])[0]
+      if (fixed) {
+        q.subject = fixed.subject || q.subject
+        q.stem = fixed.stem || q.stem
+        q.options = fixed.options || q.options
+        q.answer = fixed.answer || q.answer
+        q.analysis = fixed.analysis || q.analysis
+      }
+    }
+    showToast('✅ 已按原图重新校对，请再检查选项和答案', 'success')
+  } catch (e) {
+    showToast('校对失败：' + e.message, 'error')
+  } finally {
+    previewAiBusy.value = -1
+  }
 }
 function delPreview(i) { previewList.value.splice(i, 1) }
 function delPaper(i) { papers.value.splice(i, 1); savePapers() }
@@ -1007,15 +1047,26 @@ const examCtx = reactive({
               </select>
               <button class="btn btn-gh pv-x" @click="delPreview(i)">🗑</button>
             </div>
-            <textarea v-if="previewEdit === i" v-model="item.stem" rows="3" class="pv-edit" @blur="previewEdit = -1"></textarea>
+            <textarea v-if="previewEdit === i" v-model="item.stem" rows="4" class="pv-edit" @blur="previewEdit = -1"></textarea>
             <div v-else class="pv-stem" title="点击编辑题干" @click="previewEdit = i">{{ item.stem }}</div>
             <div v-if="item.options && item.options.length" class="pv-opts">
-              <span v-for="o in item.options" :key="o.k" class="pv-opt"><b>{{ o.k }}.</b> {{ o.t }}</span>
+              <div v-for="o in item.options" :key="o.k" class="pv-opt">
+                <b>{{ o.k }}.</b>
+                <input v-model="o.t" class="pv-inline" :title="'编辑选项 ' + o.k" />
+              </div>
             </div>
-            <div class="pv-ans">答案：<b>{{ item.answer || '—' }}</b></div>
+            <div class="pv-ans">
+              <span>答案：</span>
+              <input v-model="item.answer" class="pv-inline pv-answer" placeholder="如 B / D" title="可编辑正确答案" />
+            </div>
+            <textarea v-model="item.analysis" rows="2" class="pv-edit" placeholder="解析（可编辑，可选）"></textarea>
+            <div class="pv-item-acts">
+              <button class="btn btn-gh" :disabled="previewAiBusy === i" @click="aiReviewPreview(i)">{{ previewAiBusy === i ? '⏳ 校对中' : '🔁 AI 按原图校对' }}</button>
+              <button class="btn btn-gh" @click="savePreviewItem(i)">💾 保存本题到错题集</button>
+            </div>
           </div>
         </div>
-        <div class="pv-actions">
+<div class="pv-actions">
           <button class="btn btn-gh" @click="phase = 'config'">↩ 返回重传</button>
           <button class="btn btn-gh" @click="savePreviewToWrong()">📌 全部存入错题本</button>
           <button class="btn btn-pri" @click="startPreviewExam()">🚀 开始作答（按卷面裁剪组卷）</button>
