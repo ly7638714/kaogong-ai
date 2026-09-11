@@ -15,6 +15,14 @@ const points = computed(() => {
 const title = computed(() => (props.scene && props.scene.title) || '')
 const body = computed(() => (props.scene && props.scene.body) || '')
 const uid = Math.random().toString(36).slice(2, 8)
+const example = computed(() => (props.scene && props.scene.example) || null)
+const exampleOpts = computed(() => {
+  const ex = example.value || {}
+  const o = ex.opts || []
+  return Array.from({ length: 4 }, (_, i) => String(o[i] || '').slice(0, 28))
+})
+const exampleAnswer = computed(() => String((example.value && example.value.answer) || ''))
+const examplePath = computed(() => String((example.value && example.value.path) || ''))
 </script>
 
 <template>
@@ -86,6 +94,33 @@ const uid = Math.random().toString(36).slice(2, 8)
           <path v-if="i < 3" :d="'M' + (176 + i * 128) + ' 258 L' + (198 + i * 128) + ' 258'" stroke="#fbbf24" stroke-width="5" marker-end="url(#arrow)">
             <animate attributeName="opacity" values="0;1" dur=".35s" :begin="(i * .55 + .25) + 's'" fill="freeze" />
           </path>
+        </g>
+      </g>
+
+      <g v-else-if="type === 'deep'" class="als-scene">
+        <rect x="70" y="180" width="480" height="160" rx="16" fill="rgba(56,189,248,.08)" stroke="#38bdf8" stroke-width="2" />
+        <text x="96" y="218" fill="#7dd3fc" font-size="20" font-weight="800">深度拆解：为什么这样判</text>
+        <g v-for="(p, i) in points.slice(0, 3)" :key="i">
+          <circle :cx="102" :cy="252 + i * 31" r="6" fill="#38bdf8"><animate attributeName="r" values="5;9;5" dur="1.8s" :begin="(i * .22) + 's'" repeatCount="indefinite" /></circle>
+          <text :x="122" :y="258 + i * 31" fill="#e2e8f0" font-size="15">{{ p.slice(0, 30) }}</text>
+        </g>
+        <path d="M565 260 C610 205 635 320 680 250" fill="none" stroke="#fbbf24" stroke-width="4" stroke-dasharray="7 6"><animate attributeName="stroke-dashoffset" values="0;-26" dur="1s" repeatCount="indefinite" /></path>
+        <text x="682" y="255" fill="#fbbf24" font-size="14">因果/结构</text>
+      </g>
+
+      <g v-else-if="type === 'example'" class="als-scene">
+        <rect x="65" y="172" width="500" height="182" rx="16" fill="rgba(251,191,36,.08)" stroke="#fbbf24" stroke-width="2" />
+        <text x="90" y="207" fill="#fbbf24" font-size="19" font-weight="800">例题走一遍</text>
+        <text x="90" y="239" fill="#f8fafc" font-size="15">{{ (example && example.q || body).slice(0, 31) }}</text>
+        <g v-for="(o, i) in exampleOpts" :key="i">
+          <text :x="92" :y="272 + i * 25" :fill="exampleAnswer === 'ABCD'[i] ? '#6ee7b7' : '#cbd5e1'" font-size="14">{{ 'ABCD'[i] }}. {{ o }}</text>
+          <circle v-if="exampleAnswer === 'ABCD'[i]" :cx="70" :cy="267 + i * 25" r="8" fill="#34d399"><animate attributeName="r" values="7;11;7" dur="1.4s" repeatCount="indefinite" /></circle>
+        </g>
+        <g v-if="examplePath">
+          <rect x="590" y="208" width="260" height="116" rx="14" fill="rgba(52,211,153,.09)" stroke="#34d399" />
+          <text x="610" y="238" fill="#6ee7b7" font-size="16" font-weight="800">正确路径</text>
+          <text x="610" y="268" fill="#e2e8f0" font-size="13">{{ examplePath.slice(0, 27) }}</text>
+          <text x="610" y="294" fill="#e2e8f0" font-size="13">{{ examplePath.slice(27, 54) }}</text>
         </g>
       </g>
 

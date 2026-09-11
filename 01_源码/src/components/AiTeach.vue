@@ -21,6 +21,7 @@ const logicSource = ref(props.initialAnswer ? '错题集原始答案' : '')
 const imageBusy = ref(false)
 const wrongPick = ref('')
 const fileInput = ref(null)
+const panelRef = ref(null)
 const wrongs = computed(() => (store.wqs || []).slice(0, 80))
 const coursePlate = ref('all')
 const courseTeacher = ref('all')
@@ -129,9 +130,11 @@ function localLesson(card) {
   return {
     title: plate + ' · ' + type,
     scenes: [
-      { type: 'hook', icon: '🎯', title: '先看这道题的真正考点', body: '不是背定义，而是识别命题人想考的结构。', points: ['特征：' + (card.signs || []).join('；'), '目标：把题目翻译成可判断的结构'] },
+      { type: 'hook', icon: '🎯', title: '这道题真正考什么', body: '不是背概念，而是识别命题结构。', points: ['识别信号：' + (card.signs || []).join('；'), '考试目标：把材料翻译成可判断的结构'] },
+      { type: 'deep', icon: '🔬', title: '为什么这个方法成立', body: (card.detail || card.tip || '先找论据与结论的共同话题，再判断选项是连接、切断还是偷换。'), points: ['先看命题人改变哪一块', '再判断选项作用方向', '最后比较力度和范围'] },
       { type: 'flow', icon: '🧭', title: '读题先翻译，不先看选项', body: '先把题干压缩成“谁想让谁相信什么”。', points: ['找主体', '找结论', '找证据', '找隐藏前提'] },
       { type: 'process', icon: '🪜', title: '按步骤拆解', body: (card.steps || []).join(' → ') || '题型识别 → 结构还原 → 选项比较 → 回文验证', points: card.steps || [] },
+      { type: 'example', icon: '📝', title: '跟着例题走一遍', body: '把方法放进真实题目里，才叫会。', example: card.example || { q: '示例题：先翻译结论与论据，再判断选项作用方向。', opts: ['A 只重复论据', 'B 建立论据与结论的联系', 'C 偷换主体', 'D 无关信息'], answer: 'B', path: 'B同时连接论据和结论，作用方向最直接。' } },
       { type: 'compare', icon: '⚖️', title: '比较选项，不比“谁更像”', body: '统一用主体、方向、范围、力度四把尺子。', points: ['主体是否一致', '方向是否对应', '范围是否偷换', '力度是否相当'] },
       { type: 'checkpoint', icon: '🧠', title: '停下来检查一下', body: '题干里最重要的第一步应该是什么？', options: [{ k: 'A', t: '先看哪个选项熟悉' }, { k: 'B', t: '先把结论和论据翻译出来' }], answer: 'B', explain: '先还原结构，才不会被熟悉词带跑。' },
       { type: 'trap', icon: '⚠️', title: '最容易错在哪里', body: (card.traps || []).join('；') || '主体偷换、范围扩大、方向反转、力度不足。', points: card.traps || [] },
@@ -149,7 +152,7 @@ async function buildLesson() {
   const card = topic.value.card
   try {
     const sys = '你是行测动画微课导演。把知识卡设计成一节真正能教会考生的动画微课，不要PPT提纲。只输出 JSON。'
-    const user = '请围绕：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail }) + '\n输出：{"title":"课程名","scenes":[...]}，共 7-9 个场景。每个场景字段：type(hook|flow|process|compare|checkpoint|trap|summary|apply), icon, title, body, points(数组), options(可选数组{k,t}), answer(可选), explain(可选)。要求：先讲怎么识别，再讲怎么操作，再放一个交互检查点，再讲陷阱，最后给可执行动作。语言必须具体，禁止空话。'
+    const user = '请围绕：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail, example: card.example }) + '\n输出：{"title":"课程名","scenes":[...]}，共 9-11 个场景。每个场景字段：type(hook|deep|flow|process|example|compare|checkpoint|trap|summary|apply), icon, title, body, points(数组), example(可选对象{q,opts,answer,path}), options(可选数组{k,t}), answer(可选), explain(可选)。要求：必须包含至少1个deep深度讲解场景和至少1个example例题场景；例题优先使用提供知识卡里的 example，若没有则自行设计一个最小可验证例题并明确写出答案和路径；讲解要干练准确，不说空话；最后再放交互检查点、陷阱和实战动作。禁止只是复述知识卡字段。'
     const reply = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1800, 60000)
     const m = String(reply || '').match(/\{[\s\S]*\}/)
     const parsed = m ? JSON.parse(m[0]) : null
@@ -211,6 +214,13 @@ async function translate() {
     logicOut.value = out
   } catch (e) { logicOut.value = '生成失败：' + e.message } finally { logicBusy.value = false }
 }
+function toggleFullscreen() {
+  try {
+    const el = panelRef.value || document.documentElement
+    if (document.fullscreenElement) document.exitFullscreen()
+    else el.requestFullscreen && el.requestFullscreen()
+  } catch (e) {}
+}
 function goPractice() { emit('close'); window.dispatchEvent(new CustomEvent('xc-open-exam', { detail: { src: 'single' } })) }
 function goWrong() { emit('close'); store.tab = 'wq' }
 onUnmounted(() => { clearTimer(); stopVoice() })
@@ -218,10 +228,11 @@ onUnmounted(() => { clearTimer(); stopVoice() })
 
 <template>
   <div class="ov show at-ov" @click.self="emit('close')">
-    <div class="pnl at-pnl">
+    <div ref="panelRef" class="pnl at-pnl">
       <div class="at-head">
         <button class="pnl-top-b" @click="emit('close')">← 返回知识库</button>
         <b class="at-title">🎬 AI 动画微课 · 学懂而不是看过</b>
+        <button class="btn btn-gh" title="全屏观看动画" @click="toggleFullscreen()">⛶ 全屏</button>
         <button class="pc-close" @click="emit('close')">✕</button>
       </div>
       <div class="at-tabs">
@@ -288,7 +299,7 @@ onUnmounted(() => { clearTimer(); stopVoice() })
 
 <style scoped>
 .at-ov { z-index: 450; }
-.at-pnl { width: min(1080px, 97vw); max-height: 94vh; overflow: auto; padding: 12px 14px; }
+.at-pnl { width: 100vw; height: 100dvh; max-height: none; overflow: auto; padding: 12px 18px; border-radius: 0; }
 .at-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .at-title { font-size: calc(17px * var(--ui-fs-scale, 1)); color: var(--accent); }
 .at-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
