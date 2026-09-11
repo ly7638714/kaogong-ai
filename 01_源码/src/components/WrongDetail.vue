@@ -9,12 +9,12 @@ import { markLearned } from '../utils/learned'
 import { loadSrs, saveSrs, enqueueNew, ymdKey } from '../utils/memorySrs' // R5 二期：一键入记忆
 import { showToast } from '../utils/toast' // R5 标记已学
 import { absorbState } from '../utils/wrongAbsorb'
+import { chatOnce, activeCfg } from '../api'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
 const {
   aiBusy,
-  aiGuideBusy,
   aiPolishBusy,
   boxReasons,
   checkedAllReasons,
@@ -61,6 +61,85 @@ const {
 
 // R5：按本题考点检索关联方法卡（≤3），可在详情内展开 / 标记已学 / 跳知识库
 const kbOpen = ref(false)
+const coachOpen = ref(false)
+const coachStep = ref(0)
+const coachFirst = ref('')
+const coachBlock = ref('')
+const coachWrote = ref('')
+const coachBusy = ref(false)
+const coachFinal = ref([])
+const coachOptions = [
+  { t: '只看了局部关键词，没先还原完整意思', d: '一眼抓到熟悉的词就急着选' },
+  { t: '分不清结论和论据', d: '知道题干在讲事，但说不清到底要证明什么' },
+  { t: '选项方向看反了', d: '支持和削弱、原因和结果、主体和客体混了' },
+  { t: '几个选项都觉得对，不会比力度', d: '没有比较直接程度、必要程度和覆盖范围' },
+  { t: '其实是知识点没懂', d: '题目读懂了，但对应的规则/公式/方法不会用' }
+]
+const coachStep2Options = [
+  { t: '题干翻译错了', d: '我用自己的话复述时就已经理解偏了' },
+  { t: '结论找错了', d: '把背景、现象或论据误当成结论' },
+  { t: '论据和结论的连接断了', d: '没看出中间缺了哪一步' },
+  { t: '选项说的是另一个主体/范围', d: '被相似词带跑，没有核对主体、时间、范围' },
+  { t: '最后排除时凭感觉', d: '两个选项之间没有用统一标准比较' }
+]
+const reasonCoachReady = computed(() => !!(cur.value >= 0 && store.wqs[cur.value] && store.wqs[cur.value].reasonCoach && store.wqs[cur.value].reasonCoach.completed))
+function openLogicTranslate() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q) return
+  const text = String(q.question || q.q || q.stem || '') + (q.answer ? '\n\n参考答案：' + q.answer : '')
+  window.dispatchEvent(new CustomEvent('xc-open-ai-teach', { detail: { tab: 'logic', text } }))
+  store.tab = 'kb'
+  show.value = false
+}
+function openCoach() {
+  coachOpen.value = true
+  coachStep.value = 0
+  coachFirst.value = ''
+  coachBlock.value = ''
+  coachWrote.value = ''
+  coachFinal.value = []
+}
+function coachNext() {
+  if (coachStep.value === 0) {
+    if (!coachFirst.value) { showToast('先选一个最接近你当时状态的说法', 'info'); return }
+    coachStep.value = 1
+    return
+  }
+  if (coachStep.value === 1) {
+    if (!coachBlock.value) { showToast('再选一个最接近你的卡点', 'info'); return }
+    coachStep.value = 2
+  }
+}
+async function coachFinish() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!coachFirst.value || !coachBlock.value || !coachWrote.value.trim()) { showToast('请先完成三步，再用自己的话写一句下次动作', 'info'); return }
+  coachBusy.value = true
+  try {
+    q.reasonCoach = { first: coachFirst.value, block: coachBlock.value, reflection: coachWrote.value.trim(), completed: true, at: Date.now() }
+    const c = activeCfg()
+    if (!c || !c.key) throw new Error('请先配置文字模型')
+    const sys = '你是错因教练。只能使用考生自己写下的观察和反思来整理错因，禁止补充考生没有表达过的原因，禁止替考生编造心理活动。只输出 JSON 数组，如 ["…","…"]。'
+    const user = '考生原话：\n1. 当时状态：' + coachFirst.value + '\n2. 卡点：' + coachBlock.value + '\n3. 下次动作：' + coachWrote.value.trim() + '\n请整理成 1-2 条具体错因，必须保留“下次先做什么”。'
+    const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 500, 30000)
+    let arr = null
+    try { arr = JSON.parse(String(reply || '').trim()) } catch (e) { const m = String(reply || '').match(/\[[\s\S]*\]/); if (m) arr = JSON.parse(m[0]) }
+    coachFinal.value = Array.isArray(arr) ? arr.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 2) : []
+    if (!coachFinal.value.length) coachFinal.value = ['我对题干的翻译不够准确；下次先用自己的话复述结论和论据，再比较选项方向。']
+  } catch (e) {
+    coachFinal.value = ['我在题干翻译或结构判断上不够准确；下次先用自己的话复述结论和论据，再比较选项方向。']
+    showToast('AI 整理未完成，已保留你自己的复盘草稿', 'info')
+  } finally {
+    coachBusy.value = false
+  }
+}
+function adoptCoachReasons() {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  if (!q || !coachFinal.value.length) return
+  coachFinal.value.forEach((r) => { if (!frm.value.sel.includes(r)) frm.value.sel.push(r) })
+  q.reasonCoach = { ...(q.reasonCoach || {}), completed: true, adopted: coachFinal.value.slice() }
+  coachOpen.value = false
+  showToast('已把你的复盘草稿放入错因，记得点“保存复盘”', 'success')
+}
 const absorb = computed(() => {
   const q = cur.value >= 0 && store && store.wqs ? store.wqs[cur.value] : null
   return absorbState(q)
@@ -94,7 +173,6 @@ const {
   addCustomReason,
   aiPolishReason,
   ankiPush,
-  askAiGuide,
   askAiReasons,
   askCoreDeep,
   closeImg,
@@ -190,6 +268,7 @@ function capWrongExplain() {
             {{ wrongSubOf(store.wqs[cur]) || '未分类' }}
             <span class="wq-goto" @click.self.stop="gotoChat()">↩ 查看原对话</span>
             <span class="wq-goto" @click.self.stop="openEditQ()">✏️ 编辑题目</span>
+            <span class="wq-goto" title="打开逻辑题干翻译，把题干和选项翻译成大白话" @click.self.stop="openLogicTranslate()">🧭 去白话翻译题干选项</span>
             <span class="wq-goto" title="带着本题去对话页，让 AI 按考点、骨架、陷阱、修正、变式深挖" @click.self.stop="gotoDeepChat()">💬 带去对话深挖</span>
             <span class="wq-goto" title="进入错题集组卷；本场作答结果会自动写回原错题吸收度" @click.self.stop="gotoWrongExam()">🎲 去 AI 出题练</span>
             <span v-if="store.wqs[cur].archived" class="wq-goto" title="移回错题集继续学习" @click.self.stop="unarchiveWrong(store.wqs[cur])">↩ 移回错题集</span>
@@ -316,12 +395,41 @@ function capWrongExplain() {
                 </div>
               </div>
               <!-- AI 引导找错因：帮助用户科学决策、自己发现错因 -->
-              <div class="guide-row">
-                <button type="button" class="btn btn-gh" :disabled="aiBusy" @click="askAiReasons()">{{ aiBusy ? '⏳ 归纳中…' : '🤖 AI 归纳错因' }}</button>
-                <button type="button" class="btn btn-gh" :disabled="aiGuideBusy" @click="askAiGuide()">{{ aiGuideBusy ? '⏳ 引导中…' : '🧭 引导我找错因' }}</button>
-                <span class="cr-tip">🤖 直接归纳 · 🧭 引导你自己发现错因</span>
+              <div class="guide-row coach-row">
+                <button type="button" class="btn btn-pri" @click="openCoach()">🧭 三步引导我找错因</button>
+                <button type="button" class="btn btn-gh" :disabled="!reasonCoachReady || aiBusy" :title="reasonCoachReady ? '只基于你的三步回答整理，不会替你编造原因' : '先完成三步引导，AI 归纳才会解锁'" @click="askAiReasons()">{{ aiBusy ? '⏳ 归纳中…' : reasonCoachReady ? '🤖 整理成错因草稿' : '🔒 先完成三步引导' }}</button>
+                <span class="cr-tip">先自己观察 → 再写下次动作 → 最后才允许 AI 整理成草稿</span>
               </div>
               <div v-if="guideText" class="guide-text">{{ guideText }}</div>
+              <div v-if="coachOpen" class="coach-panel">
+                <div class="coach-progress">
+                  <span :class="{ on: coachStep >= 0 }">1 当时怎么想</span>
+                  <span :class="{ on: coachStep >= 1 }">2 卡在哪一步</span>
+                  <span :class="{ on: coachStep >= 2 }">3 下次先做什么</span>
+                </div>
+                <template v-if="coachStep === 0">
+                  <div class="coach-q">先别急着看答案。你当时做这道题时，最接近哪种状态？</div>
+                  <button v-for="o in coachOptions" :key="o.t" class="coach-opt" :class="{ on: coachFirst === o.t }" @click="coachFirst = o.t"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                </template>
+                <template v-else-if="coachStep === 1">
+                  <div class="coach-q">很好。再往下追一层：你觉得自己真正卡在哪一步？</div>
+                  <button v-for="o in coachStep2Options" :key="o.t" class="coach-opt" :class="{ on: coachBlock === o.t }" @click="coachBlock = o.t"><b>{{ o.t }}</b><span>{{ o.d }}</span></button>
+                </template>
+                <template v-else>
+                  <div class="coach-q">最后不问 AI。请用你自己的话写一句：下次看到这类题，第一步先做什么？</div>
+                  <textarea v-model="coachWrote" rows="3" placeholder="例如：先把题干翻译成“谁想让谁相信什么”，再找结论和论据，不先看选项。"></textarea>
+                </template>
+                <div class="coach-actions">
+                  <button v-if="coachStep < 2" class="btn btn-pri" @click="coachNext()">下一步 →</button>
+                  <button v-else class="btn btn-pri" :disabled="coachBusy" @click="coachFinish()">{{ coachBusy ? '⏳ 只整理你的原话…' : '生成我的错因草稿' }}</button>
+                  <button class="btn btn-gh" @click="coachOpen = false">关闭</button>
+                </div>
+                <div v-if="coachFinal.length" class="coach-final">
+                  <b>草稿完全来自你刚才的回答：</b>
+                  <span v-for="r in coachFinal" :key="r">{{ r }}</span>
+                  <button class="btn btn-pri" @click="adoptCoachReasons()">采用为本题错因</button>
+                </div>
+              </div>
               <!-- 自定义错因 + AI 规范化 -->
               <div class="custom-reason">
                 <input

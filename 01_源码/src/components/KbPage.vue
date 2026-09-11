@@ -7,6 +7,12 @@ import KnowledgeGraph from './KnowledgeGraph.vue'
 import AiTeach from './AiTeach.vue'
 
 // R5：错题详情「🔍 知识库打开」→ 定位到对应方法卡（切 tab + 展开卡 + 标记已学）
+window.addEventListener('xc-open-ai-teach', (e) => {
+  const d = (e && e.detail) || {}
+  teachInitialText.value = String(d.text || '')
+  teachTab.value = d.tab || 'logic'
+  teachShow.value = true
+})
 window.addEventListener('xc-open-kb-card', (e) => {
   const id = e && e.detail
   if (!id) return
@@ -20,6 +26,7 @@ window.addEventListener('xc-open-kb-card', (e) => {
 const activeShelf = ref('all')
 const teachShow = ref(false)
 const teachTab = ref('logic')
+const teachInitialText = ref('')
 const view = ref('quick') // quick=核心速查 | cards=理论技巧卡 | graph=神经网络图谱
 
 const shelvesList = [
@@ -372,7 +379,7 @@ function startRandom() {
       <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" @ask-example="askExample" />
     </div>
   </div>
-<AiTeach v-if="teachShow" :initial-tab="teachTab" @close="teachShow = false" />
+<AiTeach v-if="teachShow" :initial-tab="teachTab" :initial-text="teachInitialText" @close="teachShow = false" />
 </template>
 
 <style scoped>

@@ -37,9 +37,7 @@ const {
       <h3>✍️ {{ (redoQ.redoHistory || []).length ? '三刷' : '二刷' }}重做 <span class="redo-timer">⏱ {{ fmtT(redoT) }}</span></h3>
       <div class="redo-subj">{{ store.wqs[cur].subject || '未分类' }}</div>
       <div class="redo-q" v-html="richMd(String((store.wqs[cur] || {}).question || ''))"></div>
-      <div v-if="(store.wqs[cur].imgs || []).length" class="wq-imgs">
-        <img v-for="(im, j) in store.wqs[cur].imgs" :key="j" class="wq-img" :src="im" />
-      </div>
+      <div v-if="(store.wqs[cur].imgs || []).length" class="redo-img-hide">🖼 原题截图已暂时隐藏：二刷先独立判断，避免原图上的作答痕迹干扰。</div>
       <div v-if="!redoResult" class="redo-ask">
         <div class="redo-hint">{{ redoHasChoice ? '直接点击选项提交作答' : '先不看答案自己再解一遍（计时中）' }}</div>
         <div v-if="redoHasChoice" class="quiz-opts">

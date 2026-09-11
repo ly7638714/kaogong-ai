@@ -249,11 +249,84 @@ function fingerprint(data) {
   return JSON.stringify(sortedJson(data))
 }
 
+function compactForStorage(key, raw) {
+  if (key === 'xc_attempts') {
+    try {
+      const arr = JSON.parse(String(raw || '[]'))
+      if (Array.isArray(arr) && arr.length > 2000) return JSON.stringify(arr.slice(-2000))
+    } catch (e) {}
+  }
+  if (key === 'xc_msgs') {
+    try {
+      const arr = JSON.parse(String(raw || '[]'))
+      if (!Array.isArray(arr)) return raw
+      const keep = arr.slice(-120)
+      const trimmed = keep.map((m, i) => {
+        if (!m || typeof m !== 'object') return m
+        if (i >= keep.length - 30) return m
+        const x = { ...m }
+        if (Array.isArray(x.imgs) && x.imgs.length) x.imgs = []
+        if (x.img && String(x.img).startsWith('data:')) x.img = ''
+        if (Array.isArray(x.content)) x.content = x.content.filter((c) => !(c && c.type === 'image_url'))
+        return x
+      })
+      const out = JSON.stringify(trimmed)
+      return out.length < String(raw).length ? out : raw
+    } catch (e) {}
+  }
+  if (key === 'xc_wqs') {
+    try {
+      const arr = JSON.parse(String(raw || '[]'))
+      if (!Array.isArray(arr)) return raw
+      let changed = false
+      const trimmed = arr.map((q, i) => {
+        if (!q || typeof q !== 'object') return q
+        const x = { ...q }
+        if (Array.isArray(x.imgs) && x.imgs.length && i < arr.length - 80 && String(x.question || '').length > 80) {
+          x.imgs = []
+          changed = true
+        }
+        return x
+      })
+      const out = JSON.stringify(trimmed)
+      return changed && out.length < String(raw).length ? out : raw
+    } catch (e) {}
+  }
+  return raw
+}
+
+function setStorageValue(key, raw) {
+  const value = String(raw == null ? '' : raw)
+  try {
+    localStorage.setItem(key, value)
+    return { ok: true, compacted: false }
+  } catch (e) {
+    const compacted = compactForStorage(key, value)
+    if (compacted !== value) {
+      try {
+        localStorage.setItem(key, compacted)
+        return { ok: true, compacted: true }
+      } catch (_) {}
+    }
+    return { ok: false, compacted: false }
+  }
+}
+
 function writeMerged(data) {
   let n = 0
+  let compacted = false
   for (const k in data) {
     if (!shouldSyncKey(k)) continue
-    try { if (localStorage.getItem(k) !== String(data[k])) { localStorage.setItem(k, data[k]); n++ } } catch (e) {}
+    const raw = String(data[k] == null ? '' : data[k])
+    if (localStorage.getItem(k) === raw) continue
+    const r = setStorageValue(k, raw)
+    if (r.ok) {
+      n++
+      if (r.compacted) compacted = true
+    }
+  }
+  if (compacted) {
+    import('./toast').then((t) => { if (t.showToast) t.showToast('已同步；本机空间紧张，已自动压缩历史图片/日志缓存，不影响错题正文', 'info') }).catch(() => {})
   }
   return n
 }

@@ -1332,7 +1332,8 @@ async function askAiReasons() {
         }
       }
     }
-    const sys = `你是行测资深讲师，帮助考生复盘错题、归纳成因。你要结合题干、我的作答、正确答案与解析，**具体指出我错在哪一步**，拒绝泛泛而谈（不要只写"审题不清/方法不对/粗心"这类空话，要说清"你把哪个关键词误读成什么""你在第几步把哪个数据/方向用反了"）。`
+    const rc = q.reasonCoach || {}
+    const sys = `你是错因整理员。只能使用考生自己完成三步引导后写下的观察、卡点和下次动作来整理错因；不得新增考生没有表达过的原因，不得替考生编造心理活动，不得给泛泛而谈的“审题不清/粗心”。请把考生的原话整理成具体、可执行、能指导下一次避免的错因。`
     const myAnswer = String(q.your || q.answerUser || '').trim()
     const rightAns = String(q.answer || q.ans || q.correct || '').trim()
     const analysis = String(q.explain || q.analysis || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 700)
@@ -1348,7 +1349,8 @@ async function askAiReasons() {
 我的作答（我选/填的）：${myAnswer || '（未记录）'}
 正确答案：${rightAns || '（未知）'}
 正确解析：${analysis || '（无）'}
-AI 当时的解答：${aiReply || '（无）'}`
+AI 当时的解答：${aiReply || '（无）'}
+考生三步引导原话：${JSON.stringify(rc)}`
     let messages
     if (withImg) {
       messages = [{
