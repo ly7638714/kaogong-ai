@@ -1520,6 +1520,31 @@ function builtinCloneBackend() {
   if (String((store.cfg.ttsOpenAI && store.cfg.ttsOpenAI.key) || '').trim()) return 'cosy'
   return ''
 }
+async function loadPetSampleFile(sample, fileName) {
+  const href = new URL(sample, window.location.href).href
+  try {
+    const res = await fetch(href)
+    if (res.ok) {
+      const blob = await res.blob()
+      return new window.File([blob], fileName, { type: blob.type || 'audio/mpeg' })
+    }
+  } catch (e) {}
+  // 安卓 file:// WebView 下 fetch 可能被拦截，改用 XHR 读取本地随包资源。
+  return await new Promise((resolve, reject) => {
+    try {
+      const xhr = new window.XMLHttpRequest()
+      xhr.open('GET', href, true)
+      xhr.responseType = 'blob'
+      xhr.onload = () => {
+        const ok = xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)
+        if (ok && xhr.response) resolve(new window.File([xhr.response], fileName, { type: xhr.response.type || 'audio/mpeg' }))
+        else reject(new Error('参考音频读取失败：HTTP ' + xhr.status))
+      }
+      xhr.onerror = () => reject(new Error('参考音频读取失败'))
+      xhr.send()
+    } catch (e) { reject(e) }
+  })
+}
 // 选中内置公考角色后，用随包参考音频自动生成真正属于自己的克隆 voice ID；成功后立即用于朗读。
 async function autoCloneBuiltinPetVoice(skinId, opts = {}) {
   const s = petAllSkins.value.find((x) => x.id === skinId)
@@ -1536,11 +1561,7 @@ async function autoCloneBuiltinPetVoice(skinId, opts = {}) {
   petVoiceCloningId.value = skinId
   petVoiceCloneStatus.value = { ...petVoiceCloneStatus.value, [skinId]: '⏳ 正在用内置参考音频克隆「' + s.char + '」的真实声线…' }
   try {
-    const href = new URL(sample, window.location.href).href
-    const res = await fetch(href)
-    if (!res.ok) throw new Error('参考音频读取失败：HTTP ' + res.status)
-    const blob = await res.blob()
-    const file = new window.File([blob], skinId + '.mp3', { type: blob.type || 'audio/mpeg' })
+    const file = await loadPetSampleFile(sample, skinId + '.mp3')
     const pre = await prepareCloneAudio(file, { maxSeconds: 20 })
     if (!pre || pre.error) throw new Error(pre && pre.error || '参考音频预处理失败')
     const name = s.char + '内置原声'
