@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
-import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin } from '../utils/pet'
+import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
 
 describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
-  it('四个内置锁定角色 + 自定义：薛神/章若楠/李星云/姬如雪 + 自定义', () => {
+  it('九个内置锁定角色 + 自定义：原有四人 + 花生十三/小P/小黑/文姐/巾神 + 自定义', () => {
     const ids = PET_SKINS.map((s) => s.id)
-    expect(ids).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
+    expect(ids).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'huasheng13', 'xiaop', 'xiaohei', 'wenjie', 'jinshen', 'custom'])
   })
 
   it('每个皮肤都有形象/声线/人设', () => {
@@ -13,9 +13,25 @@ describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
       expect(s.id).toBeTruthy()
       expect(s.char).toBeTruthy()
       expect(s.persona).toBeTruthy()
-      expect(s.voice && s.voice.voice).toBeTruthy()
-      expect(s.hair).toBeTruthy()
+      expect((s.voice && s.voice.voice) || s.sample).toBeTruthy()
+      expect(s.hair || s.img).toBeTruthy()
     })
+  })
+
+  it('五个新增公考角色均内置形象、参考原声、人设和专属声线映射', () => {
+    store.cfg.ttsMode = 'glm'
+    store.cfg.ttsGm = { key: '', url: '', model: '', voice: '' }
+    for (const id of ['huasheng13', 'xiaop', 'xiaohei', 'wenjie', 'jinshen']) {
+      const s = PET_SKINS.find((x) => x.id === id)
+      expect(s.locked).toBe(true)
+      expect(s.img).toContain('./pet-avatars/')
+      expect(s.sample).toContain('./pet-voices/')
+      expect(petSkinSampleOf(id)).toBe(s.sample)
+      const v = petSkinVoiceOf(id)
+      expect(v.preset).toBe(true)
+      expect(v.engine).toBe('edge')
+      expect(v.voice).toContain('Neural')
+    }
   })
 
   it('薛神/李星云/姬如雪自带大模型克隆原声（内置）且锁定，章若楠内置锁定', () => {
@@ -44,11 +60,16 @@ describe('内置角色锁定：形象/声线不可改', () => {
     store.cfg.skinImgs = {}
     store.cfg.skinVoices = {}
   })
-  it('四个内置 locked，自定义不锁定', () => {
+  it('九个内置 locked，自定义不锁定', () => {
     expect(petIsLocked('xueshen')).toBe(true)
     expect(petIsLocked('zhangruonan')).toBe(true)
     expect(petIsLocked('lixingyun')).toBe(true)
     expect(petIsLocked('jiruxue')).toBe(true)
+    expect(petIsLocked('huasheng13')).toBe(true)
+    expect(petIsLocked('xiaop')).toBe(true)
+    expect(petIsLocked('xiaohei')).toBe(true)
+    expect(petIsLocked('wenjie')).toBe(true)
+    expect(petIsLocked('jinshen')).toBe(true)
     expect(petIsLocked('custom')).toBe(false)
   })
   it('锁定角色禁止上传形象', () => {
@@ -83,15 +104,15 @@ describe('多个自定义角色（自定义2/3/4…）', () => {
     pet.value.name = '李星云'
   })
 
-  it('初始 petAllSkins 有 5 个内置（4锁定+1自定义）', () => {
-    expect(petAllSkins.value.map((s) => s.id)).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
+  it('初始 petAllSkins 有 10 个内置（9锁定+1自定义）', () => {
+    expect(petAllSkins.value.map((s) => s.id)).toEqual(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'huasheng13', 'xiaop', 'xiaohei', 'wenjie', 'jinshen', 'custom'])
   })
 
   it('新增自定义 → 自定义2，可切换、名字/人设可读写', () => {
     const e = petAddCustomSkin()
     expect(e.id).toBe('custom2')
     expect(e.name).toBe('自定义2')
-    expect(petAllSkins.value.length).toBe(6)
+    expect(petAllSkins.value.length).toBe(11)
     applyPetSkin('custom2')
     expect(store.cfg.petSkin).toBe('custom2')
     expect(pet.value.name).toBe('自定义2')
@@ -105,7 +126,7 @@ describe('多个自定义角色（自定义2/3/4…）', () => {
     petAddCustomSkin()
     const e3 = petAddCustomSkin()
     expect(e3.id).toBe('custom3')
-    expect(petAllSkins.value.length).toBe(7)
+    expect(petAllSkins.value.length).toBe(12)
   })
 
   it('删除自定义角色（含其形象/声线数据），内置不可删', () => {
@@ -179,6 +200,17 @@ describe('applyPetSkin 一键切换', () => {
     expect(pet.value.name).toBe('章若楠')
     expect(petSkinVoiceOf('zhangruonan').cloned).toBe(true)
     expect(store.cfg.ttsGm.voice).toBe('83eac18d-fd6a-531b-9a71-67b0e6d340ee')
+  })
+
+  it('切到花生十三：启用内置专属声线并保留参考原声入口', () => {
+    store.cfg.ttsGm = { key: '', url: '', model: '', voice: '' }
+    applyPetSkin('huasheng13')
+    expect(store.cfg.petSkin).toBe('huasheng13')
+    expect(pet.value.name).toBe('花生十三')
+    expect(petSkinVoiceOf('huasheng13').preset).toBe(true)
+    expect(store.cfg.ttsMode).toBe('edge')
+    expect(store.cfg.ttsEdgeVoice).toBe('zh-CN-YunjianNeural')
+    expect(petSkinSampleOf('huasheng13')).toContain('huasheng13.mp3')
   })
 
 

@@ -35,7 +35,7 @@ import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { renderMd } from './utils/renderMd'
-import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice } from './utils/pet'
+import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
 import { petBatchCollectTodayWrong } from './utils/petBatch'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
@@ -1394,6 +1394,7 @@ const globalVoiceLabel = computed(() => {
 const petEffectiveLabel = computed(() => {
   const bv = petSkinVoiceOf(petSkin.value.id)
   if (bv && bv.cloned) return '当前角色「' + petSkin.value.char + '」用克隆原声「' + (bv.name || bv.voice) + '」🧬（切走恢复全局）'
+  if (bv && bv.preset) return '当前角色「' + petSkin.value.char + '」使用内置声线「' + (bv.name || bv.voice) + '」🔊'
   return '所有角色与全局朗读共用：' + globalVoiceLabel.value
 })
 // 所有克隆音色清单（内置锁定 + 自定义可删），供「我的克隆音色」展示
@@ -1495,6 +1496,21 @@ async function ttsPreviewBound(skinId) {
   if (!bv || !bv.voice) { showToast('该角色还没有克隆声线', 'info'); return }
   const r = bv.engine === 'glm' ? await previewVoice('glm', bv.voice) : await previewVoice('openai', bv.voice)
   return r
+}
+let petSampleAudio = null
+function previewPetSample(skinId) {
+  const src = petSkinSampleOf(skinId)
+  if (!src) { showToast('该角色暂无内置参考原声', 'info'); return }
+  try {
+    if (petSampleAudio) { try { petSampleAudio.pause() } catch (e) {} }
+    petSampleAudio = new window.Audio(src)
+    petSampleAudio.volume = Math.max(0.15, Math.min(1, Number(store.cfg.ttsVolume) || 1))
+    petSampleAudio.play().then(() => {
+      showToast('🔊 正在试听内置参考原声', 'info')
+    }).catch(() => showToast('浏览器拦截了试听播放，请再点一次', 'info'))
+  } catch (e) {
+    showToast('试听失败：' + String(e.message || e).slice(0, 60), 'error')
+  }
 }
 function doUnbindSkinVoice(skinId) {
   const ok = petUnbindCloneVoice(skinId)
@@ -3425,7 +3441,7 @@ onUnmounted(() => {
           <div class="skin-grid" style="grid-template-columns: repeat(4, 1fr); margin-top: 8px">
             <button v-for="s in petAllSkins" :key="s.id" class="skin-card" :class="{ on: petSkin.id === s.id }" @click="applySkin(s.id)">
               <PetAvatar :size="40" :skin-id="s.id" class="skin-av" />
-            <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="形象与声音已内置锁定，不可更改">🔒</span></span>
+            <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petSkinVoiceOf(s.id).preset" style="margin-left: 2px" title="内置声线">🔊</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="形象与声音已内置锁定，不可更改">🔒</span><span v-if="petSkinSampleOf(s.id)" style="margin-left: 3px;cursor:pointer" title="试听内置参考原声" @click.stop="previewPetSample(s.id)">▶</span></span>
               <span v-if="s.custom && s.id !== 'custom'" class="skin-desc" style="display:flex; gap:4px; justify-content:center">
                 <span style="cursor:pointer" @click.stop="applySkin(s.id)">✏️</span>
                 <span style="cursor:pointer" title="删除该自定义角色" @click.stop="doRemoveCustom(s.id)">🗑</span>
@@ -3438,6 +3454,7 @@ onUnmounted(() => {
           </div>
           <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 6px">
             当前角色：<b>{{ petSkin.name }}</b>（{{ petSkin.desc }}）；
+            <button v-if="petSkinSampleOf(petSkin.id)" class="btn btn-gh" style="padding:1px 7px;font-size:calc(11px*var(--ui-fs-scale,1));margin-left:4px" @click="previewPetSample(petSkin.id)">🔊 试听参考原声</button>
             <span v-if="petIsLocked(petSkin.id)">🔒 形象与声音<b>内置锁定</b>（{{ petSkinVoiceOf(petSkin.id).name }}），不可更改。</span>
             <span v-else-if="petSkinVoiceOf(petSkin.id).cloned">已启用克隆原声「<b>{{ petSkinVoiceOf(petSkin.id).name }}</b>」🧬</span>
             <span v-else>声音跟随「🗣️ 语音」里的<b>全局音色</b>（想给 TA 专属原声，用下方「🎤 克隆角色原声」）</span>
@@ -4059,7 +4076,7 @@ onUnmounted(() => {
           <div class="skin-grid">
             <button v-for="s in petAllSkins" :key="s.id" class="skin-card" :class="{ on: petSkin.id === s.id }" @click="applySkin(s.id)">
               <PetAvatar :size="40" :skin-id="s.id" class="skin-av" />
-              <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="内置锁定">🔒</span></span>
+              <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petSkinVoiceOf(s.id).preset" style="margin-left: 2px" title="内置声线">🔊</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="内置锁定">🔒</span><span v-if="petSkinSampleOf(s.id)" style="margin-left: 3px;cursor:pointer" title="试听内置参考原声" @click.stop="previewPetSample(s.id)">▶</span></span>
               <span class="skin-desc">{{ s.desc }}</span>
               <span v-if="s.custom && s.id !== 'custom'" style="display:flex; gap:4px; justify-content:center; margin-top:2px">
                 <span style="cursor:pointer" title="删除" @click.stop="doRemoveCustom(s.id)">🗑</span>
@@ -4070,7 +4087,7 @@ onUnmounted(() => {
               <span class="skin-name">新增自定义</span>
             </button>
           </div>
-          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">薛神/章若楠/李星云/姬如雪为内置锁定角色（形象+克隆原声不可改）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
+          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">薛神、章若楠、李星云、姬如雪、花生十三、小P、小黑、文姐、巾神均为内置锁定角色（形象、人设、专属声线内置，点 ▶ 可试听参考原声）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
         </div>
         <div v-if="bubble && !petMuted" class="pet-talk pp-talk">{{ bubble }}</div>
         <div class="pc-list pp-list">

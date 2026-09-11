@@ -52,6 +52,13 @@ foreach ($d in $deployDirs) {
   Get-ChildItem $dstAssets -Filter 'pdf-*' -ErrorAction SilentlyContinue | Remove-Item -Force
   Get-ChildItem $dstAssets -Filter 'SolidTrain-*' -ErrorAction SilentlyContinue | Remove-Item -Force
   Copy-Item (Join-Path $dist 'assets\*') $dstAssets -Recurse -Force
+  foreach ($dirName in @('pet-avatars','pet-voices')) {
+    $srcDir = Join-Path $dist $dirName
+    if (-not (Test-Path $srcDir)) { continue }
+    $dstDir = Join-Path $d $dirName
+    if (Test-Path $dstDir) { Remove-Item -LiteralPath $dstDir -Recurse -Force }
+    Copy-Item $srcDir $dstDir -Recurse -Force
+  }
 
   Write-Host "    ^ $d 已同步" -ForegroundColor Green
 }
@@ -75,6 +82,10 @@ try {
     Get-ChildItem $pub -File -Filter $pat | ForEach-Object { Copy-Item $_.FullName (Join-Path $stage $_.Name) -Force }
   }
   Copy-Item (Join-Path $pub 'assets') (Join-Path $stage 'assets') -Recurse -Force
+  foreach ($dirName in @('pet-avatars','pet-voices')) {
+    $srcDir = Join-Path $pub $dirName
+    if (Test-Path $srcDir) { Copy-Item $srcDir (Join-Path $stage $dirName) -Recurse -Force }
+  }
   if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
   Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal
   Write-Host "    ^ $zipPath 已重建" -ForegroundColor Green

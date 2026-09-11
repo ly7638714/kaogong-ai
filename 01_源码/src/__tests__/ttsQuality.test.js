@@ -70,6 +70,17 @@ describe('smoothWavBytes WAV 平滑（去静音/纯音提示声）', () => {
     expect(total).toBeGreaterThan(0)
     expect(Math.abs(dv.getInt16(44 + 200 * 2, true))).toBeGreaterThan(0)
   })
+  it('去除每段开头常见的低频短提示音，不再出现“嘟嘟”前导', () => {
+    const wav = makeWav(1800, 0.5)
+    const v = new DataView(wav)
+    for (let i = 0; i < 900; i++) v.setInt16(44 + i * 2, Math.round(0.12 * 32767 * Math.sin(2 * Math.PI * 160 * i / 8000)), true)
+    for (let i = 900; i < 1700; i++) v.setInt16(44 + i * 2, i % 5 === 0 ? Math.round((i % 10 === 0 ? 0.8 : -0.8) * 32767) : 0, true)
+    const out = smoothWavBytes(wav)
+    const ov = new DataView(out)
+    const frames = ov.getUint32(40, true) / 2
+    expect(frames).toBeLessThan(1200)
+    expect(frames).toBeGreaterThan(500)
+  })
   it('非 WAV 原样返回', () => {
     const junk = new Uint8Array([1, 2, 3, 4])
     expect(smoothWavBytes(junk)).toBe(junk)

@@ -250,12 +250,19 @@ function gapStart(audioBuf, meta) {
     }
     const src = ctx.createBufferSource()
     src.buffer = audioBuf
-    src.connect(ctx.destination)
+    const gain = ctx.createGain()
+    src.connect(gain)
+    gain.connect(ctx.destination)
     _gap.sources.push(src)
     const start = _gap.nextAt
     const end = start + audioBuf.duration
-    // 分块拼接不再做渐入渐出：淡化点会被听成“忽大忽小/上下句没接上”；提示音已在 WAV 预处理阶段去掉。
-    src.start(start, 0, audioBuf.duration + 0.002)
+    // 每个分块只做 4ms 微淡化，消除“每句开头一声嘟”的硬切爆音；足够短，不会听成忽大忽小。
+    const fade = Math.min(0.006, Math.max(0.002, audioBuf.duration / 8))
+    gain.gain.setValueAtTime(0, start)
+    gain.gain.linearRampToValueAtTime(1, start + fade)
+    gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
+    gain.gain.linearRampToValueAtTime(0, end)
+    src.start(start, 0, audioBuf.duration)
     const tailPause = (meta && meta.text ? speechPauseMs(meta.text) : 18) / 1000
     _gap.nextAt = end + tailPause
     src.onended = () => {

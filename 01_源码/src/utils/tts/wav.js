@@ -64,6 +64,9 @@ export function smoothWavBytes(input, opts = {}) {
       if (info.rms < rmsThresh) { start = w * winSize + winSize; continue } // 静音
       if (info.zcr < 0.015) { start = w * winSize + winSize; continue } // 低频嗡声/底噪
       if (info.zcr > 0.075 && info.crest < 1.45) { start = w * winSize + winSize; continue } // 纯音（嘟嘟/叮叮）
+      // 部分模型会在每段正文前插入一段很轻的高频提示音，音量和波峰特征不完全符合上一条；
+      // 只在最开头 150ms 内剔除这种短暂非语音前导，避免误伤正常开口音。
+      if (w < 15 && info.zcr > 0.015 && info.zcr < 0.065 && info.crest < 1.35 && info.rms < 0.2 * 32767) { start = w * winSize + winSize; continue }
       break // 语音开始
     }
     // 结尾：去掉末尾静音（最多 500ms）
