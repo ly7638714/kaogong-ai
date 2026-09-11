@@ -1,7 +1,7 @@
 /* global File */
 // dataBackup.js —— 统一“全量数据备份”（设置/对话/错题/知识库/战绩/出题历史/记忆库…一切 xc_* 键）
 // 供三路共用：📦导出JSON / 保存到本地文件夹 / WebDAV 云同步；导入时密钥打码字段保留本机现值
-import { stripSecrets } from './stripSecrets'
+import { stripSecrets, scrubSecretValues, containsSecretLike, maskSecretText } from './stripSecrets'
 
 export function collectAll() {
   const data = {}
@@ -13,6 +13,14 @@ export function collectAll() {
         // 配置里的 API Key / WebDAV 密码等敏感字段 → 打码（***），结构保留、密钥不落盘
         if (k === 'xc_cfg') {
           try { val = JSON.stringify(stripSecrets(JSON.parse(val || '{}'))) } catch (e) {}
+        } else if (containsSecretLike(val)) {
+          // 兜底：密钥万一被误写进其它数据键，也按“值特征”清洗后再导出/上传
+          try {
+            const parsed = JSON.parse(val)
+            val = parsed && typeof parsed === 'object'
+              ? JSON.stringify(scrubSecretValues(parsed))
+              : maskSecretText(val)
+          } catch (e) { val = maskSecretText(val) }
         }
         data[k] = val
       } catch (e) {}

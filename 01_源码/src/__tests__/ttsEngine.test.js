@@ -13,6 +13,7 @@ import {
   genEdgeSecMsGec,
   glmSynthesize,
   openaiSynthesize,
+  listGmVoices,
   GLM_PRESET_VOICES,
   EDGE_PRESET_VOICES,
   OPENAI_PRESET_VOICES
@@ -239,5 +240,38 @@ describe('音色市场预设', () => {
     expect(EDGE_PRESET_VOICES.some((v) => v.id === 'zh-CN-XiaoxiaoNeural')).toBe(true)
     expect(EDGE_PRESET_VOICES.some((v) => v.id === 'zh-CN-YunjianNeural')).toBe(true)
     expect(OPENAI_PRESET_VOICES.some((v) => v.id === 'default')).toBe(true)
+  })
+})
+
+describe('listGmVoices 音色列表去重', () => {
+  beforeEach(() => {
+    store.cfg.ttsGm = { key: 'k', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
+    store.cfg.fig = { key: '', url: '' }
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('同一音色以 UUID / 名称别名 / 重复项返回时只保留一个', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        voice_list: [
+          { voice: '18a24e59-6e8c-57bd-aeb8-6584c7a7ada2', voice_name: '姬如雪声线_mtdxfni0' },
+          { voice: '姬如雪声线_mtdxfni0', voice_name: '姬如雪声线_mtdxfni0' },
+          { voice: 'tongtong', voice_name: 'tongtong' },
+          { voice: 'tongtong', voice_name: 'tongtong' }
+        ]
+      })
+    })))
+    const list = await listGmVoices()
+    expect(list).not.toBeNull()
+    const names = list.map((v) => v.name)
+    expect(names.filter((n) => n === '姬如雪').length).toBe(1)
+    expect(names.filter((n) => n === '彤彤 · 温柔女声（默认）').length).toBe(1)
+    expect(list.length).toBe(2)
+  })
+
+  it('空列表返回 null（调用方回退内置音色）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ voice_list: [] }) })))
+    expect(await listGmVoices()).toBeNull()
   })
 })

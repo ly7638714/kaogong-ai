@@ -1278,7 +1278,20 @@ function vcHidden(engine) {
 function voiceList(engine, base) {
   const hidden = vcHidden(engine)
   const names = vcNames(engine)
-  return (base || []).filter((v) => !hidden.includes(v.id)).map((v) => ({ ...v, name: names[v.id] || v.name }))
+  // 去重：同一 id 或同一显示名只保留一个，避免官方接口返回 UUID/别名造成音色重复
+  const seenId = new Set()
+  const seenName = new Set()
+  const out = []
+  for (const v of (base || [])) {
+    if (!v || !v.id || hidden.includes(v.id)) continue
+    const name = names[v.id] || v.name
+    const nameKey = String(name || '').trim().toLowerCase()
+    if (seenId.has(v.id) || (nameKey && seenName.has(nameKey))) continue
+    seenId.add(v.id)
+    if (nameKey) seenName.add(nameKey)
+    out.push({ ...v, name })
+  }
+  return out
 }
 function hiddenVoicesList(engine, base) {
   const hidden = vcHidden(engine)

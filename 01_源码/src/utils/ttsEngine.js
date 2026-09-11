@@ -433,11 +433,21 @@ export async function listGmVoices() {
     if (!arr.length) return null
     const nameOf = {}
     GLM_PRESET_VOICES.forEach((v) => { nameOf[v.id] = v.name })
-    return arr.map((v) => ({
-      id: v.voice || v.voice_name,
-      name: nameOf[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice] || v.voice_name || v.voice,
-      emoji: '🎙️'
-    }))
+    // 官方接口会把同一音色用「UUID / 名称别名」两种形式返回，这里按 id + 显示名双重去重，只保留一个
+    const seenId = new Set()
+    const seenName = new Set()
+    const out = []
+    for (const v of arr) {
+      const id = v.voice || v.voice_name
+      if (!id) continue
+      const name = nameOf[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice] || v.voice_name || v.voice
+      const nameKey = String(name || '').trim().toLowerCase()
+      if (seenId.has(id) || (nameKey && seenName.has(nameKey))) continue
+      seenId.add(id)
+      if (nameKey) seenName.add(nameKey)
+      out.push({ id, name, emoji: '🎙️' })
+    }
+    return out.length ? out : null
   } catch (e) {
     return null
   }
