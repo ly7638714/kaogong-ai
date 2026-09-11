@@ -4,7 +4,7 @@
 /* global btoa, atob */
 import { store, saveCfg } from '../store'
 import { collectAll, restoreAll } from './dataBackup'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview } from './cloudSync'
 
 const GH_API = 'https://api.github.com'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -156,7 +156,9 @@ export async function runGitHubSync() {
   const remoteFile = await readGitHubRemote(repoInfo.full)
   const remoteRaw = remoteFile ? remoteFile.obj : null
   const state = readSyncState()
-  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const preferRemote = !!remoteRaw && remoteMeta.t > state.remoteT && !syncOverview().dirty
+  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base, { preferRemote })
   hydrateStoreFromPlan(plan)
   const body = makeCloudEnvelope(plan.merged)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
@@ -173,7 +175,6 @@ export async function runGitHubSync() {
     putTs = body.t
   }
   const finalTs = putTs || Date.now()
-  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
   const own = syncDeviceInfo()
   saveSyncState({
     ...state,

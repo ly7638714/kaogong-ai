@@ -3,7 +3,7 @@
 /* global btoa, atob, FormData */
 import { store, saveCfg } from '../store'
 import { collectAll, restoreAll } from './dataBackup'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview } from './cloudSync'
 
 const GE_API = 'https://gitee.com/api/v5'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -226,7 +226,9 @@ export async function runGiteeSync() {
   const remoteFile = await readRemote(repoInfo.full, repoInfo.branch)
   const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
   const state = readSyncState()
-  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const preferRemote = !!remoteRaw && remoteMeta.t > state.remoteT && !syncOverview().dirty
+  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base, { preferRemote })
   hydrateStoreFromPlan(plan)
   const body = makeCloudEnvelope(plan.merged)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
@@ -236,7 +238,6 @@ export async function runGiteeSync() {
     putTs = body.t
   }
   const finalTs = putTs || Date.now()
-  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
   const own = syncDeviceInfo()
   saveSyncState({
     ...state,

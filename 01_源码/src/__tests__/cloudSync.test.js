@@ -27,6 +27,16 @@ describe('cloudSync 多端安全合并', () => {
     expect(m.some((x) => x.id === 'q2')).toBe(true)
   })
 
+  it('本机无未上传改动时，同 id 同时间戳优先采用云端新版本', () => {
+    const time = 1690000000100
+    const local = [{ id: 'q1', t: time, question: '网页旧题面' }]
+    const remote = [{ id: 'q1', t: time, question: '手机新题面' }]
+    expect(mergeArrays(local, remote, 'xc_wqs', false)[0].question).toBe('网页旧题面')
+    expect(mergeArrays(local, remote, 'xc_wqs', true)[0].question).toBe('手机新题面')
+    const merged = mergeSyncData({ xc_wqs: JSON.stringify(local) }, { xc_wqs: JSON.stringify(remote) }, {}, { preferRemote: true })
+    expect(JSON.parse(merged.xc_wqs)[0].question).toBe('手机新题面')
+  })
+
   it('只同步学习数据，不同步 cfg/本机 UI/密钥类键', () => {
     expect(shouldSyncKey('xc_msgs')).toBe(true)
     expect(shouldSyncKey('xc_cfg')).toBe(false)

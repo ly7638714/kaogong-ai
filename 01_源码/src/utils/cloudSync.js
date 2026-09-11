@@ -181,7 +181,7 @@ function timeOf(it) {
 
 function hasTime(it) { return timeOf(it) > 0 }
 
-export function mergeArrays(localArr, remoteArr, key = '') {
+export function mergeArrays(localArr, remoteArr, key = '', preferRemote = false) {
   const l = Array.isArray(localArr) ? localArr : []
   const r = Array.isArray(remoteArr) ? remoteArr : []
   const map = new Map()
@@ -198,11 +198,9 @@ export function mergeArrays(localArr, remoteArr, key = '') {
     const lt = timeOf(old), nt = timeOf(item)
     const choose = nt > lt
       ? item
-      : lt === nt && (!hasTime(old) && hasTime(item))
+      : lt === nt && (preferRemote || (!hasTime(old) && hasTime(item)) || (fromRemote && JSON.stringify(item).length > JSON.stringify(old).length))
         ? item
-        : fromRemote && JSON.stringify(item).length > JSON.stringify(old).length
-          ? item
-          : old
+        : old
     map.set(k, choose)
     const idx = seq.indexOf(old)
     if (idx >= 0) seq[idx] = choose
@@ -228,7 +226,7 @@ function rawIsObject(v) {
   return s.startsWith('{')
 }
 
-function deepMergeValue(key, lv, rv, depth = 0) {
+function deepMergeValue(key, lv, rv, depth = 0, preferRemote = false) {
   if (lv === rv) return lv
   const la = Array.isArray(lv) || (typeof lv === 'string' && rawIsArray(lv))
   const ra = Array.isArray(rv) || (typeof rv === 'string' && rawIsArray(rv))
@@ -236,7 +234,7 @@ function deepMergeValue(key, lv, rv, depth = 0) {
     try {
       const a = typeof lv === 'string' ? JSON.parse(lv) : lv
       const b = typeof rv === 'string' ? JSON.parse(rv) : rv
-      const m = mergeArrays(a, b, key)
+      const m = mergeArrays(a, b, key, preferRemote)
       return JSON.stringify(m)
     } catch (e) { return lv }
   }
@@ -249,7 +247,7 @@ function deepMergeValue(key, lv, rv, depth = 0) {
       const out = { ...a }
       for (const k in b) {
         const bv = b[k]
-        out[k] = k in out ? deepMergeValue(key + '.' + k, out[k], bv, depth + 1) : bv
+        out[k] = k in out ? deepMergeValue(key + '.' + k, out[k], bv, depth + 1, preferRemote) : bv
       }
       return JSON.stringify(out)
     } catch (e) { return lv }
@@ -266,7 +264,7 @@ function parseArrayValue(v) {
   }
 }
 
-export function mergeSyncData(localData, remoteData, baseline = {}) {
+export function mergeSyncData(localData, remoteData, baseline = {}, opts = {}) {
   const local = localData || {}
   const remote = remoteData || {}
   const base = baseline || {}
@@ -284,16 +282,16 @@ export function mergeSyncData(localData, remoteData, baseline = {}) {
     if (lv == null) { out[k] = rv; continue }
     if (rv == null) { out[k] = lv; continue }
     if (k === 'xc_wqs') {
-      const merged = mergeArrays(parseArrayValue(lv), parseArrayValue(rv), k)
+      const merged = mergeArrays(parseArrayValue(lv), parseArrayValue(rv), k, !!opts.preferRemote)
       out[k] = JSON.stringify(filterDeletedWrongs(merged, deleted))
       continue
     }
-    const merged = deepMergeValue(k, lv, rv, 0)
+    const merged = deepMergeValue(k, lv, rv, 0, !!opts.preferRemote)
     if (merged != null) { out[k] = merged; continue }
     // 标量：本机没改且云端改了 → 用云端；两边都改或只有本机改 → 用本机，防自动覆盖正在学习的新数据。
     const localChanged = lv !== base[k]
     const remoteChanged = rv !== base[k]
-    out[k] = !localChanged && remoteChanged ? rv : lv
+    out[k] = opts.preferRemote && !localChanged ? rv : (!localChanged && remoteChanged ? rv : lv)
   }
   return out
 }
@@ -414,10 +412,10 @@ export function syncBaseline(data) {
 }
 
 // 云端下载后统一做“下载 → 安全合并 → 写回本机”，返回是否需要回传云端。
-export function applyLocalMerge(localAll, remoteRaw, baseline = {}) {
+export function applyLocalMerge(localAll, remoteRaw, baseline = {}, opts = {}) {
   const local = syncScopeFromBackup(localAll)
   const remote = remoteRaw ? syncScopeFromBackup(remoteRaw) : {}
-  const merged = mergeSyncData(local, remote, baseline)
+  const merged = mergeSyncData(local, remote, baseline, opts)
   const changed = writeMerged(merged)
   const rawRemote = remoteRaw ? rawScopeFromBackup(remoteRaw) : {}
   const sameAsRemote = remoteRaw ? fingerprint(rawRemote) === fingerprint(merged) : false
@@ -444,7 +442,9 @@ export async function runCloudSync() {
   if (getRes) remoteRaw = await getRes.json()
 
   const state = readSyncState()
-  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const preferRemote = !!remoteRaw && remoteMeta.t > state.remoteT && !syncOverview().dirty
+  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base, { preferRemote })
   hydrateStoreFromPlan(plan)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote) {
@@ -452,7 +452,6 @@ export async function runCloudSync() {
     await webdavPutFile(url, hdrs, JSON.stringify(body))
     putTs = body.t
   }
-  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
   const own = syncDeviceInfo()
   const finalTs = putTs || Date.now()
   saveSyncState({
