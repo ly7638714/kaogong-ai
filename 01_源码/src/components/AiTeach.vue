@@ -7,6 +7,7 @@ import { showToast } from '../utils/toast'
 import { store } from '../store'
 import { answerLetter } from '../utils/quiz'
 import { pickGenCfg } from '../utils/fastMode'
+import AiLessonStage from './AiLessonStage.vue'
 
 const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' }, initialAnswer: { type: String, default: '' } })
 const emit = defineEmits(['close'])
@@ -35,18 +36,6 @@ const topics = computed(() => allTopics.value.filter((t) => {
   return true
 }))
 const topic = ref(null)
-const teacherStyle = computed(() => {
-  const plate = topic.value && topic.value.plate
-  const map = {
-    判断推理: { robe: '#2563eb', accent: '#93c5fd', badge: '逻辑' },
-    言语理解: { robe: '#059669', accent: '#6ee7b7', badge: '言语' },
-    数量关系: { robe: '#d97706', accent: '#fcd34d', badge: '数量' },
-    资料分析: { robe: '#7c3aed', accent: '#c4b5fd', badge: '资料' },
-    常识判断: { robe: '#0891b2', accent: '#67e8f9', badge: '常识' },
-    政治理论: { robe: '#dc2626', accent: '#fca5a5', badge: '政治' }
-  }
-  return map[plate] || map['判断推理']
-})
 const lesson = ref(null)
 const lessonBusy = ref(false)
 const sceneIdx = ref(0)
@@ -269,24 +258,10 @@ onUnmounted(() => { clearTimer(); stopVoice() })
         <template v-if="lesson">
           <div class="at-stage">
             <div class="at-stage-hd"><b>{{ lessonTitle }}</b><span>{{ sceneIdx + 1 }} / {{ scenes.length }}</span></div>
-            <div v-if="currentScene" :key="sceneIdx" class="at-scene at-in">
-              <div class="at-teacher" :style="{ '--robe': teacherStyle.robe, '--accent2': teacherStyle.accent }">
-                <div class="at-teacher-hair"></div>
-                <div class="at-teacher-head"><span class="at-eye left"></span><span class="at-eye right"></span><span class="at-mouth"></span></div>
-                <div class="at-teacher-body"></div>
-                <div class="at-teacher-arm left"></div>
-                <div class="at-teacher-arm right"></div>
-                <div class="at-teacher-badge">{{ teacherStyle.badge }}</div>
-                <div class="at-teacher-name">{{ topic.card.source || 'AI 名师' }}</div>
-              </div>
-              <div class="at-scene-i">{{ currentScene.icon }}</div>
-              <div class="at-scene-t">{{ currentScene.title }}</div>
-              <div class="at-scene-d">{{ currentScene.body }}</div>
-              <div v-if="currentScene.points && currentScene.points.length" class="at-points"><span v-for="p in currentScene.points" :key="p">{{ p }}</span></div>
-              <div v-if="currentScene.type === 'checkpoint'" class="at-check">
-                <button v-for="o in currentScene.options || []" :key="o.k" class="coach-opt" :class="{ on: checkpointPick === o.k, right: checkpointOk && checkpointPick === o.k, wrong: checkpointPick === o.k && !checkpointOk }" @click="checkPoint(o.k)"><b>{{ o.k }}</b><span>{{ o.t }}</span></button>
-                <div v-if="checkpointPick" class="at-check-fb">{{ checkpointOk ? '✅ ' + currentScene.explain : '再想一步：先翻译结构，还是先看选项？' }}</div>
-              </div>
+            <AiLessonStage :scene="currentScene" :playing="playing" :scene-index="sceneIdx" />
+            <div v-if="currentScene && currentScene.type === 'checkpoint'" class="at-check">
+              <button v-for="o in currentScene.options || []" :key="o.k" class="coach-opt" :class="{ on: checkpointPick === o.k, right: checkpointOk && checkpointPick === o.k, wrong: checkpointPick === o.k && !checkpointOk }" @click="checkPoint(o.k)"><b>{{ o.k }}</b><span>{{ o.t }}</span></button>
+              <div v-if="checkpointPick" class="at-check-fb">{{ checkpointOk ? '✅ ' + currentScene.explain : '再想一步：先翻译结构，还是先看选项？' }}</div>
             </div>
             <div class="at-progress"><i :style="{ width: progress + '%' }"></i></div>
           </div>
