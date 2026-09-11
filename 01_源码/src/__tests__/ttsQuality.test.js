@@ -30,6 +30,28 @@ describe('symbolsToChinese 符号智能朗读', () => {
   })
 })
 
+describe('朗读元信息剔除（不进朗读 = 不花钱）', () => {
+  const raw = [
+    '📊 组卷来源：国家统计局 · 烟酒 · 当前第 1 篇（烟酒），同一篇供 5 问连续作答；10/15/20 题会自动混编多领域材料。',
+    '第 1 / 5 题 · ④ 速算 · 四层第 4 / 4',
+    '2020年至2024年上半年，某省烟酒类主要产品产量总体呈现波动增长态势。',
+    '本材料为训练模拟数据，非官方实际公布值。',
+    '📚 依据卡：[判断推理·削弱题型]'
+  ].join('\n')
+
+  it('题号进度 / 组卷来源 / 训练声明 / 依据卡都整行丢弃，正文保留', () => {
+    const out = cleanSpeechText(raw)
+    expect(out).not.toContain('组卷来源')
+    expect(out).not.toContain('国家统计局')
+    expect(out).not.toContain('第 1 / 5 题')
+    expect(out).not.toContain('速算')
+    expect(out).not.toContain('训练模拟数据')
+    expect(out).not.toContain('依据卡')
+    expect(out).not.toContain('削弱题型')
+    expect(out).toContain('某省烟酒类主要产品产量总体呈现波动增长态势')
+  })
+})
+
 describe('smoothWavBytes WAV 平滑（去静音/纯音提示声）', () => {
   function makeWav(totalFrames, amp) {
     const rate = 8000, ch = 1, block = 2

@@ -79,6 +79,20 @@ describe('speechScript 语音阅读讲稿改写', () => {
     await expect(speakReadyText(raw)).resolves.toBe(raw)
   })
 
+  it('改写“加戏”变长时判定为扩写，退回清洗后的原文（朗读字数不增）', async () => {
+    const src = ('资料分析先看时间和单位，再找总量与比重，最后估算首位。本题问的是比重，直接用白酒产量除以卷烟产量，注意单位一致，别把亿元当成万元。').repeat(2)
+    vi.mocked(chatOnce).mockResolvedValue('同学你好呀，今天我们来一起看这道题。' + src + src + '。')
+    const out = await speakReadyText(src)
+    expect(out).toBe(src)
+    expect(out).not.toContain('同学你好')
+  })
+
+  it('改写被截断（结尾没有收束标点）时退回原文，避免念到一半', async () => {
+    const src = ('判断推理先找论点论据，再看选项方向，最后排除无关项。').repeat(4)
+    vi.mocked(chatOnce).mockResolvedValue('先找论点论据，再看选项方向，最后排除无')
+    await expect(speakReadyText(src)).resolves.toBe(src)
+  })
+
   it('speechScriptKind 能从文本识别题干与解析', () => {
     expect(speechScriptKind('A、甲 B、乙 C、丙', '')).toBe('quiz')
     expect(speechScriptKind('解析：先看首尾句', '')).toBe('explain')
