@@ -27,7 +27,9 @@ import {
   DASH_PRESET_VOICES,
   DASH_MODELS,
   dashVoicesForModel,
-  dashSynthesize
+  dashSynthesize,
+  gapEnsure,
+  primePlayback
 } from './ttsEngine'
 
 // ===== 场景音色清单（仅系统语音兜底时使用；真人引擎在「音色市场」里选）=====
@@ -116,7 +118,7 @@ function errToast(msg) {
 // 按 store.cfg.ttsMode 分发：glm(默认·智谱超拟人) / openai / edge / sys
 export function speak(text, opts) {
   opts = opts || {}
-  speakPro(text, {
+  return speakPro(text, {
     voice: opts.voice,
     rate: opts.rate != null ? opts.rate : 0.98,
     pitch: opts.pitch != null ? opts.pitch : scenePitch(opts.scene),
@@ -124,6 +126,12 @@ export function speak(text, opts) {
     onEnd: opts.onEnd,
     onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
   })
+}
+// 在用户点击播放的第一时间同步解锁移动端音频；后续即使先异步生成讲稿，也不容易被浏览器拦截。
+export function primeTts() {
+  try { gapEnsure() } catch (e) {}
+  try { primePlayback() } catch (e) {}
+  try { if (window.speechSynthesis && window.speechSynthesis.paused) window.speechSynthesis.resume() } catch (e) {}
 }
 export function stopSpeak() {
   stopSpeakPro()

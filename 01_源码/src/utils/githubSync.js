@@ -3,8 +3,8 @@
 // GitHub API 支持 CORS，适合网页 / iPad / 安卓直接用同一 Token 互通。
 /* global btoa, atob */
 import { store, saveCfg } from '../store'
-import { collectAll } from './dataBackup'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
+import { collectAll, restoreAll } from './dataBackup'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo } from './cloudSync'
 
 const GH_API = 'https://api.github.com'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -158,7 +158,7 @@ export async function runGitHubSync() {
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   hydrateStoreFromPlan(plan)
-  const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
+  const body = makeCloudEnvelope(plan.merged)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote || (remoteFile && remoteFile.corrupted)) {
     const payload = {
@@ -172,12 +172,84 @@ export async function runGitHubSync() {
     })
     putTs = body.t
   }
+  const finalTs = putTs || Date.now()
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const own = syncDeviceInfo()
   saveSyncState({
-    kind: state.kind,
-    auto: state.auto,
-    last: putTs,
-    lastStat: '已同步 ' + new Date(putTs).toLocaleString(),
+    ...state,
+    last: finalTs,
+    lastAction: 'merge',
+    at: Date.now(),
+    localT: finalTs,
+    remoteT: finalTs,
+    remoteDevice: remoteMeta.t ? { id: remoteMeta.deviceId, label: remoteMeta.deviceLabel } : own,
+    baseHash: syncDataHash(plan.merged),
+    lastStat: 'GitHub 智能合并 ' + new Date(finalTs).toLocaleString(),
     base: syncBaseline(plan.merged)
   })
-  return { ok: true, changed: plan.changed > 0, ts: putTs, repo: repoInfo.full, created: repoInfo.created }
+  return { ok: true, changed: plan.changed > 0, ts: finalTs, repo: repoInfo.full, created: repoInfo.created, direction: 'merge' }
+}
+
+export async function runGitHubUpload(options = {}) {
+  const g = ghCfg()
+  if (!g.token || !String(g.token).trim()) throw new Error('请先填写 GitHub Token')
+  const repoInfo = await ensurePrivateRepo()
+  const remoteFile = await readGitHubRemote(repoInfo.full)
+  const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
+  const state = readSyncState()
+  const local = collectAll()
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  const sameAsLocal = remoteRaw ? syncDataHash(remoteRaw) === syncDataHash(local) : false
+  if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'gh' || meta.t > state.remoteT)) {
+    return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
+  }
+  const body = makeCloudEnvelope(local.data)
+  const payload = {
+    message: '行测AI上传本机版本 ' + new Date(body.t).toLocaleString(),
+    content: b64EncodeUtf8(JSON.stringify(body))
+  }
+  if (remoteFile) payload.sha = remoteFile.sha
+  await ghFetch('/repos/' + repoInfo.full + '/contents/' + SYNC_FILE, { method: 'PUT', body: JSON.stringify(payload) })
+  saveSyncState({
+    ...state,
+    last: body.t,
+    lastAction: 'upload',
+    at: Date.now(),
+    localT: body.t,
+    remoteT: body.t,
+    remoteDevice: syncDeviceInfo(),
+    baseHash: syncDataHash(body),
+    lastStat: 'GitHub 已上传本机版本 ' + new Date(body.t).toLocaleString()
+  })
+  return { ok: true, changed: true, ts: body.t, direction: 'upload', repo: repoInfo.full, created: repoInfo.created }
+}
+
+export async function runGitHubDownload(options = {}) {
+  const g = ghCfg()
+  if (!g.token || !String(g.token).trim()) throw new Error('请先填写 GitHub Token')
+  const repoInfo = await ensurePrivateRepo()
+  const remoteFile = await readGitHubRemote(repoInfo.full)
+  if (!remoteFile || !remoteFile.obj) throw new Error('GitHub 云端还没有可用同步文件；请先在任一设备上传本机版本')
+  const remoteRaw = remoteFile.obj
+  const state = readSyncState()
+  const local = collectAll()
+  const remoteHash = syncDataHash(remoteRaw)
+  const localHash = syncDataHash(local)
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  if (localHash !== remoteHash && !options.force && (state.kind !== 'gh' || (state.baseHash && localHash !== state.baseHash))) {
+    return { ok: false, needsConfirm: true, direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
+  }
+  const n = restoreAll(remoteRaw)
+  saveSyncState({
+    ...state,
+    last: Date.now(),
+    lastAction: 'download',
+    at: Date.now(),
+    localT: meta.t || Date.now(),
+    remoteT: meta.t || Date.now(),
+    remoteDevice: { id: meta.deviceId, label: meta.deviceLabel },
+    baseHash: remoteHash,
+    lastStat: 'GitHub 已下载云端版本 ' + new Date(meta.t || Date.now()).toLocaleString()
+  })
+  return { ok: true, changed: n > 0, ts: meta.t || Date.now(), direction: 'download', repo: repoInfo.full }
 }

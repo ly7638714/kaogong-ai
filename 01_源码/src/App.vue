@@ -16,7 +16,6 @@ import FloatPanel from './components/FloatPanel.vue'
 import ExamBar from './components/ExamBar.vue'
 import ExamManager from './components/ExamManager.vue'
 import PetAvatar from './components/PetAvatar.vue'
-import Data3DPage from './components/Data3DPage.vue'
 import ReviewHub from './components/ReviewHub.vue' // R 今日复习中枢（全局）
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
@@ -26,10 +25,9 @@ import { APP_VERSION } from './version'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
 import { nav, navBack, syncNavFromHistory } from './utils/nav'
 import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nativeToast, isNativeHost } from './utils/platform' // ★安卓返回键/宿主桥
-import { webdavUpload, webdavDownload } from './utils/webdav'
-import { runCloudSync, readSyncState, saveSyncState } from './utils/cloudSync'
-import { runGitHubSync } from './utils/githubSync'
-import { runGiteeSync } from './utils/giteeSync'
+import { runCloudSync, runCloudUpload, runCloudDownload, readSyncState, saveSyncState, syncOverview } from './utils/cloudSync'
+import { runGitHubSync, runGitHubUpload, runGitHubDownload } from './utils/githubSync'
+import { runGiteeSync, runGiteeUpload, runGiteeDownload } from './utils/giteeSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
@@ -49,12 +47,12 @@ const tabs = [
   { k: 'ths', t: '🗂️ 积累' },
   { k: 'stat', t: '📊 统计' },
   { k: 'wq', t: '📋 错题' },
-  { k: '3d', t: '🌌 3D数据' }
+  { k: 'sync', t: '💾 数据同步' }
 ]
 // 界面自定义：被隐藏的板块/功能入口不渲染（功能仍在，可从深链/更多菜单进入）
 const visibleTabs = computed(() => tabs.filter((t) => !(store.cfg.uiHidden && store.cfg.uiHidden['tab_' + t.k])))
 // ===== URL 深链（hash 路由）：#/ck #/chat #/kb #/ths #/stat #/wq，可收藏/分享、浏览器返回键切页 =====
-const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1, '3d': 1 }
+const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1 }
 function tabFromHash() {
   try {
     const h = String(location.hash || '').replace(/^#\/?/, '')
@@ -295,7 +293,6 @@ const savedPack = localStorage.getItem('xc_theme_pack')
 if (savedPack && THEME_PACKS.some((x) => x.id === savedPack)) {
   try { onMounted(() => applyThemePack(savedPack)) } catch (e) { /* 无 onMounted 场景忽略 */ }
 }
-// 3D 学习数据驾驶舱已独立为「🌌 3D数据」页签；背景 3D 可在设置里开关
 function doTheme() {
   // 顶栏 ☀️/🌙：在白天/黑夜「配对主题包」间一键切换（如 护眼绿白 ↔ 护眼柔绿）
   const pair = THEME_PACK_PAIR[themePack.value]
@@ -853,7 +850,7 @@ function revealPetDock() {
 // 悬浮物安全区：避免落在顶部 HUD 区与底部输入/操作区（纯函数见 utils/floatClamp.js，可单测）
 import { floatSafeClamp, vpBucket as vpB, FLOAT_TOP_SAFE } from './utils/floatClamp'
 // 动态测量顶部导航真实高度（topbar + exam-bar(HUD) + tabs 三段，取最下沿），
-// 让萌宠/音乐球落点避开整个顶部导航区（而非写死的 96px，旧值会压住 .tabs 里的「积累/统计/错题/3D数据」）。
+// 让萌宠/音乐球落点避开整个顶部导航区（而非写死的 96px，旧值会压住 .tabs 里的页面入口）。
 function topNavSafe() {
   try {
     let bottom = 0
@@ -1022,7 +1019,7 @@ const FUNCS = [
   { k: 'paper', t: '📥 导入组卷', match: ['真题', '导入题', 'paper', '试卷', '图片识别'] },
   { k: 'music', t: '🎵 背景音乐', match: ['音乐', 'music', 'bgm', '歌单'] },
   { k: 'pet', t: '🐾 我的萌宠', match: ['萌宠', '宠物', 'pet'] },
-  { k: '3d', t: '🌌 3D 学习数据驾驶舱', match: ['3d', '数据', '全景', '星球'] }
+  { k: 'sync', t: '💾 数据同步与保存', match: ['同步', '保存', '备份', '导出', '导入', 'gitee', 'github', 'webdav', '坚果云'] }
 ]
 function goFunc(f) {
   sq.value = ''
@@ -1035,7 +1032,7 @@ function goFunc(f) {
   if (f.k === 'paper') { store.tab = 'chat'; evEmit('xc-open-paper'); return }
   if (f.k === 'music') { toggleMusic(); return }
   if (f.k === 'pet') { openPet(); return }
-  if (f.k === '3d') { store.tab = '3d'; return }
+  if (f.k === 'sync') { openDataSync(); return }
 }
 function goKb(it) {
   sq.value = ''
@@ -1216,7 +1213,7 @@ const uiEntries = [
   { id: 'tab_ths', label: '🗂️ 积累', desc: '常识 / 时政 / 成语积累' },
   { id: 'tab_stat', label: '📊 统计', desc: '学习数据统计图' },
   { id: 'tab_wq', label: '📋 错题', desc: '错题复盘本' },
-  { id: 'tab_3d', label: '🌌 3D数据', desc: '3D 学习数据驾驶舱' },
+  { id: 'tab_sync', label: '💾 数据同步', desc: '本地保存 / Gitee / GitHub / WebDAV / 导出导入' },
   { id: 'pet', label: '🐾 萌宠', desc: '常驻主页的宠物球与对话小窗' },
   { id: 'music', label: '🎵 背景音乐', desc: '看板页角的背景音乐球' }
 ]
@@ -1816,8 +1813,26 @@ const ghAuto = ref(readSyncState().auto && readSyncState().kind === 'gh')
 const geBusy = ref(false)
 const geStat = ref('')
 const geAuto = ref(readSyncState().auto && readSyncState().kind === 'ge')
+const syncUi = ref(buildSyncUi())
 let syncTimer = null
 let cloudApplyTimer = null
+function fmtSyncTime(ts) {
+  return Number(ts) ? new Date(Number(ts)).toLocaleString() : '未记录'
+}
+function buildSyncUi() {
+  const s = syncOverview()
+  const actionMap = { upload: '上传本机版本', download: '下载云端版本', merge: '智能合并' }
+  return {
+    local: !s.known ? '尚未建立同步基准' : s.dirty ? '本机有未上传改动' : '本机与上次同步一致',
+    localState: !s.known ? 'unknown' : s.dirty ? 'warn' : 'ok',
+    localT: s.localT ? fmtSyncTime(s.localT) : '未记录',
+    remote: s.remoteT ? fmtSyncTime(s.remoteT) + ' · ' + ((s.remoteDevice && s.remoteDevice.label) || '其他设备') : '尚未读取云端版本',
+    remoteState: s.dirty ? 'warn' : s.remoteT ? 'ok' : 'unknown',
+    action: s.lastAction ? (actionMap[s.lastAction] || s.lastAction) : '暂无',
+    actionT: s.at ? fmtSyncTime(s.at) : '未记录'
+  }
+}
+function refreshSyncUi() { syncUi.value = buildSyncUi() }
 function scheduleCloudApply() {
   if (cloudApplyTimer) clearTimeout(cloudApplyTimer)
   cloudApplyTimer = setTimeout(() => {
@@ -1873,6 +1888,7 @@ async function runWdAuto(manual) {
     return { ok: false, error: (e && e.message) || e }
   } finally {
     wdBusy.value = false
+    refreshSyncUi()
   }
 }
 function wdToggleAuto() {
@@ -1912,7 +1928,7 @@ function ghToggleAuto() {
   }
 }
 async function runGhSync(manual) {
-  if (wdBusy.value || ghBusy.value) return { ok: false }
+  if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   ghBusy.value = true
   ghStat.value = manual ? 'GitHub 智能同步中…' : 'GitHub 自动互通中…'
   try {
@@ -1933,6 +1949,7 @@ async function runGhSync(manual) {
     return { ok: false, error: (e && e.message) || e }
   } finally {
     ghBusy.value = false
+    refreshSyncUi()
   }
 }
 function geToggleAuto() {
@@ -1975,35 +1992,85 @@ async function runGeSync(manual) {
     return { ok: false, error: (e && e.message) || e }
   } finally {
     geBusy.value = false
+    refreshSyncUi()
   }
 }
-async function wdUp() {
-  wdBusy.value = true
-  wdStat.value = '上传中…'
+function setSyncProviderBusy(kind, v) {
+  if (kind === 'wd') wdBusy.value = v
+  else if (kind === 'gh') ghBusy.value = v
+  else geBusy.value = v
+}
+function setSyncProviderStat(kind, v) {
+  if (kind === 'wd') wdStat.value = v
+  else if (kind === 'gh') ghStat.value = v
+  else geStat.value = v
+}
+function syncProviderName(kind) {
+  return kind === 'wd' ? 'WebDAV' : kind === 'gh' ? 'GitHub' : 'Gitee'
+}
+function uploadConfirmText(r) {
+  return '云端版本比本机上次记录更新：' + fmtSyncTime(r.remoteT) + '（' + (r.remoteDevice || '其他设备') + '）。\n\n继续上传会用本机数据覆盖云端。若不确定，请取消后先下载云端或智能合并。确定上传吗？'
+}
+function downloadConfirmText(r) {
+  return '本机有未上传改动，下载云端会覆盖这些改动。\n\n云端版本：' + fmtSyncTime(r.remoteT) + '（' + (r.remoteDevice || '其他设备') + '）。\n\n若想两边都保留，请取消后使用“智能合并”。确定下载云端吗？'
+}
+async function syncUpload(kind, force = false) {
+  if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
+  setSyncProviderBusy(kind, true)
+  setSyncProviderStat(kind, '正在检查云端并上传本机版本…')
   try {
-    const ts = await webdavUpload()
-    wdStat.value = '✅ 已上传（' + new Date(ts).toLocaleString() + '）'
-    showToast('☁️ 已上传备份到 WebDAV', 'success')
+    const fn = kind === 'wd' ? runCloudUpload : kind === 'gh' ? runGitHubUpload : runGiteeUpload
+    const r = await fn({ force })
+    if (r && r.needsConfirm) {
+      setSyncProviderBusy(kind, false)
+      const ok = confirm(uploadConfirmText(r))
+      if (!ok) {
+        setSyncProviderStat(kind, '已取消上传；本机数据未改动')
+        return r
+      }
+      return await syncUpload(kind, true)
+    }
+    setSyncProviderStat(kind, '✅ 已上传本机版本（' + fmtSyncTime(r.ts) + '）')
+    showToast('⬆️ ' + syncProviderName(kind) + ' 已上传本机版本，云端已更新', 'success')
+    refreshSyncUi()
+    return r
   } catch (e) {
-    wdStat.value = '❌ ' + e.message
+    setSyncProviderStat(kind, '❌ ' + ((e && e.message) || e))
+    showToast('⬆️ ' + syncProviderName(kind) + ' 上传失败：' + ((e && e.message) || e), 'error')
+    return { ok: false, error: (e && e.message) || e }
   } finally {
-    wdBusy.value = false
+    setSyncProviderBusy(kind, false)
+    refreshSyncUi()
   }
 }
-async function wdDown() {
-  wdBusy.value = true
-  wdStat.value = '下载中…'
+async function syncDownload(kind, force = false) {
+  if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
+  setSyncProviderBusy(kind, true)
+  setSyncProviderStat(kind, '正在读取云端版本…')
   try {
-    const d = await webdavDownload()
-    if (!d || (!d.data && !d.app)) throw new Error('备份文件格式不对')
-    const n = restoreAll(d)
-    wdStat.value = '✅ 已恢复 ' + n + ' 项数据（' + (d.ts ? new Date(d.ts).toLocaleString() : '') + '），即将刷新'
-    showToast('☁️ 已从 WebDAV 恢复备份（' + n + ' 项）', 'success')
-    setTimeout(() => location.reload(), 900)
+    const fn = kind === 'wd' ? runCloudDownload : kind === 'gh' ? runGitHubDownload : runGiteeDownload
+    const r = await fn({ force })
+    if (r && r.needsConfirm) {
+      setSyncProviderBusy(kind, false)
+      const ok = confirm(downloadConfirmText(r))
+      if (!ok) {
+        setSyncProviderStat(kind, '已取消下载；本机数据未改动')
+        return r
+      }
+      return await syncDownload(kind, true)
+    }
+    setSyncProviderStat(kind, '✅ 已下载云端版本（' + fmtSyncTime(r.ts) + '，来自 ' + (r.remoteDevice || '其他设备') + '），即将刷新')
+    showToast('⬇️ ' + syncProviderName(kind) + ' 已下载云端最新版本', 'success')
+    refreshSyncUi()
+    setTimeout(() => location.reload(), 1000)
+    return r
   } catch (e) {
-    wdStat.value = '❌ ' + ((e && e.message) || e)
+    setSyncProviderStat(kind, '❌ ' + ((e && e.message) || e))
+    showToast('⬇️ ' + syncProviderName(kind) + ' 下载失败：' + ((e && e.message) || e), 'error')
+    return { ok: false, error: (e && e.message) || e }
   } finally {
-    wdBusy.value = false
+    setSyncProviderBusy(kind, false)
+    refreshSyncUi()
   }
 }
 function resetAll() {
@@ -2118,7 +2185,14 @@ function onPopState() {
   const ids = syncNavFromHistory()
   if (ids.length) window.dispatchEvent(new CustomEvent('app:nav-back', { detail: ids }))
 }
+function openDataSync() {
+  openSet()
+  setGroup.value = 'data'
+  refreshSyncUi()
+  setTimeout(() => scrollSet('set-data'), 120)
+}
 function goTab(k) {
+  if (k === 'sync') { openDataSync(); return }
   // 若有打开的浮层/面板：先关掉栈顶（回到当前层级）再切页
   if (nav.stack.length) {
     const e = navBack()
@@ -2170,11 +2244,13 @@ if (isNativeHost()) { try { installNativeBackBehavior() } catch (e) {} } // 自�
 onMounted(() => {
   authGateInit()
   clampFloatPos()
-  if (wdAuto.value || ghAuto.value) {
+  refreshSyncUi()
+  if (wdAuto.value || ghAuto.value || geAuto.value) {
     ensureSyncTimer()
     const st2 = readSyncState()
     setTimeout(() => {
       if (st2.kind === 'gh' && ghAuto.value) runGhSync(false).catch(() => {})
+      else if (st2.kind === 'ge' && geAuto.value) runGeSync(false).catch(() => {})
       else if (wdAuto.value) runWdAuto(false).catch(() => {})
     }, 2200)
   }
@@ -2318,8 +2394,8 @@ onUnmounted(() => {
         <button class="cost-pill" :class="{ warn: costToday > 0, live: costLive.active }" :title="costLive.active ? '🔴 正在调用 AI（' + (COST_FEATURES[costLive.feature] || costLive.feature) + ' · ' + (costLive.model || '') + '），完成自动记账' : '💰 AI 用量与花费（实时追踪）：点开查看明细、计价表、清空记录'" @click="costShow = true">
           💰 {{ fmtCost(costToday) }}<span v-if="costLive.active" class="cost-pill-live"></span>
         </button>
-        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" title="3D 学习数据驾驶舱：查看各板块学习数据的交互式 3D 场景" @click="store.tab = '3d'">
-          🌌 3D数据
+        <button class="btn" :class="{ on: setShow && setGroup === 'data' }" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" title="数据同步与保存：本地基础、Gitee、GitHub、WebDAV、导出导入" @click="openDataSync()">
+          💾 数据同步
         </button>
         <button v-if="nav.stack.length" class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1)); color: var(--hud-cyan)" title="返回上一层（也可按键盘 Esc / 浏览器返回）" @click="onPopState(); navBack()">← {{ nav.stack[nav.stack.length - 1].label }}</button>
         <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" @click="openExp('chat')">📤 导出</button>
@@ -2342,7 +2418,7 @@ onUnmounted(() => {
           </div>
           <div class="top-mm-row"><span class="status-pill"><span class="dot" :class="stDot"></span><span>{{ stStat }}</span></span></div>
           <button class="top-mm-it" @click="moreGo(() => costShow = true)">💰 用量与花费 {{ fmtCost(costToday) }}</button>
-          <button class="top-mm-it" @click="moreGo(() => store.tab = '3d')">🌌 3D数据</button>
+          <button class="top-mm-it" @click="moreGo(() => openDataSync())">💾 数据同步与保存</button>
           <button class="top-mm-it" @click="moreGo(() => openExp('chat'))">📤 导出</button>
           <button class="top-mm-it" @click="moreGo(() => openSet())">⚙️ 设置</button>
           <button class="top-mm-it" @click="moreGo(() => doTheme())">{{ theme === 'light' ? '🌙 深色' : '☀️ 浅色' }}</button>
@@ -2351,7 +2427,7 @@ onUnmounted(() => {
     </header>
     <ExamBar />
     <nav class="tabs">
-      <button v-for="t in visibleTabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k }" @click="goTab(t.k)">
+      <button v-for="t in visibleTabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k || (t.k === 'sync' && setShow && setGroup === 'data') }" @click="goTab(t.k)">
         {{ t.t }}
       </button>
     </nav>
@@ -2362,7 +2438,6 @@ onUnmounted(() => {
       <WrongPage @export="openExp('wrong')" @txt="exportWrongTxt()" @export-md="exportWrongMd()" />
     </div>
     <div class="pg" :class="{ on: store.tab === 'ck' }"><CockpitPage /></div>
-    <div class="pg" :class="{ on: store.tab === '3d' }"><Data3DPage /></div>
           <div class="pg" :class="{ on: store.tab === 'ths' }"><FloatPanel /></div>
     <ReviewHub />
     <!-- 设置弹窗 -->
@@ -3196,6 +3271,20 @@ onUnmounted(() => {
           <button class="btn btn-gh" @click="clearQuizLog()">🧹 清空出题历史</button>
           <span style="font-size: calc(11px * var(--ui-fs-scale, 1));color:var(--text3);align-self:center">已记录 {{ quizLogCount }} 条</span>
         </div>
+<div class="sec-t">🧭 本机版本 / 云端版本状态</div>
+<div class="sec-desc">先看状态再操作：上传会把本机当前版本写到云端；下载会把云端当前版本完整写回本机；智能合并会保留两端新增内容，日常最稳妥。云端时间以本机最近一次读取/同步结果为准，点击“下载云端最新”或“智能合并”会实时读取云端。</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin:6px 0 12px">
+  <div style="border:1px solid rgba(56,189,248,.28);border-radius:8px;padding:9px 11px;background:rgba(56,189,248,.06)">
+    <div style="font-size:calc(11px * var(--ui-fs-scale, 1));color:var(--text3)">📱 本机版本</div>
+    <b :style="{color: syncUi.localState === 'warn' ? 'var(--red)' : syncUi.localState === 'ok' ? 'var(--hud-cyan)' : 'var(--text2)'}">{{ syncUi.local }}</b>
+    <div style="font-size:calc(10.5px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:3px">上次同步版本：{{ syncUi.localT }}</div>
+  </div>
+  <div style="border:1px solid rgba(56,189,248,.28);border-radius:8px;padding:9px 11px;background:rgba(56,189,248,.06)">
+    <div style="font-size:calc(11px * var(--ui-fs-scale, 1));color:var(--text3)">☁️ 云端版本</div>
+    <b :style="{color: syncUi.remoteState === 'warn' ? 'var(--red)' : syncUi.remoteState === 'ok' ? 'var(--hud-cyan)' : 'var(--text2)'}">{{ syncUi.remote }}</b>
+    <div style="font-size:calc(10.5px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:3px">最近操作：{{ syncUi.action }} · {{ syncUi.actionT }}</div>
+  </div>
+</div>
 <div class="sec-t">🇨🇳 Gitee 自动互通（国内推荐，网页/iPad/安卓免翻墙直连）</div>
         <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>
         <div class="fld">
@@ -3207,8 +3296,10 @@ onUnmounted(() => {
           <input v-model="store.cfg.gitee.repo" autocomplete="off" placeholder="你的Gitee用户名/xingce-ai-cloud-sync（可留空）" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
-          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="geToggleAuto()">{{ geAuto ? '⏸ 关闭 Gitee 自动互通' : '▶ 开启 Gitee 自动互通' }}</button>
-          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGeSync(true)">🔄 立即同步 / 创建仓库</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="syncUpload('ge')">⬆️ 上传本机备份</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="syncDownload('ge')">⬇️ 下载云端最新</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGeSync(true)">🔀 智能合并 / 创建仓库</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="geToggleAuto()">{{ geAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
         </div>
         <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ geStat || '提示：Gitee 网页可直接同步，不需要 VPN；不同用户各自填自己的令牌，仓库会自动建在各自名下并保持私有。' }}
@@ -3226,8 +3317,10 @@ onUnmounted(() => {
           <input v-model="store.cfg.github.repo" autocomplete="off" placeholder="你的GitHub用户名/xingce-ai-cloud-sync（可留空）" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
-          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭 GitHub 自动互通' : '▶ 开启 GitHub 自动互通' }}</button>
-          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGhSync(true)">🔄 立即同步 / 创建仓库</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="syncUpload('gh')">⬆️ 上传本机备份</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="syncDownload('gh')">⬇️ 下载云端最新</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runGhSync(true)">🔀 智能合并 / 创建仓库</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="ghToggleAuto()">{{ ghAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
         </div>
         <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ ghStat || '提示：不同用户请各自填自己的 GitHub Token；首次同步会在你自己的账户下新建私人仓库，数据不会写入别人的仓库。Token 有有效期，到期后重新填写即可。' }}
@@ -3254,10 +3347,10 @@ onUnmounted(() => {
           <input v-model="store.cfg.webdav.pass" type="password" autocomplete="new-password" @change="saveCfg()" />
         </div>
         <div class="exp-choices">
-          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="wdToggleAuto()">{{ wdAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
-          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runWdAuto(true)">🔄 立即同步</button>
-          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="wdUp()">⬆️ 上传备份</button>
-          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="wdDown()">⬇️ 下载备份</button>
+          <button class="btn btn-pri" :disabled="wdBusy || ghBusy || geBusy" @click="syncUpload('wd')">⬆️ 上传本机备份</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="syncDownload('wd')">⬇️ 下载云端最新</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="runWdAuto(true)">🔀 智能合并</button>
+          <button class="btn btn-gh" :disabled="wdBusy || ghBusy || geBusy" @click="wdToggleAuto()">{{ wdAuto ? '⏸ 关闭自动互通' : '▶ 开启自动互通' }}</button>
         </div>
         <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-bottom: 8px">
           {{ wdStat || '提示：坚果云先在官网「安全选项」生成应用密码（不是登录密码）；地址会自动填好，一般无需手改。自定义地址以 .json 结尾（同一 URL 覆盖旧备份）。' }}

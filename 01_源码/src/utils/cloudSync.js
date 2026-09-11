@@ -2,7 +2,7 @@
 // 网页 / iPad / 安卓共用同一份 WebDAV 文件；同步时先把云端拉下来与本机做集合级合并，
 // 避免“后打开的一端整包覆盖另一端”。xc_cfg（含 API Key / WebDAV 密码）与纯本机 UI 键不同步。
 import { store } from '../store'
-import { collectAll } from './dataBackup'
+import { collectAll, restoreAll } from './dataBackup'
 import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav'
 import { WRONG_DELETED_KEY, filterDeletedWrongs, parseWrongDeleted } from './wrongDelete'
 
@@ -14,7 +14,7 @@ const LOCAL_ONLY_KEYS = new Set([
   'xc_draft_mode', 'xc_draft_size', 'xc_draft_mini_pos', 'xc_weak_toast',
   'xc_wq_due_tip', 'xc_pdf_tree', 'xc_pdf_tree_name', 'xc_pdf_online_order',
   'xc_native_tree', 'xc_native_tree_name', 'xc_tts_migrated', 'xc_wq_subj_v1',
-  'xc_sync_state'
+  'xc_sync_state', 'xc_sync_device_id'
 ])
 const LOCAL_ONLY_PREFIXES = [
   'xc_pet_pos_', 'xc_music_pos_', 'xc_pet_panel_pos_', 'xc_draft_mini_pos_'
@@ -74,23 +74,76 @@ export function readSyncState() {
       auto: !!s.auto,
       last: Number(s.last) || 0,
       kind: s.kind === 'gh' || s.kind === 'ge' ? s.kind : 'wd',
+      lastStat: String(s.lastStat || '').slice(0, 300),
+      lastAction: String(s.lastAction || ''),
+      at: Number(s.at) || Number(s.last) || 0,
+      localT: Number(s.localT) || 0,
+      remoteT: Number(s.remoteT) || 0,
+      baseHash: String(s.baseHash || ''),
+      remoteDevice: s.remoteDevice && typeof s.remoteDevice === 'object' ? s.remoteDevice : null,
       base: s.base && typeof s.base === 'object' ? s.base : {}
     }
   } catch (e) {
-    return { auto: false, last: 0, kind: 'wd', base: {} }
+    return { auto: false, last: 0, kind: 'wd', lastStat: '', lastAction: '', at: 0, localT: 0, remoteT: 0, baseHash: '', remoteDevice: null, base: {} }
   }
 }
 
 export function saveSyncState(p) {
   try {
+    const prev = readSyncState()
+    const src = p && typeof p === 'object' ? p : {}
+    const remoteDevice = src.remoteDevice === null
+      ? null
+      : src.remoteDevice && typeof src.remoteDevice === 'object'
+        ? src.remoteDevice
+        : prev.remoteDevice
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
-      kind: p.kind === 'gh' || p.kind === 'ge' ? p.kind : 'wd',
-      auto: !!p.auto,
-      last: Number(p.last) || Date.now(),
-      lastStat: String(p.lastStat || '').slice(0, 300),
-      base: p.base || {}
+      kind: src.kind === 'gh' || src.kind === 'ge' ? src.kind : (src.kind === 'wd' ? 'wd' : prev.kind),
+      auto: src.auto === undefined ? prev.auto : !!src.auto,
+      last: Number(src.last === undefined ? prev.last : src.last) || 0,
+      lastStat: String(src.lastStat === undefined ? prev.lastStat : src.lastStat || '').slice(0, 300),
+      lastAction: String(src.lastAction === undefined ? prev.lastAction : src.lastAction || ''),
+      at: Number(src.at === undefined ? prev.at : src.at) || 0,
+      localT: Number(src.localT === undefined ? prev.localT : src.localT) || 0,
+      remoteT: Number(src.remoteT === undefined ? prev.remoteT : src.remoteT) || 0,
+      baseHash: String(src.baseHash === undefined ? prev.baseHash : src.baseHash || ''),
+      remoteDevice,
+      base: src.base && typeof src.base === 'object' ? src.base : prev.base
     }))
   } catch (e) {}
+}
+
+// 设备标识只留在本机，用于让用户在网页端/手机端之间辨认“最新一版是谁写的”。
+export function syncDeviceInfo() {
+  let id = ''
+  try {
+    id = localStorage.getItem('xc_sync_device_id') || ''
+    if (!id) {
+      id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+      localStorage.setItem('xc_sync_device_id', id)
+    }
+  } catch (e) {
+    id = id || 'dev_unknown'
+  }
+  const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+  const android = /Android/i.test(ua)
+  const ios = /iPhone|iPad|iPod/i.test(ua)
+  const label = android ? '安卓端' : ios ? 'iOS/iPad 端' : mobile ? '手机端' : '网页/桌面端'
+  return { id, label }
+}
+
+export function makeCloudEnvelope(data) {
+  return { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), device: syncDeviceInfo(), data }
+}
+
+export function cloudEnvelopeMeta(raw) {
+  const d = raw && raw.device && typeof raw.device === 'object' ? raw.device : {}
+  return {
+    t: Number(raw && raw.t) || 0,
+    deviceId: String(d.id || ''),
+    deviceLabel: String(d.label || '其他设备')
+  }
 }
 
 function hashString(s) {
@@ -249,6 +302,22 @@ function fingerprint(data) {
   return JSON.stringify(sortedJson(data))
 }
 
+export function syncDataHash(dataOrEnvelope) {
+  const scope = syncScopeFromBackup(dataOrEnvelope)
+  return hashString(fingerprint(scope))
+}
+
+export function syncOverview() {
+  const state = readSyncState()
+  const currentHash = syncDataHash(collectAll())
+  return {
+    ...state,
+    currentHash,
+    known: !!state.baseHash,
+    dirty: !!state.baseHash && currentHash !== state.baseHash
+  }
+}
+
 function compactForStorage(key, raw) {
   if (key === 'xc_attempts') {
     try {
@@ -379,10 +448,91 @@ export async function runCloudSync() {
   hydrateStoreFromPlan(plan)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote) {
-    const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
+    const body = makeCloudEnvelope(plan.merged)
     await webdavPutFile(url, hdrs, JSON.stringify(body))
     putTs = body.t
   }
-  saveSyncState({ kind: state.kind, auto: state.auto, last: putTs, lastStat: '已同步 ' + new Date(putTs).toLocaleString(), base: scalarBaseline(plan.merged) })
-  return { ok: true, changed: plan.changed > 0, ts: putTs }
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const own = syncDeviceInfo()
+  const finalTs = putTs || Date.now()
+  saveSyncState({
+    ...state,
+    last: finalTs,
+    lastAction: 'merge',
+    at: Date.now(),
+    localT: finalTs,
+    remoteT: finalTs,
+    remoteDevice: remoteMeta.t ? { id: remoteMeta.deviceId, label: remoteMeta.deviceLabel } : own,
+    baseHash: syncDataHash(plan.merged),
+    lastStat: '智能合并 ' + new Date(finalTs).toLocaleString(),
+    base: scalarBaseline(plan.merged)
+  })
+  return { ok: true, changed: plan.changed > 0, ts: finalTs, direction: 'merge' }
+}
+
+// 单向上传：把当前设备的数据作为新版本覆盖云端。云端若能读到且比本机上次记录更新，先返回 needsConfirm 交给界面二次确认。
+export async function runCloudUpload(options = {}) {
+  const w = (store.cfg && store.cfg.webdav) || {}
+  if (!w.url || !w.url.trim()) throw new Error('请先填写 WebDAV 地址')
+  if (!w.pass) throw new Error('请填写 WebDAV 密码/应用密码')
+  const url = cloudSyncUrl()
+  const hdrs = wdAuthHeaders(w.user, w.pass)
+  const getRes = await webdavGet(url, hdrs)
+  let remoteRaw = null
+  if (getRes) remoteRaw = await getRes.json()
+  const state = readSyncState()
+  const local = collectAll()
+  const sameAsLocal = remoteRaw ? syncDataHash(remoteRaw) === syncDataHash(local) : false
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'wd' || meta.t > state.remoteT)) {
+    return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel }
+  }
+  const body = makeCloudEnvelope(local.data)
+  await webdavPutFile(url, hdrs, JSON.stringify(body))
+  saveSyncState({
+    ...state,
+    last: body.t,
+    lastAction: 'upload',
+    at: Date.now(),
+    localT: body.t,
+    remoteT: body.t,
+    remoteDevice: syncDeviceInfo(),
+    baseHash: syncDataHash(body),
+    lastStat: '已上传本机版本 ' + new Date(body.t).toLocaleString()
+  })
+  return { ok: true, changed: true, ts: body.t, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel }
+}
+
+// 单向下载：把云端当前版本完整写回本机。本机若有未上传修改，先返回 needsConfirm，避免误覆盖。
+export async function runCloudDownload(options = {}) {
+  const w = (store.cfg && store.cfg.webdav) || {}
+  if (!w.url || !w.url.trim()) throw new Error('请先填写 WebDAV 地址')
+  if (!w.pass) throw new Error('请填写 WebDAV 密码/应用密码')
+  const url = cloudSyncUrl()
+  const hdrs = wdAuthHeaders(w.user, w.pass)
+  const getRes = await webdavGet(url, hdrs)
+  if (!getRes) throw new Error('云端还没有同步文件；请先在任一设备点「⬆️ 上传本机」')
+  const remoteRaw = await getRes.json()
+  if (!remoteRaw || (!remoteRaw.data && !remoteRaw.app)) throw new Error('云端同步文件格式不对')
+  const state = readSyncState()
+  const local = collectAll()
+  const remoteHash = syncDataHash(remoteRaw)
+  const localHash = syncDataHash(local)
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  if (localHash !== remoteHash && !options.force && (state.kind !== 'wd' || (state.baseHash && localHash !== state.baseHash))) {
+    return { ok: false, needsConfirm: true, direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel }
+  }
+  const n = restoreAll(remoteRaw)
+  saveSyncState({
+    ...state,
+    last: Date.now(),
+    lastAction: 'download',
+    at: Date.now(),
+    localT: meta.t || Date.now(),
+    remoteT: meta.t || Date.now(),
+    remoteDevice: { id: meta.deviceId, label: meta.deviceLabel },
+    baseHash: remoteHash,
+    lastStat: '已下载云端版本 ' + new Date(meta.t || Date.now()).toLocaleString()
+  })
+  return { ok: true, changed: n > 0, ts: meta.t || Date.now(), direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel }
 }

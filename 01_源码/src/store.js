@@ -30,6 +30,7 @@ const D = () => ({
   // 阿里百炼 TTS（v3.8.91，真实实测 qwen3-tts-instruct-flash 可用；¥0.8/万字符级）
   ttsDash: { key: '', url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', voiceCustom: '', customVoices: [] },
   ttsEdgeVoice: 'zh-CN-XiaoxiaoNeural',
+  microScriptOn: true, // AI 动画微课：播放每一幕前先生成教案式讲课稿，再交给 TTS 朗读
   voiceCustom: { hidden: {}, names: {} }, // 音色市场自定义：隐藏/重命名已有音色
   petVoice: true, // 萌宠语音朗读总开关（配合真人 TTS 引擎）
   petSkin: 'lixingyun', // 萌宠角色皮肤：xueshen=薛神 / zhangruonan=章若楠 / lixingyun=李星云 / jiruxue=姬如雪 / custom=自定义人物

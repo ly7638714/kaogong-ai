@@ -16,6 +16,7 @@ export function symbolsToChinese(text) {
   t = t.replace(/(\d+)\/(\d+)/g, (m, a, b) => a + '分之' + b)
   // 数学符号
   const MAP = {
+    '=>': '推出', '->': '推出', '<-': '得到', '<=': '小于等于', '>=': '大于等于', '!=': '不等于', '~=': '约等于',
     '→': '推出', '⇒': '推出', '⟹': '推出', '⟶': '推出', '➜': '推出',
     '←': '得到', '⇐': '得到', '⟵': '得到',
     '↔': '相互推出', '⇔': '等价于', '⟺': '等价于',
@@ -37,15 +38,51 @@ export function symbolsToChinese(text) {
   // 清理重复空格
   return t.replace(/\s{2,}/g, ' ').trim()
 }
+
+// 公式转口语：不把公式丢掉。先保留公式内容，再翻译常见 LaTeX/数学写法。
+function latexToSpeech(text) {
+  let t = String(text || '')
+  t = t.replace(/\$\$([\s\S]*?)\$\$/g, ' $1 ')
+  t = t.replace(/\$([^$]+)\$/g, ' $1 ')
+  t = t.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$1除以$2')
+  t = t.replace(/\\dfrac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$1除以$2')
+  t = t.replace(/\\tfrac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$1除以$2')
+  t = t.replace(/\\sqrt\s*\[3\]\s*\{([^{}]+)\}/g, '三次根号$1')
+  t = t.replace(/\\sqrt\s*\{([^{}]+)\}/g, '根号$1')
+  t = t.replace(/\\text\s*\{([^{}]+)\}/g, '$1')
+  t = t.replace(/\\mathrm\s*\{([^{}]+)\}/g, '$1')
+  t = t.replace(/\\(?:left|right|limits|,|;|!|\s)/g, ' ')
+  t = t.replace(/\\times|\\cdot/g, '乘')
+  t = t.replace(/\\div/g, '除以')
+  t = t.replace(/\\pm/g, '正负')
+  t = t.replace(/\\mp/g, '负正')
+  t = t.replace(/\\le(?:q|s)?\b/g, '小于等于')
+  t = t.replace(/\\ge(?:q|s)?\b/g, '大于等于')
+  t = t.replace(/\\ne(?:q)?\b/g, '不等于')
+  t = t.replace(/\\approx/g, '约等于')
+  t = t.replace(/\\equiv/g, '恒等于')
+  t = t.replace(/\\to|\\rightarrow|\\Rightarrow/g, '推出')
+  t = t.replace(/\\leftarrow|\\Leftarrow/g, '得到')
+  t = t.replace(/\\infty/g, '无穷大')
+  t = t.replace(/\\pi/g, '派')
+  t = t.replace(/\\alpha/g, '阿尔法')
+  t = t.replace(/\\beta/g, '贝塔')
+  t = t.replace(/\\Delta/g, '变化量')
+  t = t.replace(/\^\{?2\}?/g, '的平方')
+  t = t.replace(/\^\{?3\}?/g, '的立方')
+  t = t.replace(/\^\{?([^{}\s]+)\}?/g, '的$1次方')
+  t = t.replace(/[{}]/g, ' ')
+  t = t.replace(/\\[A-Za-z]+/g, ' ')
+  return t
+}
 export function cleanSpeechText(text) {
-  const cleaned = stripSpeechNoise(String(text || ''))
+  const cleaned = stripSpeechNoise(latexToSpeech(String(text || '')))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/~~~[\s\S]*?~~~/g, ' ')
     .replace(/`[^`]*`/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\$\$[\s\S]*?\$\$/g, ' ')
-    .replace(/\$[^$]*\$/g, ' ')
+    .replace(/\${1,2}/g, ' ')
     .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/[#*_~>`|]/g, ' ')
@@ -74,14 +111,14 @@ function ensureSpeechBoundary(line) {
 // 分块之间的停顿时长：文本先补过边界标点，这里据此调度真实静音，避免“无标点连读”
 export function speechPauseMs(text) {
   const t = String(text || '').trim()
-  if (/[。！？…]$/.test(t)) return 240
-  if (/[；;]$/.test(t)) return 170
-  if (/[，,：:]$/.test(t)) return 120
-  return 90
+  if (/[。！？…]$/.test(t)) return 150
+  if (/[；;]$/.test(t)) return 100
+  if (/[，,：:]$/.test(t)) return 70
+  return 50
 }
 
 // 朗读去噪：按行去掉系统/功能提示横幅，只保留真正要听的内容
-const SPEECH_NOISE_RE = /^(?:【|\[)?\s*(?:温馨提示|提示|说明|注意|免责声明|官方说法|官方口径|使用说明|以上说明|未匹配到已蒸馏方法)(?:\]|】)?\s*[：:]?\s*/i
+const SPEECH_NOISE_RE = /^(?:【|\[)?\s*(?:温馨提示|提示|说明|注意|免责声明|官方说法|官方口径|使用说明|以上说明|未匹配到已蒸馏方法|依据卡|知识卡|参考卡|引用卡|资料卡|命中卡|命中知识卡|提示卡|方法卡|教材依据|组卷来源|材料来源|数据来源|卡片来源|来源|出处)(?:\]|】)?\s*[：:]?\s*/i
 export function stripSpeechNoise(text) {
   return String(text || '')
     .split(/\r?\n/)

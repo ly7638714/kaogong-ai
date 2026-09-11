@@ -34,6 +34,18 @@ const examplePath = computed(() => String((example.value && example.value.path) 
           <stop offset="1" stop-color="#15263b" />
         </linearGradient>
         <filter :id="'alsGlow' + uid"><feGaussianBlur stdDeviation="3" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+        <linearGradient :id="'alsSkin' + uid" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#ffe4d2" />
+          <stop offset="1" stop-color="#f5bfa0" />
+        </linearGradient>
+        <linearGradient :id="'alsHair' + uid" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#334155" />
+          <stop offset="1" stop-color="#111827" />
+        </linearGradient>
+        <linearGradient :id="'alsBlazer' + uid" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#3b82f6" />
+          <stop offset="1" stop-color="#1e40af" />
+        </linearGradient>
       </defs>
       <rect width="960" height="430" rx="18" :fill="'url(#alsBg' + uid + ')'" />
       <rect x="22" y="22" width="560" height="386" rx="14" fill="rgba(255,255,255,.025)" stroke="rgba(148,163,184,.18)" />
@@ -41,27 +53,58 @@ const examplePath = computed(() => String((example.value && example.value.path) 
 
       <!-- 动画教师角色：连续眨眼、口型、摆臂和指示动作 -->
       <g class="als-teacher">
-        <ellipse cx="765" cy="390" rx="92" ry="12" fill="rgba(0,0,0,.28)" />
+        <ellipse cx="765" cy="388" rx="96" ry="13" fill="rgba(0,0,0,.3)" />
         <g>
           <animateTransform attributeName="transform" type="translate" values="0 0;0 -7;0 0" dur="2.8s" repeatCount="indefinite" />
-          <path d="M690 370 Q700 270 765 260 Q830 270 840 370 Z" fill="#2563eb" />
-          <path d="M711 302 Q765 342 819 302 L808 369 Q765 392 722 369 Z" fill="#1d4ed8" />
-          <circle cx="765" cy="216" r="45" fill="#f3c7a7" stroke="#0f172a" stroke-width="3" />
-          <path d="M724 207 Q738 163 766 169 Q802 175 806 216 Q779 192 742 200 Q734 206 724 207" fill="#263244" />
-          <ellipse cx="748" cy="216" rx="5" ry="7" fill="#0f172a"><animate attributeName="ry" values="7;7;1;7" dur="3.1s" repeatCount="indefinite" /></ellipse>
-          <ellipse cx="784" cy="216" rx="5" ry="7" fill="#0f172a"><animate attributeName="ry" values="7;7;1;7" dur="3.1s" repeatCount="indefinite" /></ellipse>
-          <path d="M747 245 Q765 260 784 245" fill="none" stroke="#9f1239" stroke-width="4" stroke-linecap="round">
-            <animate attributeName="d" values="M747 245 Q765 258 784 245;M747 245 Q765 267 784 245;M747 245 Q765 258 784 245" dur=".42s" repeatCount="indefinite" />
+          <path d="M706 230 C688 158 716 124 765 122 C815 122 844 158 826 232 C843 255 838 296 823 319 L805 307 C820 274 817 240 805 210 C792 182 776 170 758 170 C739 170 724 183 716 204 C712 222 720 243 731 255 L712 260 C701 248 701 237 706 230 Z" :fill="'url(#alsHair' + uid + ')'" />
+          <path d="M744 253 C751 270 779 270 786 253 L793 293 L737 293 Z" :fill="'url(#alsSkin' + uid + ')'" stroke="#0f172a" stroke-width="2" />
+          <path d="M690 370 C698 305 723 279 765 279 C808 279 833 305 841 370 Z" :fill="'url(#alsBlazer' + uid + ')'" stroke="#0f172a" stroke-width="3" />
+          <path d="M742 284 L765 319 L789 284 L803 370 L728 370 Z" fill="#f8fafc" stroke="#dbeafe" stroke-width="2" />
+          <path d="M765 319 L748 370 L783 370 Z" fill="#dc2626" stroke="#991b1b" stroke-width="2" />
+          <path d="M724 283 L765 319 L739 286 Z" fill="#1d4ed8" opacity=".96" />
+          <path d="M807 283 L765 319 L791 286 Z" fill="#1d4ed8" opacity=".96" />
+          <ellipse cx="716" cy="219" rx="10" ry="15" :fill="'url(#alsSkin' + uid + ')'" stroke="#0f172a" stroke-width="2" />
+          <ellipse cx="814" cy="219" rx="10" ry="15" :fill="'url(#alsSkin' + uid + ')'" stroke="#0f172a" stroke-width="2" />
+          <path d="M765 157 C731 157 711 181 711 213 C711 250 737 274 765 274 C794 274 820 250 820 213 C820 181 799 157 765 157 Z" :fill="'url(#alsSkin' + uid + ')'" stroke="#0f172a" stroke-width="3" />
+          <path d="M711 210 C705 167 733 143 765 143 C799 143 824 164 821 207 C811 186 797 176 781 176 C768 190 744 190 727 199 C719 203 714 207 711 210 Z" :fill="'url(#alsHair' + uid + ')'" />
+          <path d="M728 175 C744 156 780 152 799 170" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="4" stroke-linecap="round" />
+          <path d="M714 207 C709 234 713 252 722 267 L733 252 C724 239 722 223 724 208 Z" :fill="'url(#alsHair' + uid + ')'" />
+          <path d="M816 207 C821 234 817 252 809 267 L798 251 C807 238 809 222 807 208 Z" :fill="'url(#alsHair' + uid + ')'" />
+          <path d="M731 201 Q741 195 751 202" fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" />
+          <path d="M779 202 Q789 195 799 201" fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" />
+          <ellipse cx="743" cy="220" rx="12" ry="15" fill="#fff" stroke="#1e293b" stroke-width="2">
+            <animate attributeName="ry" values="15;15;3;15" dur="3.2s" repeatCount="indefinite" />
+          </ellipse>
+          <ellipse cx="787" cy="220" rx="12" ry="15" fill="#fff" stroke="#1e293b" stroke-width="2">
+            <animate attributeName="ry" values="15;15;3;15" dur="3.2s" repeatCount="indefinite" />
+          </ellipse>
+          <circle cx="745" cy="223" r="8" fill="#2563eb" />
+          <circle cx="785" cy="223" r="8" fill="#2563eb" />
+          <circle cx="747" cy="225" r="3.5" fill="#0f172a" />
+          <circle cx="787" cy="225" r="3.5" fill="#0f172a" />
+          <circle cx="742" cy="218" r="3" fill="#fff" />
+          <circle cx="782" cy="218" r="3" fill="#fff" />
+          <path d="M730 210 Q743 204 755 211" fill="none" stroke="#1e293b" stroke-width="2.5" stroke-linecap="round" />
+          <path d="M775 211 Q787 204 801 210" fill="none" stroke="#1e293b" stroke-width="2.5" stroke-linecap="round" />
+          <ellipse cx="733" cy="240" rx="12" ry="6" fill="#fb7185" opacity=".25" />
+          <ellipse cx="797" cy="240" rx="12" ry="6" fill="#fb7185" opacity=".25" />
+          <path d="M758 236 Q765 240 772 236" fill="none" stroke="#c08457" stroke-width="2" stroke-linecap="round" />
+          <path d="M752 251 Q765 263 779 251" fill="none" stroke="#9f1239" stroke-width="3.5" stroke-linecap="round">
+            <animate attributeName="d" values="M752 251 Q765 260 779 251;M752 251 Q765 268 779 251;M752 251 Q765 260 779 251" dur=".42s" repeatCount="indefinite" />
           </path>
-          <g transform="translate(805 285)">
-            <animateTransform attributeName="transform" type="rotate" values="0 805 285;18 805 285;34 805 285;8 805 285;0 805 285" dur="3.2s" repeatCount="indefinite" />
-            <path d="M0 0 L86 -28" stroke="#f3c7a7" stroke-width="18" stroke-linecap="round" />
-            <path d="M78 -28 L118 -44" stroke="#fbbf24" stroke-width="7" stroke-linecap="round" />
-            <circle cx="119" cy="-45" r="4" fill="#fbbf24" />
+          <path d="M713 210 L727 214 L727 226 L713 223 Z M803 214 L817 210 L817 223 L803 226 Z" fill="#bfdbfe" opacity=".24" stroke="#93c5fd" stroke-width="2" />
+          <path d="M727 218 L743 218 M787 218 L803 218" stroke="#93c5fd" stroke-width="2" opacity=".7" />
+          <g transform="translate(803 294)">
+            <animateTransform attributeName="transform" type="rotate" values="0 803 294;15 803 294;30 803 294;7 803 294;0 803 294" dur="3.2s" repeatCount="indefinite" />
+            <path d="M0 0 C36 8 57 28 71 48" fill="none" stroke="#1e40af" stroke-width="22" stroke-linecap="round" />
+            <path d="M64 45 C75 55 84 62 90 62" fill="none" :stroke="'url(#alsSkin' + uid + ')'" stroke-width="14" stroke-linecap="round" />
+            <path d="M89 61 L132 38" stroke="#fbbf24" stroke-width="7" stroke-linecap="round" />
+            <circle cx="134" cy="37" r="5" fill="#fbbf24" />
           </g>
-          <g transform="translate(720 285)">
-            <animateTransform attributeName="transform" type="rotate" values="0 720 285;-12 720 285;8 720 285;0 720 285" dur="3.6s" repeatCount="indefinite" />
-            <path d="M0 0 L-58 42" stroke="#f3c7a7" stroke-width="18" stroke-linecap="round" />
+          <g transform="translate(724 294)">
+            <animateTransform attributeName="transform" type="rotate" values="0 724 294;-10 724 294;5 724 294;0 724 294" dur="3.6s" repeatCount="indefinite" />
+            <path d="M0 0 C-31 10 -47 30 -55 51" fill="none" stroke="#1e40af" stroke-width="22" stroke-linecap="round" />
+            <path d="M-49 49 C-59 59 -67 64 -73 63" fill="none" :stroke="'url(#alsSkin' + uid + ')'" stroke-width="14" stroke-linecap="round" />
           </g>
           <rect x="742" y="318" width="46" height="24" rx="9" fill="rgba(15,23,42,.78)" stroke="rgba(255,255,255,.25)" />
           <text x="765" y="335" text-anchor="middle" fill="#fff" font-size="14">{{ type === 'trap' ? '避坑' : type === 'compare' ? '对比' : type === 'checkpoint' ? '检验' : '讲解' }}</text>

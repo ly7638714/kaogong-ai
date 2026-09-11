@@ -42,25 +42,28 @@ export function smoothWavBytes(input, opts = {}) {
     const winSize = Math.max(1, Math.floor(rate / 100))
     const winInfo = (w) => {
       const s0 = w * winSize, s1 = Math.min(s0 + winSize, frames)
-      let rms = 0, zc = 0
+      let rms = 0, absSum = 0, zc = 0
       for (let f = s0; f < s1; f++) {
         let peak = 0
         for (let c = 0; c < ch; c++) { const v = Math.abs(read(f, c)); if (v > peak) peak = v }
         rms += peak * peak
+        absSum += peak
         if (f > s0) { const a = read(f - 1, 0), b = read(f, 0); if ((a < 0) !== (b < 0)) zc++ }
       }
       const n = s1 - s0
-      return { rms: Math.sqrt(rms / n), zcr: zc / n }
+      const rr = Math.sqrt(rms / n)
+      const meanAbs = absSum / Math.max(1, n)
+      return { rms: rr, zcr: zc / n, crest: meanAbs > 0 ? rr / meanAbs : 9 }
     }
     const rmsThresh = Math.max(90, 0.012 * 32767)
-    const zcrTone = 0.055
     const maxWin = Math.floor(rate * 4 / winSize) // 最多扫 4s 的开头提示音/静音（智谱 GLM 开头提示音可达 ~2s）
     // 开头：跳过 静音 或 纯音(嘟嘟) —— 直到遇到语音样（高过零率）
     let start = 0
     for (let w = 0; w < maxWin && w < Math.ceil(frames / winSize); w++) {
       const info = winInfo(w)
       if (info.rms < rmsThresh) { start = w * winSize + winSize; continue } // 静音
-      if (info.zcr < zcrTone) { start = w * winSize + winSize; continue } // 纯音（嘟嘟/叮叮）
+      if (info.zcr < 0.015) { start = w * winSize + winSize; continue } // 低频嗡声/底噪
+      if (info.zcr > 0.075 && info.crest < 1.45) { start = w * winSize + winSize; continue } // 纯音（嘟嘟/叮叮）
       break // 语音开始
     }
     // 结尾：去掉末尾静音（最多 500ms）
@@ -73,6 +76,8 @@ export function smoothWavBytes(input, opts = {}) {
       break
     }
     if (end - start < 32) return input
+    // 检测异常时宁可保留原音频，也不要因为提示音/静音误判把整段正文裁掉。
+    if (end - start < frames * 0.25) return input
     const newFrames = end - start
     const newDataLen = newFrames * blockAlign
     // 重建标准 WAV（丢弃 AIGC/LIST 元数据，浏览器播放更稳）
@@ -87,7 +92,7 @@ export function smoothWavBytes(input, opts = {}) {
     dv.setUint16(32, blockAlign, true); dv.setUint16(34, bits, true)
     dv.setUint32(40, newDataLen, true)
     const fadeFrames = Math.max(1, Math.floor(rate * 0.006))
-    const applyFade = opts.fade !== false
+    const applyFade = opts.fade === true
     for (let fi = 0; fi < newFrames; fi++) {
       let f = 1
       if (applyFade) {

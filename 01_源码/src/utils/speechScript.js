@@ -8,7 +8,7 @@
 //  - 复用 chatOnce（OpenAI 兼容协议 + 成本记录 + 自动重试），非流式、小预算、短超时
 import { store } from '../store'
 import { chatOnce } from '../api/client'
-import { stripSpeechNoise } from './tts/clean'
+import { cleanSpeechText } from './tts/clean'
 
 // 当前是否启用并可用
 export function rdCfg() {
@@ -38,6 +38,9 @@ const SHORT_AS_IS_MAX = 90
 
 // 场景提示：让题干和解析不要被同一套“卖萌化”改写规则污染
 function speechUserRule(kind) {
+  if (kind === 'lesson') {
+    return '这是动画微课中的一个教学场景。请写成老师面对学生现场讲授的教案式口播稿：先用一句话点明本场景要解决的知识点，再用大白话讲清“为什么这样做、具体怎么做、最容易错在哪里”，最后给一句能马上执行的动作提示。必须紧扣当前知识点和场景画面，不能泛泛介绍，不能加入场景中没有的新结论，也不要照读标题。'
+  }
   if (kind === 'quiz') {
     return '这是题干/选项/判题内容。请像老师现场念题给考生听：关键条件和选项逐个读清，字母编号不能丢；信息太多时允许把修饰语拆成短句，但绝不能为了顺口改写数字、年份、单位或逻辑关系。'
   }
@@ -50,6 +53,7 @@ function speechUserRule(kind) {
 // 通过 readCtx.type / 文本特征判断朗读场景；拿不准时按通用答疑处理
 export function speechScriptKind(raw, hint) {
   const t = String(hint || '')
+  if (t === 'lesson') return 'lesson'
   if (/^(quiz|solid|redo|wrong|chat)/.test(t) && t !== 'chat') return 'quiz'
   if (/^(theory|explain|kb)/.test(t)) return 'explain'
   const s = String(raw || '')
@@ -60,7 +64,8 @@ export function speechScriptKind(raw, hint) {
 
 // 把原文转成“可直接朗读的讲稿”；不可用/失败一律返回原文
 export async function speakReadyText(raw, opts = {}) {
-  const src = stripSpeechNoise(String(raw || '').trim())
+  // 先做一次统一正文清洗和符号/公式口语化，再交给讲稿模型；防止“依据卡”、来源标注、代码和公式原样混入朗读。
+  const src = cleanSpeechText(String(raw || '').trim())
   if (!src) return src
   const c = rdCfg()
   if (!c) return src

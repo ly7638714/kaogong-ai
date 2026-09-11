@@ -67,11 +67,13 @@ export async function slideSynthesize(chunks, worker, onChunk, W = 5) {
 }
 // ============ 统一音频播放器（一次只播一个）============
 let _player = { audio: null, url: '' }
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=='
 export function stopPlayback() {
-  const p = _player
-  _player = { audio: null, url: '' }
-  if (p.audio) { try { p.audio.pause() } catch (e) {} }
-  if (p.url) { try { URL.revokeObjectURL(p.url) } catch (e) {} }
+  if (_player.audio) {
+    try { _player.audio.onended = null; _player.audio.onerror = null; _player.audio.pause() } catch (e) {}
+  }
+  if (_player.url) { try { URL.revokeObjectURL(_player.url) } catch (e) {} }
+  _player.url = ''
 }
 export function playing() {
   try {
@@ -89,16 +91,32 @@ export function playBytes(bytes, mime) {
       const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes) : bytes
       const blob = new Blob([data], { type: mime || 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      _player = { audio, url }
+      const audio = _player.audio || (_player.audio = new Audio())
+      _player.url = url
       audio.onended = () => { stopPlayback(); resolve(true) }
       audio.onerror = () => { stopPlayback(); resolve(false) }
+      audio.muted = false
+      audio.src = url
       audio.play().catch(() => { stopPlayback(); resolve(false) })
     } catch (e) {
       stopPlayback()
       resolve(false)
     }
   })
+}
+
+// 用复用的 HTMLAudio 元素播放极短静音，给移动端后续异步生成的 TTS 音频留下播放权限。
+export function primePlayback() {
+  try {
+    const audio = _player.audio || (_player.audio = new Audio())
+    audio.muted = true
+    audio.src = SILENT_WAV
+    const p = audio.play()
+    if (p && typeof p.then === 'function') {
+      p.then(() => { try { audio.pause(); audio.currentTime = 0; audio.muted = false } catch (e) {} })
+        .catch(() => { try { audio.muted = false } catch (e) {} })
+    }
+  } catch (e) {}
 }
 
 // ============ WAV 平滑：正确解析块 + 去开头纯音(嘟嘟)/静音 + 淡入淡出 ============
@@ -155,7 +173,7 @@ export function spSetCallbacks(endCb, errCb) { _sp.endCb = endCb; _sp.errCb = er
 // ============ 无缝流式播放器（Web Audio 精确调度，采样点级无缝，零卡顿）============
 // 旧播放器每个分块单独建 Audio 元素，块间切换有加载/启动空隙 → 感觉卡顿。
 // 这里把每个分块解码成 AudioBuffer，按 ctx.currentTime 时间轴首尾精确衔接播放，像真人说话一样无缝隙。
-let _gap = { ctx: null, started: false, nextAt: 0, queue: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0 }
+let _gap = { ctx: null, started: false, nextAt: 0, queue: [], sources: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0 }
 // 解码串行链：decodeAudioData 是异步的，多个分块若并发解码会乱序完成，
 // 导致「后一块先开播、前一块解码完又叠加上来」（上一句没读完就响下一句）。
 // 用 promise 链把「解码+调度」严格串行化，保证永远按分块顺序无缝衔接。
@@ -232,21 +250,17 @@ function gapStart(audioBuf, meta) {
     }
     const src = ctx.createBufferSource()
     src.buffer = audioBuf
-    const gain = ctx.createGain()
-    src.connect(gain)
-    gain.connect(ctx.destination)
+    src.connect(ctx.destination)
+    _gap.sources.push(src)
     const start = _gap.nextAt
     const end = start + audioBuf.duration
-    const fade = 0.006
-    // 块首/块尾做 6ms 极短淡入淡出：既不会让上下句断出“滴”，又不会形成可感知停顿
-    gain.gain.setValueAtTime(0.0001, start)
-    gain.gain.linearRampToValueAtTime(1, start + fade)
-    gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
-    gain.gain.linearRampToValueAtTime(0.0001, end)
+    // 分块拼接不再做渐入渐出：淡化点会被听成“忽大忽小/上下句没接上”；提示音已在 WAV 预处理阶段去掉。
     src.start(start, 0, audioBuf.duration + 0.002)
     const tailPause = (meta && meta.text ? speechPauseMs(meta.text) : 18) / 1000
     _gap.nextAt = end + tailPause
     src.onended = () => {
+      const si = _gap.sources.indexOf(src)
+      if (si >= 0) _gap.sources.splice(si, 1)
       _gap.active--
       if (_gap.active <= 0) _gap.queue = []
       if (_gap.active <= 0 && _gap.endCb && !_gap.stopping) {
@@ -262,8 +276,12 @@ export function gaplessStop() {
   _gap.token++
   _gapChain = Promise.resolve()
   _gap.stopping = true
-  try { if (_gap.ctx) _gap.ctx.close().catch(() => {}) } catch (e) {}
-  _gap.ctx = null
+  // 只停掉旧音源，保留已经由用户手势解锁的 AudioContext；移动端下一句才能在异步生成讲稿后继续出声。
+  for (const src of _gap.sources) {
+    try { src.stop() } catch (e) {}
+    try { src.disconnect() } catch (e) {}
+  }
+  _gap.sources = []
   _gap.started = false
   _gap.nextAt = 0
   _gap.queue = []
@@ -1066,12 +1084,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -1094,7 +1112,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 140, firstChunkSize: 26, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)

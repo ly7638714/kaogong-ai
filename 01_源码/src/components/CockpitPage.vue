@@ -300,7 +300,7 @@ const cpMastery = computed(() => {
     const rev = wq.filter((q) => q.reviewed || q.digested).length
     const attempts = done + wq.length
     const rate = done ? Math.round((ok / done) * 100) : null
-    // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达/CosmosScene 同口径）；无数据保持 null（看板显示"—"）
+    // 批次6-6A 掌握度收编：统一走 mastery.js（与统计雷达同口径）；无数据保持 null（看板显示"—"）
     let v = null
     if (attempts > 0) v = masteryOfPlate(p.key, store.wqs, { plates: p.subs, attempts: readAttempts() })
     // 近 7 天活跃

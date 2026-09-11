@@ -2,8 +2,8 @@
 // Gitee API 允许浏览器跨域；同步文件仍放在用户自己的私人仓库，学习数据不公开。
 /* global btoa, atob, FormData */
 import { store, saveCfg } from '../store'
-import { collectAll } from './dataBackup'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline } from './cloudSync'
+import { collectAll, restoreAll } from './dataBackup'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo } from './cloudSync'
 
 const GE_API = 'https://gitee.com/api/v5'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -228,19 +228,89 @@ export async function runGiteeSync() {
   const state = readSyncState()
   const plan = applyLocalMerge(collectAll(), remoteRaw, state.base)
   hydrateStoreFromPlan(plan)
-  const body = { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), data: plan.merged }
+  const body = makeCloudEnvelope(plan.merged)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   // 云端文件无法解析时仍用最新 sha 覆盖重建，不让用户手动去仓库删文件。
   if (!plan.sameAsRemote || (remoteFile && remoteFile.unreadable)) {
     await writeRemote(repoInfo.full, repoInfo.branch, JSON.stringify(body), remoteFile ? remoteFile.sha : '')
     putTs = body.t
   }
+  const finalTs = putTs || Date.now()
+  const remoteMeta = cloudEnvelopeMeta(remoteRaw)
+  const own = syncDeviceInfo()
   saveSyncState({
+    ...state,
     kind: 'ge',
-    auto: state.auto,
-    last: putTs,
-    lastStat: '已同步 ' + new Date(putTs).toLocaleString(),
+    last: finalTs,
+    lastAction: 'merge',
+    at: Date.now(),
+    localT: finalTs,
+    remoteT: finalTs,
+    remoteDevice: remoteMeta.t ? { id: remoteMeta.deviceId, label: remoteMeta.deviceLabel } : own,
+    baseHash: syncDataHash(plan.merged),
+    lastStat: 'Gitee 智能合并 ' + new Date(finalTs).toLocaleString(),
     base: syncBaseline(plan.merged)
   })
-  return { ok: true, changed: plan.changed > 0, ts: putTs, repo: repoInfo.full, created: repoInfo.created }
+  return { ok: true, changed: plan.changed > 0, ts: finalTs, repo: repoInfo.full, created: repoInfo.created, direction: 'merge' }
+}
+
+export async function runGiteeUpload(options = {}) {
+  const g = geCfg()
+  if (!g.token || !String(g.token).trim()) throw new Error('请先填写 Gitee 私人令牌')
+  const repoInfo = await ensurePrivateRepo()
+  const remoteFile = await readRemote(repoInfo.full, repoInfo.branch)
+  const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
+  const state = readSyncState()
+  const local = collectAll()
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  const sameAsLocal = remoteRaw ? syncDataHash(remoteRaw) === syncDataHash(local) : false
+  if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'ge' || meta.t > state.remoteT)) {
+    return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
+  }
+  const body = makeCloudEnvelope(local.data)
+  await writeRemote(repoInfo.full, repoInfo.branch, JSON.stringify(body), remoteFile ? remoteFile.sha : '')
+  saveSyncState({
+    ...state,
+    kind: 'ge',
+    last: body.t,
+    lastAction: 'upload',
+    at: Date.now(),
+    localT: body.t,
+    remoteT: body.t,
+    remoteDevice: syncDeviceInfo(),
+    baseHash: syncDataHash(body),
+    lastStat: 'Gitee 已上传本机版本 ' + new Date(body.t).toLocaleString()
+  })
+  return { ok: true, changed: true, ts: body.t, direction: 'upload', repo: repoInfo.full, created: repoInfo.created }
+}
+
+export async function runGiteeDownload(options = {}) {
+  const g = geCfg()
+  if (!g.token || !String(g.token).trim()) throw new Error('请先填写 Gitee 私人令牌')
+  const repoInfo = await ensurePrivateRepo()
+  const remoteFile = await readRemote(repoInfo.full, repoInfo.branch)
+  if (!remoteFile || !remoteFile.obj) throw new Error('Gitee 云端还没有可用同步文件；请先在任一设备上传本机版本')
+  const remoteRaw = remoteFile.obj
+  const state = readSyncState()
+  const local = collectAll()
+  const remoteHash = syncDataHash(remoteRaw)
+  const localHash = syncDataHash(local)
+  const meta = cloudEnvelopeMeta(remoteRaw)
+  if (localHash !== remoteHash && !options.force && (state.kind !== 'ge' || (state.baseHash && localHash !== state.baseHash))) {
+    return { ok: false, needsConfirm: true, direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
+  }
+  const n = restoreAll(remoteRaw)
+  saveSyncState({
+    ...state,
+    kind: 'ge',
+    last: Date.now(),
+    lastAction: 'download',
+    at: Date.now(),
+    localT: meta.t || Date.now(),
+    remoteT: meta.t || Date.now(),
+    remoteDevice: { id: meta.deviceId, label: meta.deviceLabel },
+    baseHash: remoteHash,
+    lastStat: 'Gitee 已下载云端版本 ' + new Date(meta.t || Date.now()).toLocaleString()
+  })
+  return { ok: true, changed: n > 0, ts: meta.t || Date.now(), direction: 'download', repo: repoInfo.full }
 }

@@ -35,6 +35,15 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
     expect(out).toContain('结束')
   })
 
+  it('公式保留内容并转成口语，同时过滤依据卡/来源卡', () => {
+    const out = cleanSpeechText('增长率为 $\\frac{12}{34}$，面积是 x^2。\n📚 依据卡：[判断推理·削弱题型]')
+    expect(out).toContain('12除以34')
+    expect(out).toContain('的平方')
+    expect(out).toContain('增长率为')
+    expect(out).not.toContain('依据卡')
+    expect(out).not.toContain('$')
+  })
+
   it('去掉 emoji，合并多余空白', () => {
     const out = cleanSpeechText('🎉 你好 ！  我是 AI 助教 🚀')
     expect(out).not.toMatch(/[\u{1F000}-\u{1FAFF}]/u)
@@ -49,9 +58,9 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
   })
 
   it('分块停顿时长随句末标点区分', () => {
-    expect(speechPauseMs('这是一整句。')).toBe(240)
-    expect(speechPauseMs('这里只是小停顿，')).toBe(120)
-    expect(speechPauseMs('这段真的没有标点')).toBe(90)
+    expect(speechPauseMs('这是一整句。')).toBe(150)
+    expect(speechPauseMs('这里只是小停顿，')).toBe(70)
+    expect(speechPauseMs('这段真的没有标点')).toBe(50)
   })
 })
 
