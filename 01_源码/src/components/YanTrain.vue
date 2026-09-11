@@ -5,6 +5,7 @@ import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { store, addWrong } from '../store'
 import { chatOnce, activeCfg } from '../api'
+import { isYanWrong, buildYanTrainingFromWrong } from '../utils/yanWrongImport'
 
 const emit = defineEmits(['close', 'send-question'])
 const md = (t) => renderMd(t || '')
@@ -23,6 +24,9 @@ const examElapsed = ref(0)
 const examQTime = ref(0)
 const domain = ref('自动')
 const level = ref('entry')
+const wrongPickerOpen = ref(false)
+const wrongPickId = ref('')
+const yanWrongs = computed(() => (store.wqs || []).filter(isYanWrong))
 const paper = ref(null)
 const q = ref(null)
 const mode = ref('topic')
@@ -38,7 +42,10 @@ const runStarted = ref(false)
 const elapsed = ref(0)
 const qStart = ref(0)
 const qTime = ref(0)
-const modeStats = ref({ topic: { ok: 0, bad: 0 }, sentence: { ok: 0, bad: 0 }, structure: { ok: 0, bad: 0 }, main: { ok: 0, bad: 0 } })
+function blankModeStats() {
+  return { topic: { ok: 0, bad: 0 }, sentence: { ok: 0, bad: 0 }, structure: { ok: 0, bad: 0 }, main: { ok: 0, bad: 0 }, imported: { ok: 0, bad: 0 } }
+}
+const modeStats = ref(blankModeStats())
 const modeOrder = YAN_MODES.map((m) => m.k)
 const curMode = computed(() => YAN_MODES.find((m) => m.k === mode.value) || YAN_MODES[0])
 const paperText = computed(() => (paper.value ? paper.value.sentences : []))
@@ -94,11 +101,39 @@ function startTrain() {
   paper.value = pickPassage(seed, domain.value, level.value)
   mode.value = 'topic'
   sentenceIdx.value = 0
-  modeStats.value = { topic: { ok: 0, bad: 0 }, sentence: { ok: 0, bad: 0 }, structure: { ok: 0, bad: 0 }, main: { ok: 0, bad: 0 } }
+  modeStats.value = blankModeStats()
+  wrongPickerOpen.value = false
   elapsed.value = 0
   setReadySplit(true)
   buildQ(seed)
   showToast('📖 已生成一篇文段，请按四步拆解训练', 'success')
+}
+function wrongLabel(wq) {
+  const sub = String(wq.subx || wq.sub || wq.variant || '言语理解')
+  const text = String(wq.question || wq.q || wq.stem || '').replace(/\s+/g, ' ')
+  return String(wq.subject || '言语理解') + ' · ' + sub + ' · ' + text.slice(0, 52)
+}
+function loadWrongYan() {
+  const wq = yanWrongs.value.find((x) => String(x.id) === String(wrongPickId.value))
+  if (!wq) { showToast('请先选择一道言语理解错题', 'info'); return }
+  const built = buildYanTrainingFromWrong(wq)
+  if (!built.ok) { showToast('❌ ' + built.error, 'error'); return }
+  paper.value = built.paper
+  q.value = built.question
+  mode.value = 'topic'
+  sentenceIdx.value = 0
+  modeStats.value = blankModeStats()
+  elapsed.value = 0
+  qTime.value = 0
+  runStarted.value = false
+  picked.value = ''
+  examReady.value = false
+  exam.value = null
+  examHist.value = []
+  examFinished.value = false
+  wrongPickerOpen.value = false
+  setReadySplit(true)
+  showToast('📋 已导入完整错题，先做原题复练，再切换四步拆解', 'success')
 }
 function backHome() {
   setReadySplit(false)
@@ -141,7 +176,7 @@ function pick(k) {
   picked.value = k
   qTime.value = Math.max(0, Math.round((Date.now() - qStart.value) / 1000))
   const ok = k === q.value.answer
-  const st = modeStats.value[q.value.mode]
+  const st = modeStats.value[q.value.mode] || (modeStats.value[q.value.mode] = { ok: 0, bad: 0 })
   if (ok) st.ok++
   else st.bad++
   const doneLayers = YAN_MODES.filter((m) => {
@@ -325,6 +360,24 @@ onUnmounted(() => { if (timerId) clearInterval(timerId) })
           <div style="color:var(--text3);margin-top:6px">答错会自动定位到错误能力层；每篇完成四步后建议点「📌 存错题」把不会的句子收进错题本。</div>
         </div>
         <button class="btn btn-pri yt-start" @click="startTrain()">🤖 开始四步拆解 · 随机一篇文段</button>
+        <div class="yt-card" style="border:1px dashed var(--glass-border)">
+          <div style="font-weight:800;color:var(--text)">📋 从错题集联动言语理解错题</div>
+          <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);line-height:1.8;margin-top:5px">
+            选取错题集中言语理解的完整题目，优先做原题复练；随后可继续切换主题词、句子功能、行文结构、主旨意图四步。
+            当前可用错题：<b>{{ yanWrongs.length }}</b> 道。
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;align-items:center">
+            <button class="btn btn-gh" @click="wrongPickerOpen = !wrongPickerOpen">{{ wrongPickerOpen ? '▲ 收起错题选择' : '📋 选择错题集言语理解题' }}</button>
+            <span v-if="!yanWrongs.length" style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">错题集里暂时没有言语理解错题</span>
+          </div>
+          <div v-if="wrongPickerOpen && yanWrongs.length" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select v-model="wrongPickId" class="tb-sel" style="flex:1;min-width:240px;max-width:100%">
+              <option value="">请选择一道言语理解错题</option>
+              <option v-for="wq in yanWrongs" :key="wq.id" :value="wq.id">{{ wrongLabel(wq) }}</option>
+            </select>
+            <button class="btn btn-pri" :disabled="!wrongPickId" @click="loadWrongYan()">导入完整原题训练</button>
+          </div>
+        </div>
         <div class="yt-card" style="border:1px dashed var(--glass-border)">
           <div style="font-weight:800;color:var(--text)">📝 完整 5 问真题卷 {{ examUnlocked ? '（已解锁）' : '（🔒 建议先完成一轮拆分）' }}</div>
           <div style="font-size: calc(13px * var(--ui-fs-scale, 1));color:var(--text2);line-height:1.8;margin-top:5px">同一篇文段连做 5 问：主题词 → 句子功能 → 行文结构 → 主旨意图 → 标题选择，模拟真实片段阅读做题节奏。</div>
