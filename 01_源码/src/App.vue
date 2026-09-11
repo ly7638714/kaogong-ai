@@ -35,7 +35,7 @@ import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
 import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playTrack, toggleMusic, prevTrack, nextTrack, setVolume, setLoop, addMusicUrl, addMusicFile, removeMusic, importNetEase, pauseAll } from './utils/music'
 import { renderMd } from './utils/renderMd'
-import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
+import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
 import { petBatchCollectTodayWrong } from './utils/petBatch'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
@@ -1432,6 +1432,28 @@ function petCloneVoiceList() {
     }
   }
   return out
+}
+// 🔗 给「锁定角色」绑定已有克隆声线：从智谱音色列表里挑一个已存在的（含你克隆的）直接绑定，
+// 不重新克隆、不花钱；绑定后与薛神/李星云那种内置克隆声线走完全相同的朗读逻辑。
+const builtinVoicePick = ref('')
+function clonedVoiceOptions() {
+  return voiceList('glm', gmVoiceList.value)
+}
+function bindBuiltinVoiceToPet() {
+  const id = petSkin.value && petSkin.value.id
+  const vid = String(builtinVoicePick.value || '').trim()
+  if (!id || !vid) { showToast('请先选择要绑定的音色', 'info'); return }
+  const v = (gmVoiceList.value || []).find((x) => x.id === vid)
+  petBindBuiltinVoice(id, { engine: 'glm', voice: vid, name: (v && v.name) || vid })
+  saveCfg()
+  showToast('🔗 已把「' + ((v && v.name) || vid) + '」绑定给『' + petSkin.value.char + '』', 'success')
+}
+function unbindBuiltinVoiceOfPet() {
+  const id = petSkin.value && petSkin.value.id
+  if (!id) return
+  petUnbindBuiltinVoice(id)
+  saveCfg()
+  showToast('已解绑，恢复该角色内置声线', 'info')
 }
 async function loadGmVoices() {
   gmVoiceStat.value = '正在拉取官方音色…'
@@ -3491,6 +3513,22 @@ onUnmounted(() => {
             <span v-if="petIsLocked(petSkin.id)">🔒 形象与声音<b>内置锁定</b>（{{ petSkinVoiceOf(petSkin.id).name }}），不可更改。</span>
             <span v-else-if="petSkinVoiceOf(petSkin.id).cloned">已启用克隆原声「<b>{{ petSkinVoiceOf(petSkin.id).name }}</b>」🧬</span>
             <span v-else>声音跟随「🗣️ 语音」里的<b>全局音色</b>（想给 TA 专属原声，用下方「🎤 克隆角色原声」）</span>
+          </div>
+          <div v-if="petIsLocked(petSkin.id)" class="fld" style="border: 1px dashed rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.05); border-radius: 10px; padding: 10px">
+            <label style="font-weight: 700">🔗 绑定已有克隆声线（不重新克隆 · 不花钱）</label>
+            <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 4px 0">
+              你之前在智谱克隆过的音色会出现在下面的列表里，选一个直接绑定给『{{ petSkin.char }}』即可——和薛神、李星云那种内置克隆原声是<b>同一套逻辑</b>，切到这个角色就用它朗读。
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+              <select v-model="builtinVoicePick" style="font-size: calc(12px * var(--ui-fs-scale, 1)); max-width: 240px">
+                <option value="">选择已克隆/已有音色…</option>
+                <option v-for="v in clonedVoiceOptions()" :key="v.id" :value="v.id">{{ v.name }}</option>
+              </select>
+              <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="bindBuiltinVoiceToPet()">绑定到「{{ petSkin.char }}」</button>
+              <button v-if="petVoiceBindingOf(petSkin.id)" class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="unbindBuiltinVoiceOfPet()">解绑（恢复内置声线）</button>
+              <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="loadGmVoices()">🔄 刷新音色列表</button>
+            </div>
+            <div v-if="gmVoiceStat" style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 5px">{{ gmVoiceStat }}</div>
           </div>
         </div>
         <div v-if="!petIsLocked(petSkin.id)" class="fld" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">

@@ -68,7 +68,7 @@ import { gateNow } from '../utils/abilityGate' // 35号批次4-B(2/2)：锚点�
 import { navOpen, navBack } from '../utils/nav'
 import { buildReview } from '../utils/review'
 import ExamPanel from './ExamPanel.vue'
-import { addPoints as petAddPoints } from '../utils/pet'
+import { addPoints as petAddPoints, petSpeakOpts } from '../utils/pet'
 
 // SolidTrain 依赖 three.js（~556KB），按需异步加载，避免拖慢启动
 const SolidTrain = defineAsyncComponent(() => import('./SolidTrain.vue'))
@@ -1649,7 +1649,8 @@ function toggleTts() {
 // v3.8.225：自动朗读与手动「🔊 朗读消息」统一走讲稿链路；
 // 启用语音阅读大模型 → 先改口语讲稿再朗读；未启用/失败 → 原文直读
 function speakWithScript(txt, onEnd) {
-  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch }
+  // 对话页朗读同样使用「当前萌宠」的专属声线（与萌宠朗读、读题保持同一套声音）
+  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
   if (onEnd) base.onEnd = onEnd
   const raw = String(txt || '').trim()
   if (!raw) return Promise.resolve()

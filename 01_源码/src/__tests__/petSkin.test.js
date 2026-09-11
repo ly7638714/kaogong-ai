@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
-import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petVoiceBindings, petBindCloneVoice, petBindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
+import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petVoiceBindings, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf, petSpeakOpts } from '../utils/pet'
 
 const petSkinTestMem = new Map()
 if (!globalThis.localStorage) {
@@ -585,5 +585,41 @@ describe('cloneZhipuVoice 自动转写参考音频（修复克隆音色复读英
     expect(r.ok).toBe(true)
     expect(asrCalled).toBe(false)
     vi.unstubAllGlobals()
+  })
+})
+
+describe('萌宠声线：朗读实时解析 + 角色列表去重', () => {
+  it('与内置角色同 id 的历史自定义副本不再重复（角色列表/音色列表各只出现一条）', () => {
+    store.cfg.customSkins = [
+      { id: 'huasheng13', name: '花生十三（旧自定义副本）' },
+      { id: 'custom9', name: '我的角色' },
+      { id: 'custom9', name: '我的角色副本' },
+      { id: 'huasheng13', name: '花生十三副本2' }
+    ]
+    const ids = petAllSkins.value.map((s) => s.id)
+    expect(ids.filter((x) => x === 'huasheng13').length).toBe(1)
+    expect(ids.filter((x) => x === 'custom9').length).toBe(1)
+    expect(ids.length).toBe(PET_SKINS.length + 1)
+    store.cfg.customSkins = []
+  })
+
+  it('绑定已有克隆声线后，朗读实时使用该声线（不重新克隆、不花钱）', () => {
+    store.cfg.ttsGm = { key: 'k', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
+    store.cfg.fig = { key: '', url: '' }
+    store.cfg.ttsMode = 'glm'
+    applyPetSkin('huasheng13')
+    petBindBuiltinVoice('huasheng13', { engine: 'glm', voice: 'clone-abc', name: '花生十三克隆' })
+    expect(petSkinVoiceOf('huasheng13').cloned).toBe(true)
+    expect(petSpeakOpts()).toMatchObject({ engine: 'glm', voice: 'clone-abc' })
+    petUnbindBuiltinVoice('huasheng13')
+    expect(petSpeakOpts().voice).not.toBe('clone-abc')
+  })
+
+  it('目标引擎没配 Key 时交回全局音色（不硬切引擎，避免切角色后朗读直接失败）', () => {
+    store.cfg.ttsGm = { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
+    store.cfg.fig = { key: '', url: '' }
+    applyPetSkin('huasheng13')
+    petBindBuiltinVoice('huasheng13', { engine: 'glm', voice: 'clone-abc', name: 'x' })
+    expect(petSpeakOpts()).toEqual({})
   })
 })

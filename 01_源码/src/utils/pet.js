@@ -40,7 +40,17 @@ export const PET_SKINS = [
 // 内置角色（薛神/章若楠/李星云/姬如雪）locked=true 锁定形象与声线，不可更改；custom=true 为自定义角色
 export const petAllSkins = computed(() => {
   const DEF_AVATAR = { hair: '#8b93a1', coat: '#e2e8f0', collar: '#64748b', eye: '#334155', mouth: 'closed' }
-  const extras = (store.cfg.customSkins || []).map((s) => ({ ...DEF_AVATAR, ...s, custom: true, char: s.name || s.id, desc: '用户自定义角色' }))
+  // 去重：内置角色只能出现一次；与内置同 id 的历史自定义副本、以及重复 id 的自定义角色一律忽略。
+  // （历史版本曾把「花生十三/小P/小黑/文姐/巾神」当作自定义角色写进 customSkins，
+  //   这些角色后来变成内置角色，若不去重，角色列表与音色列表就会出现重复好几条。）
+  const builtinIds = new Set(PET_SKINS.map((s) => s.id))
+  const seen = new Set()
+  const extras = []
+  for (const s of (store.cfg.customSkins || [])) {
+    if (!s || !s.id || builtinIds.has(s.id) || seen.has(s.id)) continue
+    seen.add(s.id)
+    extras.push({ ...DEF_AVATAR, ...s, custom: true, char: s.name || s.id, desc: '用户自定义角色' })
+  }
   return [...PET_SKINS, ...extras]
 })
 // 获取某自定义角色的设定数据（内置 custom 用 petCustom；额外的用 customSkins 条目）
@@ -222,6 +232,11 @@ export function petBindBuiltinVoice(skinId, bind) {
   if (!skinId || !bind || !bind.voice) return null
   return setPetVoiceBinding(skinId, { ...bind, builtinAuto: true })
 }
+// 解除锁定角色绑定的声线（回归该角色内置声线/预设声线）
+export function petUnbindBuiltinVoice(skinId) {
+  if (!skinId) return null
+  return setPetVoiceBinding(skinId, null)
+}
 export function petUnbindCloneVoice(skinId) { return petBindCloneVoice(skinId, null) }
 // 重命名用户绑定的克隆音色（内置克隆不可改）
 export function petRenameCloneVoice(skinId, name) {
@@ -295,7 +310,9 @@ export function applyPetSkin(id) {
       store.cfg.ttsDash.voiceCustom = v.voiceCustom || ''
     }
     if (v.engine === 'edge') store.cfg.ttsEdgeVoice = v.voice
-    if (v.engine && store.cfg.ttsMode !== v.engine) store.cfg.ttsMode = v.engine
+    // 只有该引擎确实可用（有 Key / 免费）时才把朗读引擎切过去；
+    // 否则会出现「切到某角色后朗读直接失败」——例如角色绑的是智谱克隆声线，但用户没配智谱 Key。
+    if (v.engine && presetEngineReady(v.engine) && store.cfg.ttsMode !== v.engine) store.cfg.ttsMode = v.engine
   } else {
     // 未绑定 → 恢复全局音色（用户自己在「语音」里选的大模型声音），保持全局一致
     const g = store.cfg.globalVoice
@@ -458,8 +475,25 @@ export function petRead(text, opts = {}) {
   if (!petVoiceOn.value) { petBubbleTip('我的语音被静音了，去设置里打开吧 🔇'); return false }
   const speed = opts.speed != null ? opts.speed : Number(store.cfg.ttsRate) || 1
   petBubbleTip('📖 我在帮你读～（' + Math.round(speed * 100) + '% 倍速）')
-  speak(t, { rate: speed, scene: 'teacher', onEnd: opts.onEnd })
+  // 关键：朗读时实时带上「当前萌宠」的专属声线，不再依赖切换角色时改写全局语音设置。
+  // 这样即使后续改了全局音色、或换了没有绑定的角色，读出来的也始终是当前角色对应的声音。
+  speak(t, { rate: speed, scene: 'teacher', onEnd: opts.onEnd, ...petSpeakOpts() })
   return true
+}
+// 解析当前萌宠朗读要用的 { voice, engine }（供 speak 使用）。
+// 返回空对象表示「按全局音色朗读」——即该角色没有专属声线，或其引擎当前不可用（避免朗读失败）。
+export function petSpeakOpts() {
+  const id = petSkin.value && petSkin.value.id
+  if (!id) return {}
+  const v = petSkinVoiceOf(id)
+  if (!v || !v.voice) return {}
+  const engine = v.engine || store.cfg.ttsMode || 'glm'
+  // 目标引擎没配好就不要硬切（角色绑了智谱克隆但没智谱 Key 时会读不出来）→ 交回全局音色
+  if (!presetEngineReady(engine)) return {}
+  const out = { voice: v.voice, engine }
+  if (engine === 'dash' && v.voiceCustom) out.voiceCustom = v.voiceCustom
+  if (v.model) out.model = v.model
+  return out
 }
 export function petStop() {
   stopSpeak()

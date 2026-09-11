@@ -120,6 +120,10 @@ export function speak(text, opts) {
   opts = opts || {}
   return speakPro(text, {
     voice: opts.voice,
+    // 角色专属声线：允许单次朗读临时指定引擎/模型/自定义音色，不改动全局语音设置
+    engine: opts.engine,
+    model: opts.model,
+    voiceCustom: opts.voiceCustom,
     rate: opts.rate != null ? opts.rate : 0.98,
     pitch: opts.pitch != null ? opts.pitch : scenePitch(opts.scene),
     speed: opts.rate != null ? opts.rate : 1,

@@ -608,6 +608,9 @@ export async function openaiSynthesize(text, opts = {}) {
   const cfg = openaiCfg()
   if (!cfg) return { ok: false, msg: '未配置 OpenAI 兼容 Key（设置·语音·OpenAI 兼容）' }
   const voice = opts.voice || cfg.voice
+  // 角色专属声线可能绑定在不同模型上，这里允许单次覆盖模型（缓存键跟着一起变，避免串音）
+  const model = String(opts.model || cfg.model || '').trim() || cfg.model
+  const chunkCfg = Object.assign({}, cfg, { model })
   const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
@@ -615,11 +618,11 @@ export async function openaiSynthesize(text, opts = {}) {
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => synthChunkCached('openai', cfg, voice, speed, c, async () => {
+    async (c) => synthChunkCached('openai', chunkCfg, voice, speed, c, async () => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-        body: JSON.stringify({ model: cfg.model, input: c, voice, speed, response_format: 'mp3' })
+        body: JSON.stringify({ model, input: c, voice, speed, response_format: 'mp3' })
       })
       if (!r.ok) {
         const e = await r.json().catch(() => ({}))
@@ -1223,7 +1226,8 @@ export async function speakPro(text, opts = {}) {
   stopSpeakPro()
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
   gapInitOnGesture()
-  const mode0 = store.cfg.ttsMode || 'glm'
+  // 允许单次朗读临时指定引擎（角色专属声线用），不改动全局 ttsMode
+  const mode0 = opts.engine ? String(opts.engine) : (store.cfg.ttsMode || 'glm')
   let mode = mode0
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
@@ -1244,12 +1248,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
