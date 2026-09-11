@@ -192,6 +192,21 @@ export function petBindCloneVoice(skinId, bind) {
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
   return store.cfg.skinVoices[skinId]
 }
+// 内置角色自动克隆专用：允许给 locked 角色写入一次自动生成的真实克隆声线。
+export function petBindBuiltinVoice(skinId, bind) {
+  if (!skinId || !bind || !bind.voice) return null
+  if (!store.cfg.skinVoices) store.cfg.skinVoices = {}
+  store.cfg.skinVoices[skinId] = {
+    engine: bind.engine,
+    voice: bind.voice,
+    name: bind.name || '',
+    model: bind.model || '',
+    builtinAuto: true,
+    at: Date.now()
+  }
+  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
+  return store.cfg.skinVoices[skinId]
+}
 export function petUnbindCloneVoice(skinId) { return petBindCloneVoice(skinId, null) }
 // 重命名用户绑定的克隆音色（内置克隆不可改）
 export function petRenameCloneVoice(skinId, name) {

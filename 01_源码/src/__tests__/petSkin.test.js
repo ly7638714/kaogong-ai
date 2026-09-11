@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
-import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
+import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf } from '../utils/pet'
 
 describe('动漫角色皮肤系统 PET_SKINS（精简版）', () => {
   it('九个内置锁定角色 + 自定义：原有四人 + 花生十三/小P/小黑/文姐/巾神 + 自定义', () => {
@@ -88,6 +88,12 @@ describe('内置角色锁定：形象/声线不可改', () => {
   it('锁定角色仍可用内置克隆原声（切到它即用）', () => {
     applyPetSkin('lixingyun')
     expect(store.cfg.ttsGm.voice).toBe('a6d7ba90-7cd6-5ef6-9f37-d259112f8be1')
+  })
+  it('内置角色允许写入自动生成的真实克隆声线，并优先于内置近似声线', () => {
+    petBindBuiltinVoice('huasheng13', { engine: 'glm', voice: 'real-clone-id', name: '花生十三内置原声' })
+    const v = petSkinVoiceOf('huasheng13')
+    expect(v.cloned).toBe(true)
+    expect(v.voice).toBe('real-clone-id')
   })
 })
 
