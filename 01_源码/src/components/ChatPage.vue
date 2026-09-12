@@ -1262,7 +1262,7 @@ function openExam(src, opts = {}) {
   examShow.value = true
   store.examOpen = true
   store.uiCtx.panel = 'exam'
-  const EXAM_LABEL = { single: '⚡ 单题快练', ai: '🎲 AI 整卷出题', import: '📂 导入材料', wrong: '📚 错题集组卷', zhenti: '📋 真题快练', morning: '🌅 晨练包', weekRedo: '📅 每周重做', anchor: '📐 锚点自测' }
+  const EXAM_LABEL = { single: '⚡ 单题快练', ai: '🎲 AI 整卷出题', import: '📂 导入材料', wrong: '📚 错题集组卷', zhenti: '📋 真题快练', morning: '🌅 每日必刷', weekRedo: '📅 每周重做', anchor: '📐 锚点自测' }
   navOpen({ id: 'exam', label: EXAM_LABEL[src] || '统一考场' })
 }
 function closeExam() {

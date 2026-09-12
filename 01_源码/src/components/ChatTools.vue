@@ -15,7 +15,7 @@ const TRAIN_GROUPS = [
   ] },
   { key: 'review', title: '复习巩固', items: [
     { id: 'wrong', ic: '📚', name: '错题重练', c: '#fb7185', tag: '把错题按板块、题型和错次重新组卷。', pts: ['按错次优先', '未复盘优先'] },
-    { id: 'morning', ic: '🌅', name: '晨练包', c: '#f97316', tag: '15 题晨练组合，资料、常识与错题二刷一次完成。', pts: ['自动组合'] },
+    { id: 'daily', ic: '🌅', name: '每日必刷', c: '#f97316', tag: '资料分析10 + 言语20 + 判断推理35，共65题一次生成，点开直接刷。', pts: ['三大块固定', '图推本地出图'] },
     { id: 'weekRedo', ic: '📅', name: '每周重做', c: '#22d3ee', tag: '把本周到期和反复出错的题重新组卷。', pts: ['到期优先'] }
   ] }
 ]
@@ -23,6 +23,7 @@ function startTrainModule(id) {
   trainPickShow.value = false
   utilsOpen.value = false
   if (id === 'offline') { startOffline(); return }
+  if (id === 'daily') { openExam.value('morning', { autoStart: true }); return }
   openExam.value(id)
 }
 function startOffline() {

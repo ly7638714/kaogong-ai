@@ -434,6 +434,7 @@ async function startAnchor() {
 // ===== 出卷与作答 =====
 function start() {
   retryInfo.value = null // 用户重新开始出卷/切换到其它入口 → 放弃上一卷的「只补失败题」快照
+  if (srcMode.value === 'ai' || srcMode.value === 'morning') applyRecommendedAiSettings()
   // 单题快练：无条件立刻进入「出题等待界面」；Key 缺失在等待界面内明确提示（出题用的是文字模型，勿用视觉模型前置拦截）
   if (srcMode.value === 'single') { startSingle(); return }
   if (srcMode.value === 'zhenti') { startZhenti(); return }
@@ -456,7 +457,6 @@ function start() {
     startPaper(p)
     return
   }
-  if (srcMode.value === 'ai') applyRecommendedAiSettings()
   startAi()
 }
 function applyRecommendedAiSettings() {
@@ -958,7 +958,7 @@ const topTitle = computed(() => {
   if (phase.value === 'gen') return '⏳ AI 出卷中…'
   if (phase.value === 'doing') return '📝 作答中 · ' + (curPaper.value ? curPaper.value.name : '模拟卷')
   if (phase.value === 'result') return '📄 成绩单'
-  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'ai' ? '🎲 AI 整卷出题' : srcMode.value === 'morning' ? '🌅 每日晨练包' : srcMode.value === 'weekRedo' ? '📅 每周重做卷' : srcMode.value === 'import' ? '📂 导入材料' : srcMode.value === 'wrong' ? '📚 错题集组卷' : srcMode.value === 'zhenti' ? '📋 真题快练' : '📐 锚点自测'
+  return srcMode.value === 'single' ? '⚡ 单题快练' : srcMode.value === 'ai' ? '🎲 AI 整卷出题' : srcMode.value === 'morning' ? '🌅 每日必刷·三大块' : srcMode.value === 'weekRedo' ? '📅 每周重做卷' : srcMode.value === 'import' ? '📂 导入材料' : srcMode.value === 'wrong' ? '📚 错题集组卷' : srcMode.value === 'zhenti' ? '📋 真题快练' : '📐 锚点自测'
 })
 function topBack() {
   if (phase.value === 'doing' || phase.value === 'result' || phase.value === 'preview') backToConfig()
@@ -976,7 +976,7 @@ onMounted(() => {
     const p = props.initialPaper
     if (!papers.value.some((x) => x.id === p.id)) { papers.value.unshift(p); savePapers() }
     setTimeout(() => startPaper(p), 50)
-  } else if (props.autoStart && srcMode.value === 'ai') {
+  } else if (props.autoStart && (srcMode.value === 'ai' || srcMode.value === 'morning')) {
     setTimeout(() => start(), 80)
   }
 })

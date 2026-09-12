@@ -798,27 +798,63 @@ export function useExamGen(ctx) {
     genAll(paper) // 先出题再开考，避免做题倒计时提前启动
   }
 
-  // 🌅 晨练包（批次8）：资料速算5(一篇材料配5题) + 常识速测5 + 错题本未复盘二刷5 = 15题，复用 genAll 出卷流程
+  // 🌅 每日必刷：三大块固定 65 题，入口点击后直接整包生成。
+  // 资料分析 10（2 篇×5）与图形推理 5 使用本地确定性生成，保证材料完整、图形可渲染、答案可复算；
+  // 其余 AI 题沿用稳定质检与唯一答案硬门。
   function startMorning() {
     singleMode.value = false
+    genConcur.value = 4
     const plan = []
-    // 资料分析 5 题（真题一篇材料配 5 题，第 5 题综合分析）
-    for (let k = 0; k < 5; k++) {
-      const variant = k === 4 ? '综合分析' : (ZL_PLAN[k])
-      plan.push({ subject: '资料分析', difficulty: 'mid', variant, dir: resolveDir('auto'), dirText: '', group: true, groupId: 0, groupN: 5, groupLeader: k === 0, matType: ['text', 'table', 'chart'][k % 3], stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
+    // 一、资料分析 10 题：两篇完整材料，每篇 5 题，最后一题为综合分析。
+    for (let gid = 0; gid < 2; gid++) {
+      const lg = genZlChartGroup()
+      if (!lg || !Array.isArray(lg.qs) || lg.qs.length < 5) { showToast('每日必刷生成失败：资料分析本地材料不足，请重试', 'error'); return }
+      const material = '【📄 材料】\n```svg\n' + lg.svg + '\n```'
+      for (let k = 0; k < 5; k++) {
+        const q = lg.qs[k]
+        const variant = k === 4 ? '综合分析' : (ZL_PLAN[k % ZL_PLAN.length])
+        plan.push({
+          subject: '资料分析', difficulty: 'real', variant,
+          dir: resolveDir('auto'), dirText: '',
+          group: true, groupId: gid, groupN: 5, groupLeader: k === 0,
+          matType: 'chart', local: true,
+          stem: material + '\n\n' + q.stem, options: q.options, answer: q.answer, explain: q.explain || '',
+          picked: null, correct: null, timeout: false, err: false
+        })
+      }
     }
-    // 常识判断 5 题
-    for (let k = 0; k < 5; k++) {
-      plan.push({ subject: '常识判断', difficulty: 'mid', variant: '', dir: resolveDir('auto'), dirText: '', stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
-    }
-    // 错题本未复盘/未消化 5 题（二刷）
-    const pend = store.wqs.filter((q) => !(q.reviewed || q.digested)).slice(0, 5)
-    pend.forEach((wq) => {
-      const opts = extractChoices(wq.question || '')
-      plan.push({ subject: wq.subject || '未分类', stem: wq.question || '', options: opts, answer: answerLetter(wq.answer || ''), analysis: [wq.method, wq.note].filter(Boolean).join('\n'), fromWrong: true, wrongId: wq.id, picked: null, correct: null, timeout: false, err: false })
+    const pushAi = (subject, variant) => plan.push({
+      subject, difficulty: 'real', variant,
+      dir: resolveDir('auto'), dirText: '',
+      stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
     })
+    // 二、言语理解与表达 20 题：逻辑填空 10 + 片段阅读 10。
+    for (let i = 0; i < 10; i++) pushAi('言语理解', '逻辑填空')
+    const fragVariants = ['中心理解', '意图判断', '标题填入', '态度观点', '细节判断', '词句理解', '语句填空', '下文推断', '语句排序']
+    for (let i = 0; i < 10; i++) pushAi('言语理解', fragVariants[i % fragVariants.length])
+    // 三、逻辑判断与推理 35 题：图推5 + 类比10 + 定义10 + 逻辑10。
+    const tutuVariants = ['位置规律', '样式规律', '属性规律', '数量规律', '空间重构']
+    for (let i = 0; i < tutuVariants.length; i++) {
+      let q = null
+      for (let tryN = 0; tryN < 8 && !q; tryN++) {
+        const nq = genTutuQuestion()
+        if (nq && nq.stem && Array.isArray(nq.options) && nq.options.length >= 4 && nq.answer) q = nq
+      }
+      if (!q) { showToast('每日必刷生成失败：图形推理本地出图异常，请重试', 'error'); return }
+      plan.push({
+        subject: '图形推理', difficulty: 'real', variant: tutuVariants[i], dir: '', dirText: '', local: true,
+        stem: q.stem, options: q.options, answer: q.answer, explain: q.explain || '', picked: null, correct: null, timeout: false, err: false
+      })
+    }
+    const analogyVariants = [...(SUB_VARIANTS['类比推理'] || []), '二词型', '三词型'].slice(0, 10)
+    analogyVariants.forEach((v) => pushAi('类比推理', v))
+    const defVariants = SUB_VARIANTS['定义判断'] || []
+    for (let i = 0; i < 10; i++) pushAi('定义判断', defVariants[i % Math.max(1, defVariants.length)])
+    const logicVariants = (SUB_VARIANTS['逻辑判断'] || []).slice(0, 10)
+    logicVariants.forEach((v) => pushAi('逻辑判断', v))
     if (!plan.length) { showToast('晨练包生成失败：请先收纳错题或配置模型', 'error'); return }
-    const p = makePaper('🌅 每日晨练包（15题）', plan)
+    if (plan.length !== 65) { showToast('每日必刷题量校验异常：' + plan.length + ' 题，已停止出卷', 'error'); return }
+    const p = makePaper('🌅 每日必刷·三大块（65题）', plan)
     genAll(p)
   }
   // 每周错题重做卷（批次8）：近 7 天新错的题一键重做（含未复盘优先）
