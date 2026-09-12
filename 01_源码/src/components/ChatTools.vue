@@ -6,18 +6,23 @@ const props = defineProps({ ctx: { type: Object, required: true } })
 const pdfLibShow = ref(false)
 const trainPickShow = ref(false)
 const utilsOpen = ref(false)
-const TRAIN_MODULES = [
-  { id: 'single', ic: '⚡', name: '单题快练', c: '#34d399', tag: '专项速刷：选板块和题型逐题突破，答完即批、错题入库。', pts: ['本地/离线可用', '答错钉同考点', '自动进“出题集”可二刷'] },
-  { id: 'ai', ic: '🎲', name: 'AI 整卷出题', c: '#5cc8ff', tag: '按真实卷面结构 AI 智能组卷：模块、题量、难度、补短都能调。', pts: ['断点续出 / 只补失败', '仿真答题卡模式', '成绩单多格式导出'] },
-  { id: 'import', ic: '📂', name: '导入材料', c: '#fbbf24', tag: '把本地真题/讲义（图片、PDF、Word、txt、tex）识别成可做题。', pts: ['OCR 后先“预览校对”再入库', '可一键存入错题本'] },
-  { id: 'wrong', ic: '📚', name: '错题集组卷', c: '#fb7185', tag: '从错题本组卷二刷：只看未复盘、按错次优先，针对性重做。', pts: ['联动今日复习中枢', '不会重复入库'] },
-  { id: 'zhenti', ic: '📋', name: '真题快练', c: '#a78bfa', tag: '真题库快速练：选年份卷和板块，AI 负责判题与解析。', pts: ['支持按年份/板块选题'] },
-  { id: 'morning', ic: '🌅', name: '晨练包', c: '#f97316', tag: '一键 15 题晨练组合卷，资料、常识与错题二刷一次完成。', pts: ['完成联动看板“晨练”打卡'] },
-  { id: 'weekRedo', ic: '📅', name: '每周重做', c: '#22d3ee', tag: '把本周到期和反复出错的题重新组卷，按规则再卷一遍。', pts: ['到期与复错优先'] }
+const PRIMARY_MODULE = { id: 'oneclick', ic: '🎯', name: 'AI 真题模拟', c: '#5cc8ff', tag: '一键生成真题级整卷模拟题，系统自动选快模型、质检、唯一答案校验和失败修复，出完直接开做。', pts: ['无需设置', '真题级质量', '出完即可作答'] }
+const TRAIN_GROUPS = [
+  { key: 'special', title: '专项突破', items: [
+    { id: 'single', ic: '⚡', name: '专项刷题', c: '#34d399', tag: '选板块和题型逐题突破，答完即批、错题入库。', pts: ['按板块专项', '答错进错题本', '可二刷'] },
+    { id: 'offline', ic: '📴', name: '离线练习', c: '#94a3b8', tag: '图推、数量、政治、资料等本地确定性题，无 Key 也能刷。', pts: ['零额度', '离线可用'] },
+    { id: 'zhenti', ic: '📋', name: '真题快练', c: '#a78bfa', tag: '按年份和板块练历年真题，AI 判题与解析。', pts: ['年份卷', '按板块筛选'] }
+  ] },
+  { key: 'review', title: '复习巩固', items: [
+    { id: 'wrong', ic: '📚', name: '错题重练', c: '#fb7185', tag: '把错题按板块、题型和错次重新组卷。', pts: ['按错次优先', '未复盘优先'] },
+    { id: 'morning', ic: '🌅', name: '晨练包', c: '#f97316', tag: '15 题晨练组合，资料、常识与错题二刷一次完成。', pts: ['自动组合'] },
+    { id: 'weekRedo', ic: '📅', name: '每周重做', c: '#22d3ee', tag: '把本周到期和反复出错的题重新组卷。', pts: ['到期优先'] }
+  ] }
 ]
 function startTrainModule(id) {
   trainPickShow.value = false
   utilsOpen.value = false
+  if (id === 'offline') { startOffline(); return }
   openExam.value(id)
 }
 function startOffline() {
@@ -87,9 +92,7 @@ const {
             <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
               <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
             </select>
-            <button class="btn btn-pri tb-btn train-launch" title="统一入口：先选模块，再进入对应训练配置" @click="trainPickShow = true">🎯 训练中心</button>
-            <button class="btn btn-pri tb-btn" title="一键按推荐配置生成高质量模拟题，无需设置参数" @click="startOneClickQuiz()">⚡ 一键高质量模拟题</button>
-            <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="startOffline()">📴 离线练习</button>
+            <button class="btn btn-pri tb-btn train-launch" title="统一刷题入口：AI真题模拟、专项提升、真题复习都在这里" @click="trainPickShow = true">🚀 开始刷题</button>
           </div>
           <div class="train-utils">
             <button class="btn btn-gh tb-btn util-toggle" :aria-expanded="utilsOpen" @click="utilsOpen = !utilsOpen">
@@ -115,6 +118,7 @@ const {
               <div class="util-group">
                 <span class="util-group-t">📚 学习资源</span>
                 <div class="util-group-items">
+                  <button class="btn btn-gh tb-btn" title="导入图片、PDF、Word 等题目材料，校对后组卷或存入错题本" @click="utilsOpen = false; openExam('import')">📂 导入题目/材料</button>
                   <button class="btn btn-gh tb-btn" title="本地真题PDF卷库" @click="utilsOpen = false; pdfLibShow = true">📄 真题PDF库</button>
                   <button class="btn btn-gh tb-btn" title="对话功能使用说明书" @click="utilsOpen = false; guideShow = true">📖 使用说明书</button>
                 </div>
@@ -127,11 +131,22 @@ const {
         <div class="pnl train-pick-pnl">
           <div class="pnl-top">
             <button class="pnl-top-b" @click="trainPickShow = false">← 返回</button>
-            <span class="pnl-top-t">🎯 训练中心 · 按需选择</span>
+            <span class="pnl-top-t">🚀 刷题中心</span>
           </div>
-          <div class="tp-tip">同一个入口进入后按需选择：专项速刷、整卷模考、导入真题、复盘错题，或完成晨练/周重做。</div>
-          <div class="tp-grid">
-            <button v-for="m in TRAIN_MODULES" :key="m.id" class="tp-card" :style="{ borderColor: m.c + '88', background: 'linear-gradient(135deg,' + m.c + '1a, rgba(255,255,255,0.015))' }" @click="startTrainModule(m.id)">
+          <div class="tp-tip">想直接刷题就点 AI 真题模拟；需要专项提升、真题资料或错题复习时，再从下面选择。</div>
+          <button class="tp-card" style="width:100%;margin-bottom:14px;border-width:2px" :style="{ borderColor: PRIMARY_MODULE.c + 'aa', background: 'linear-gradient(135deg,' + PRIMARY_MODULE.c + '26, rgba(255,255,255,0.02))' }" @click="startOneClickQuiz()">
+            <span class="tp-head">
+              <span class="tp-ic" :style="{ color: PRIMARY_MODULE.c, background: PRIMARY_MODULE.c + '22' }">{{ PRIMARY_MODULE.ic }}</span>
+              <span class="tp-name" :style="{ color: PRIMARY_MODULE.c, fontSize: 'calc(16px * var(--ui-fs-scale, 1))' }">{{ PRIMARY_MODULE.name }}</span>
+              <span class="tp-arrow">›</span>
+            </span>
+            <span class="tp-desc" style="font-size:calc(13px * var(--ui-fs-scale, 1))">{{ PRIMARY_MODULE.tag }}</span>
+            <span class="tp-pts"><span v-for="p in PRIMARY_MODULE.pts" :key="p" class="tp-pt">{{ p }}</span></span>
+          </button>
+          <div v-for="g in TRAIN_GROUPS" :key="g.key" style="margin-top:12px">
+            <div style="font-weight:700;font-size:calc(13px * var(--ui-fs-scale,1));color:var(--text2);margin:0 0 7px">{{ g.title }}</div>
+            <div class="tp-grid">
+            <button v-for="m in g.items" :key="m.id" class="tp-card" :style="{ borderColor: m.c + '88', background: 'linear-gradient(135deg,' + m.c + '1a, rgba(255,255,255,0.015))' }" @click="startTrainModule(m.id)">
               <span class="tp-head">
                 <span class="tp-ic" :style="{ color: m.c, background: m.c + '22' }">{{ m.ic }}</span>
                 <span class="tp-name" :style="{ color: m.c }">{{ m.name }}</span>
@@ -140,6 +155,7 @@ const {
               <span class="tp-desc">{{ m.tag }}</span>
               <span class="tp-pts"><span v-for="p in m.pts" :key="p" class="tp-pt">{{ p }}</span></span>
             </button>
+            </div>
           </div>
         </div>
       </div>

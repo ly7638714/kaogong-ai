@@ -21,8 +21,19 @@ const RECENT_HEAD_N = 3             // 同一板块记住最近 N 道题的题�
 const HEAD_LEN = 120                // 每题题干头保留长度（防记忆膨胀、token 可控）
 
 function readMem() {
-  try { const d = JSON.parse(localStorage.getItem(MEM_KEY) || 'null'); return d && typeof d === 'object' ? d : { heads: {} } }
-  catch (e) { return { heads: {} } }
+  try {
+    const d = JSON.parse(localStorage.getItem(MEM_KEY) || 'null')
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return { heads: {}, variants: {} }
+    const heads = (d.heads && typeof d.heads === 'object' && !Array.isArray(d.heads)) ? d.heads : {}
+    const variants = (d.variants && typeof d.variants === 'object' && !Array.isArray(d.variants)) ? d.variants : {}
+    Object.keys(heads).forEach((k) => {
+      heads[k] = Array.isArray(heads[k]) ? heads[k].map((x) => String(x || '')).filter(Boolean).slice(0, RECENT_HEAD_N) : []
+    })
+    Object.keys(variants).forEach((k) => {
+      variants[k] = Array.isArray(variants[k]) ? variants[k].map((x) => String(x || '')).filter(Boolean).slice(0, VARIANT_RECENT_N) : []
+    })
+    return Object.assign({}, d, { heads, variants })
+  } catch (e) { return { heads: {}, variants: {} } }
 }
 function writeMem(m) {
   try { localStorage.setItem(MEM_KEY, JSON.stringify(m)) } catch (e) {}
@@ -123,17 +134,19 @@ export function recentHeads(plate) {
 }
 // 出题成功后记录本题题干头（供后续题避开同话题/同素材）
 export function recordQuestion(plate, stem) {
-  if (!plate || !stem) return
-  const head = stemHead(stem)
-  if (!head) return
-  const mem = readMem()
-  mem.heads = mem.heads || {}
-  const arr = mem.heads[plate] || (mem.heads[plate] = [])
-  const i = arr.findIndex((x) => x === head || (head.length > 40 && x.indexOf(head.slice(0, 40)) === 0))
-  if (i >= 0) arr.splice(i, 1) // 已记过则前移
-  arr.unshift(head)
-  mem.heads[plate] = arr.slice(0, RECENT_HEAD_N)
-  writeMem(mem)
+  try {
+    if (!plate || !stem) return
+    const head = stemHead(stem)
+    if (!head) return
+    const mem = readMem()
+    mem.heads = mem.heads && typeof mem.heads === 'object' && !Array.isArray(mem.heads) ? mem.heads : {}
+    const arr = Array.isArray(mem.heads[plate]) ? mem.heads[plate] : []
+    const i = arr.findIndex((x) => x === head || (head.length > 40 && x.indexOf(head.slice(0, 40)) === 0))
+    if (i >= 0) arr.splice(i, 1) // 已记过则前移
+    arr.unshift(head)
+    mem.heads[plate] = arr.slice(0, RECENT_HEAD_N)
+    writeMem(mem)
+  } catch (e) { /* 多样性记忆损坏不得阻断出题 */ }
 }
 // 旧版域名记忆兼容读取（无用但防脏数据）：清掉旧结构字段
 export function commitDomain() { /* v3.8.82 起改用 recordQuestion，保留空实现避免旧调用报错 */ }

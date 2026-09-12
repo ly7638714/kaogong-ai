@@ -1,6 +1,6 @@
 // ③ 单题同类不重出：题型级短记忆 freshVariant 回归
 import { describe, it, expect, beforeEach } from 'vitest'
-import { freshVariant, recentVariants } from '../utils/genDiversity'
+import { freshVariant, recentVariants, recordQuestion, recentHeads } from '../utils/genDiversity'
 
 const mem = new Map()
 beforeEach(() => {
@@ -31,5 +31,12 @@ describe('freshVariant 题型级同类不重出', () => {
     freshVariant('逻辑判断', ['削弱型'], 3)
     freshVariant('逻辑判断', ['削弱型'], 3) // 池只有 1 项也须正常返回
     expect(freshVariant('常识判断', [], 3)).toBe('')
+  })
+  it('多样性记忆被旧版/云同步写成字符串时自动修复，不再阻断出题', () => {
+    mem.set('xc_gen_diver', JSON.stringify({ heads: '{"逻辑判断":"被损坏的题面字符串"}', variants: 'bad' }))
+    expect(() => recordQuestion('逻辑判断', '某连锁餐饮品牌在全国拥有超过2000家门店，近年顾客满意度提升。')).not.toThrow()
+    const heads = recentHeads('逻辑判断')
+    expect(Array.isArray(heads)).toBe(true)
+    expect(heads[0]).toContain('某连锁餐饮品牌')
   })
 })
