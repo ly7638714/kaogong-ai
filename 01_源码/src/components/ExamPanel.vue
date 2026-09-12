@@ -471,6 +471,7 @@ function applyRecommendedAiSettings() {
   store.cfg.genTimeoutSec = 45
   saveCfg()
   fastGenModel.value = ''
+  try { localStorage.removeItem('xc_fast_gen_model'); localStorage.removeItem('xc_chat_fast_model') } catch (e) {}
   useFigGen.value = false
   genConcur.value = 3
   paperDir.value = 'auto'

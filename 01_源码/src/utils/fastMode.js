@@ -47,8 +47,16 @@ export function pickGenCfg() {
     if (read(KEY_FIG) === '1' && fig && fig.key) {
       return withUrl({ prov: fig.prov || 'zhipu', key: fig.key, url: fig.url, model: fig.model || 'glm-4.6-flash' })
     }
-    const autoFast = (fastTextOf(c.prov || '')[0] || {}).id || ''
-    const fast = String(read(KEY_FAST) || read(KEY_CHAT_FAST) || '').trim() || autoFast
+    const candidates = fastTextOf(c.prov || '') || []
+    const autoFast = (candidates[0] || {}).id || ''
+    const requested = String(read(KEY_FAST) || read(KEY_CHAT_FAST) || '').trim()
+    const allowedFast = new Set(candidates.map((x) => x && x.id).filter(Boolean))
+    const validRequested = requested && (!allowedFast.size || allowedFast.has(requested))
+    const fast = validRequested ? requested : autoFast
+    // 已下线的旧快模型名（如 deepseek-chat / deepseek-reasoner）自动丢弃，避免每次出题都 400 失败。
+    if (requested && !validRequested) {
+      try { localStorage.removeItem(KEY_FAST); localStorage.removeItem(KEY_CHAT_FAST) } catch (e) {}
+    }
     if (fast) return withUrl({ ...c, model: fast, noThink: true })
   } catch (e) {}
   return withUrl(c)

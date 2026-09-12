@@ -70,19 +70,26 @@ describe('pickGenCfg 快模型生成路由（单题快练/错题变式共用）'
   })
 
   it('出题快模型覆盖思考型文字模型', () => {
+    mem.set('xc_fast_gen_model', 'deepseek-flash')
+    expect(pickGenCfg().model).toBe('deepseek-flash')
+  })
+
+  it('已下线的 deepseek-chat 快模型会被自动丢弃，避免每次出题 400 失败', () => {
     mem.set('xc_fast_gen_model', 'deepseek-chat')
-    expect(pickGenCfg().model).toBe('deepseek-chat')
+    const c = pickGenCfg()
+    expect(c.model).toBe('deepseek-flash')
+    expect(mem.has('xc_fast_gen_model')).toBe(false)
   })
 
   it('对话快模型同样可被生成类调用复用', () => {
-    mem.set('xc_chat_fast_model', 'glm-4-flash')
-    expect(pickGenCfg().model).toBe('glm-4-flash')
+    mem.set('xc_chat_fast_model', 'deepseek-flash')
+    expect(pickGenCfg().model).toBe('deepseek-flash')
   })
 
   it('图形快模型开关优先于快模型名', () => {
     store.cfg.fig.key = 'fig-k'
     mem.set('xc_use_fig_gen', '1')
-    mem.set('xc_fast_gen_model', 'deepseek-chat')
+    mem.set('xc_fast_gen_model', 'deepseek-flash')
     const c = pickGenCfg()
     expect(c.key).toBe('fig-k')
     expect(c.model).toContain('glm')
