@@ -1854,11 +1854,11 @@ function makeMsgSpeechBase(rate, token, onEnd, onError, baseOverride = null) {
   const base = baseOverride
     ? Object.assign({}, baseOverride)
     : { scene: store.cfg.ttsScene, rate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
-  base.onEnd = () => {
+  base.onEnd = (spokenText) => {
     if (token !== _msgSpeechToken) return
     speakingMsgIndex.value = -1
     speechPreparing.value = false
-    if (onEnd) onEnd()
+    if (onEnd) onEnd(spokenText)
   }
   base.onError = (msg) => {
     if (token !== _msgSpeechToken) return
@@ -1889,6 +1889,8 @@ function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, 
   const playReady = (ready) => {
     if (trackMessage && token !== _msgSpeechToken) return
     if (trackMessage) speechPreparing.value = false
+    const endCb = base.onEnd
+    base.onEnd = () => { if (typeof endCb === 'function') endCb(ready) }
     speak(ready, base)
   }
   const rd = store.cfg && store.cfg.rd
@@ -1903,7 +1905,7 @@ function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, 
 function speakMsgTxt(txt, onEnd, trackMessage = false, question = '', cacheOnly = false, pinCache = false) {
   return speakWithScript(txt, onEnd, trackMessage, false, null, question, cacheOnly, pinCache)
 }
-function toggleSpeak(ev) {
+async function toggleSpeak(ev) {
   const btn = ev.currentTarget
   const msg = btn.closest('.msg')
   if (!msg) return
@@ -1917,11 +1919,40 @@ function toggleSpeak(ev) {
   const txt = speechTextFromMessage(msg)
   if (!txt) return
   const m = store.msgs[idx]
+  if (m && m._ttsCached && Array.isArray(m._ttsSegments) && m._ttsSegments.length) {
+    replayMessageSpeech(m, idx)
+    return
+  }
   speakingMsgIndex.value = idx
   const ready = cleanSpeechText(stripUnrelatedSpeech(txt, question)).trim()
-  speakMsgTxt(txt, async () => {
-    if (!m || !ready) return
-    const ok = await finalizeMessageSpeechCache(m, [ready], snapshotSpeechOpts())
+  // 旧版本可能已把音频写进 IndexedDB，但消息元数据没有落盘；先做一次纯缓存覆盖检查，命中就直接重播，不再请求 TTS。
+  try {
+    const o = snapshotSpeechOpts()
+    const cov = await ttsCacheCoverage(ready, {
+      mode: o.engine,
+      voice: o.voice,
+      model: o.model,
+      voiceCustom: o.voiceCustom,
+      speed: o.rate,
+      rate: o.rate,
+      pitch: o.pitch,
+      chunkSize: 240,
+      firstChunkSize: 42
+    })
+    if (m && cov && cov.full) {
+      m._ttsCached = true
+      m._ttsCacheKind = 'segments'
+      m._ttsSegments = [ready]
+      m._ttsSpeakOpts = Object.assign({}, o)
+      saveMsgs()
+      replayMessageSpeech(m, idx)
+      return
+    }
+  } catch (e) {}
+  speakMsgTxt(txt, async (spoken) => {
+    const spokenReady = cleanSpeechText(stripUnrelatedSpeech(String(spoken || ready || txt), question)).trim()
+    if (!m || !spokenReady) return
+    const ok = await finalizeMessageSpeechCache(m, [spokenReady], snapshotSpeechOpts())
     if (!ok) showToast('本次语音已播放，但未形成可验证的永久缓存；请检查当前朗读引擎设置', 'warning')
   }, true, question, false, true)
 }
