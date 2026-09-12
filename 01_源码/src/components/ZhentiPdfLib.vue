@@ -33,6 +33,8 @@ async function loadBundle() {
   const urls = [
     './zhenti-pdf/index.json',
     'https://kaogong-ai.pages.dev/zhenti-pdf/index.json',
+    'https://cdn.jsdelivr.net/gh/ly7638714/kaogong-ai@main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json',
+    'https://raw.githubusercontent.com/ly7638714/kaogong-ai/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json',
     'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json'
   ]
   try {
@@ -62,9 +64,9 @@ async function loadBundle() {
 // ===== 在线真题库（多镜像自动切换：本站/Gitee 国内优先，jsDelivr/GitHub 仅兜底）=====
 const MIRRORS = [
   { name: '本站(国内)', base: './zhenti-pdf/' },
-  { name: 'Gitee(国内)', base: 'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/' },
-  { name: 'jsDelivr(国内加速)', base: 'https://cdn.jsdelivr.net/gh/ly7638714/MobileApp-DeepDev@main/zhenti-online/' },
-  { name: 'GitHub raw(备)', base: 'https://raw.githubusercontent.com/ly7638714/MobileApp-DeepDev/main/zhenti-online/' }
+  { name: 'jsDelivr(国内加速)', base: 'https://cdn.jsdelivr.net/gh/ly7638714/kaogong-ai@main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/' },
+  { name: 'GitHub raw(备)', base: 'https://raw.githubusercontent.com/ly7638714/kaogong-ai/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/' },
+  { name: 'Gitee(国内兜底)', base: 'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/' }
 ]
 function onlineMirrorOrder() {
   const list = []
