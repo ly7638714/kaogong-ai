@@ -29,9 +29,13 @@ describe('petNextSpeed 朗读倍速循环', () => {
     store.cfg.ttsRate = 1
     try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
   })
-  it('按 0.75→1→1.25→1.5→0.75 循环', () => {
-    expect(petNextSpeed()).toBe(1.25)
+  it('按 75/100/110/120/130/150/180/200% 八档循环', () => {
+    expect(petNextSpeed()).toBe(1.1)
+    expect(petNextSpeed()).toBe(1.2)
+    expect(petNextSpeed()).toBe(1.3)
     expect(petNextSpeed()).toBe(1.5)
+    expect(petNextSpeed()).toBe(1.8)
+    expect(petNextSpeed()).toBe(2)
     expect(petNextSpeed()).toBe(0.75)
     expect(petNextSpeed()).toBe(1)
   })

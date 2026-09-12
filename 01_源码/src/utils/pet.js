@@ -1,7 +1,7 @@
 // ===== 养成系萌宠：靠刷题/问答成长，知学习状态、有情绪与作息 =====
 import { ref, computed, reactive } from 'vue'
 import { store } from '../store'
-import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused } from './tts'
+import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, setGaplessRate } from './tts'
 import { chatOnce, supportsVision, setCostCtx } from '../api/client'
 import { SYS, KB } from '../kb'
 import { petFeatureText, petDetectUi, DATA_TRAIN_INDEX } from './petKnowledge'
@@ -535,8 +535,8 @@ export function petPauseToggle() {
 export function petReadCtx(ctx) {
   store.readCtx = ctx || null
 }
-// 循环倍速：0.75 → 1 → 1.25 → 1.5 → 0.75…
-const SPEEDS = [0.75, 1, 1.25, 1.5]
+// 循环倍速：0.75 → 1 → 1.1 → 1.2 → 1.3 → 1.5 → 1.8 → 2 → 0.75…
+const SPEEDS = [0.75, 1, 1.1, 1.2, 1.3, 1.5, 1.8, 2]
 export function petNextSpeed() {
   const cur = Number(store.cfg.ttsRate) || 1
   const i = SPEEDS.indexOf(cur)
@@ -544,10 +544,8 @@ export function petNextSpeed() {
   store.cfg.ttsRate = next
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
   if (speaking()) {
-    // 朗读中改倍速：已排好的音频无法原地变速（会破坏无缝时间轴），
-    // 标记为「继续时按新倍速重读本段」，保证倍速真实生效。
-    _restartOnResume = true
-    petBubbleTip('⏱ 已设为 ' + Math.round(next * 100) + '%，继续播放时按新倍速朗读')
+    setGaplessRate(next)
+    petBubbleTip('⏱ 已设为 ' + Math.round(next * 100) + '%，当前朗读已立即生效')
   } else {
     petBubbleTip('⏱ 朗读倍速 ' + Math.round(next * 100) + '%')
   }

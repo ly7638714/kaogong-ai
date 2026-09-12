@@ -32,8 +32,11 @@ import {
   dashVoicesForModel,
   dashSynthesize,
   gapEnsure,
+  setGaplessRate,
   primePlayback
 } from './ttsEngine'
+
+export { setGaplessRate }
 
 // ===== 场景音色清单（仅系统语音兜底时使用；真人引擎在「音色市场」里选）=====
 export const SCENES = [
@@ -133,6 +136,7 @@ export function speak(text, opts) {
     speed: opts.rate != null ? opts.rate : 1,
     cacheOnly: opts.cacheOnly === true,
     pinCache: opts.pinCache === true,
+    singleRequest: opts.singleRequest === true,
     onEnd: opts.onEnd,
     onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
   })

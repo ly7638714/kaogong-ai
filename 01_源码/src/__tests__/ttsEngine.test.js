@@ -59,9 +59,9 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
   })
 
   it('分块停顿时长随句末标点区分', () => {
-    expect(speechPauseMs('这是一整句。')).toBe(150)
-    expect(speechPauseMs('这里只是小停顿，')).toBe(70)
-    expect(speechPauseMs('这段真的没有标点')).toBe(50)
+    expect(speechPauseMs('这是一整句。')).toBe(45)
+    expect(speechPauseMs('这里只是小停顿，')).toBe(15)
+    expect(speechPauseMs('这段真的没有标点')).toBe(10)
   })
 })
 

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveNotes } from './store'
 import { useExamTimer } from './composables/useExamTimer'
-import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
+import { speak, stopSpeak, setGaplessRate, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
 import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
 import { queryProviderBalance } from './utils/apiBalance'
 import { PLATE_MODE } from './api'
@@ -3114,15 +3114,9 @@ onUnmounted(() => {
 
         <div class="fld">
           <label>语速：{{ (store.cfg.ttsRate * 100).toFixed(0) }}%</label>
-          <input
-            v-model.number="store.cfg.ttsRate"
-            type="range"
-            min="0.5"
-            max="1.5"
-            step="0.05"
-            style="width: 100%"
-            @change="saveCfg()"
-          />
+          <select v-model.number="store.cfg.ttsRate" class="pv-edit" style="width:100%" @change="saveCfg(); setGaplessRate(store.cfg.ttsRate)">
+            <option v-for="r in [0.75, 1, 1.1, 1.2, 1.3, 1.5, 1.8, 2]" :key="r" :value="r">{{ Math.round(r * 100) }}%</option>
+          </select>
         </div>
         <div v-if="store.cfg.ttsMode === 'sys'" class="fld">
           <label>角色代入感（音调）：{{ store.cfg.ttsPitch == null ? '默认' : store.cfg.ttsPitch.toFixed(2) }}</label>

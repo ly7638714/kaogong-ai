@@ -7,12 +7,13 @@ vi.mock('../utils/tts', () => ({
   speaking: vi.fn(() => true),
   pauseSpeak: vi.fn(() => true),
   resumeSpeak: vi.fn(() => true),
-  speakPaused: vi.fn(() => false)
+  speakPaused: vi.fn(() => false),
+  setGaplessRate: vi.fn()
 }))
 
 import { store } from '../store'
 import { petPauseToggle, petReadPaused, petNextSpeed, petRead } from '../utils/pet'
-import { pauseSpeak, resumeSpeak, speakPaused, speaking, stopSpeak, speak } from '../utils/tts'
+import { pauseSpeak, resumeSpeak, speakPaused, speaking, stopSpeak, speak, setGaplessRate } from '../utils/tts'
 
 describe('萌宠朗读：暂停 / 继续 / 倍速调整后继续', () => {
   beforeEach(() => {
@@ -22,6 +23,7 @@ describe('萌宠朗读：暂停 / 继续 / 倍速调整后继续', () => {
     vi.mocked(resumeSpeak).mockClear()
     vi.mocked(stopSpeak).mockClear()
     vi.mocked(speak).mockClear()
+    vi.mocked(setGaplessRate).mockClear()
     store.cfg.petVoice = true
     store.cfg.ttsRate = 1
     store.cfg.ttsGm = { key: '', url: '', model: 'glm-tts', voice: 'tongtong' }
@@ -41,17 +43,16 @@ describe('萌宠朗读：暂停 / 继续 / 倍速调整后继续', () => {
     expect(stopSpeak).not.toHaveBeenCalled()
   })
 
-  it('暂停期间调倍速 → 继续时按新倍速重读本段（倍速真实生效）', () => {
+  it('朗读期间调倍速 → 当前音频立即生效', () => {
     petRead('这是一段用来测试倍速继续的朗读文本。', { speed: 1 })
     vi.mocked(speak).mockClear()
     vi.mocked(speakPaused).mockReturnValue(true)
-    const next = petNextSpeed() // 1 → 1.25
-    expect(next).toBe(1.25)
+    const next = petNextSpeed() // 1 → 1.1
+    expect(next).toBe(1.1)
+    expect(setGaplessRate).toHaveBeenCalledWith(1.1)
     petPauseToggle()
-    expect(stopSpeak).toHaveBeenCalled()
-    expect(speak).toHaveBeenCalled()
-    const opts = vi.mocked(speak).mock.calls[0][1]
-    expect(opts.rate).toBe(1.25)
+    expect(resumeSpeak).toHaveBeenCalled()
+    expect(stopSpeak).not.toHaveBeenCalled()
   })
 
   it('没有在朗读时点击 → 不误触暂停', () => {

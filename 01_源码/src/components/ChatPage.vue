@@ -60,8 +60,8 @@ import { loadSrs } from '../utils/memorySrs' // v3.8.205 记忆召回数据源
 import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
 import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
 import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
-import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, ttsStatus, startRecog, recogActive } from '../utils/tts'
-import { ttsCacheCoverage } from '../utils/ttsEngine'
+import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, setGaplessRate, ttsStatus, startRecog, recogActive } from '../utils/tts'
+import { ttsCacheCoverage, prefetchTts } from '../utils/ttsEngine'
 import { speakReadyText, stripUnrelatedSpeech } from '../utils/speechScript'
 import { cleanSpeechText } from '../utils/tts/clean'
 import { MODE_NAMES } from '../kb'
@@ -762,6 +762,7 @@ addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     if (!hasRealSvg && _isTutu && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
       drawTutuAnno(lastAi2, curTxt)
     }
+    _autoSpeechTrackIndex = store.msgs.length - 1
     finishAutoSpeech(_withSrc, async () => {
       if (!lastAiForSpeech) return
       const ok = await finalizeMessageSpeechCache(lastAiForSpeech, _autoSpeechUsedSegments, _autoSpeechStoredOpts)
@@ -1625,7 +1626,6 @@ let _autoSpeechToken = 0
 let _autoSpeechCursor = 0
 let _autoSpeechQueue = []
 let _autoSpeechBusy = false
-let _autoSpeechInFence = false
 let _autoSpeechQuestion = ''
 let _autoSpeechCacheOnly = false
 let _autoSpeechPinCache = false
@@ -1633,6 +1633,7 @@ let _autoSpeechTrackIndex = -1
 let _autoSpeechOnDone = null
 let _autoSpeechUsedSegments = []
 let _autoSpeechStoredOpts = null
+let _autoSpeechPrefetchText = ''
 
 function snapshotSpeechOpts() {
   const cfg = store.cfg || {}
@@ -1641,6 +1642,7 @@ function snapshotSpeechOpts() {
     rate: Number(cfg.ttsRate) || 1,
     pitch: cfg.ttsPitch,
     engine: cfg.ttsMode || 'sys',
+    singleRequest: true,
     ...petSpeakOpts()
   }
 }
@@ -1650,7 +1652,6 @@ function resetAutoSpeech(question = '') {
   _autoSpeechCursor = 0
   _autoSpeechQueue = []
   _autoSpeechBusy = false
-  _autoSpeechInFence = false
   _autoSpeechQuestion = String(question || '')
   _autoSpeechCacheOnly = false
   _autoSpeechPinCache = false
@@ -1658,20 +1659,33 @@ function resetAutoSpeech(question = '') {
   _autoSpeechOnDone = null
   _autoSpeechUsedSegments = []
   _autoSpeechStoredOpts = null
+  _autoSpeechPrefetchText = ''
   stopSpeak()
 }
-function autoSpeechCut(text, final) {
+function autoSpeechCut(text, final, first = false) {
   const s = String(text || '')
   if (final) return s.length
+  if (first) {
+    const firstPunct = /[。！？!?；;\n]/.exec(s)
+    if (firstPunct && firstPunct.index + 1 >= 8) return firstPunct.index + 1
+    if (s.length >= 36) {
+      const comma = Math.max(s.lastIndexOf('，'), s.lastIndexOf(','), s.lastIndexOf('：'), s.lastIndexOf(':'))
+      return comma >= 12 ? comma + 1 : 28
+    }
+    return 0
+  }
+  // 首轮合并到较长的自然语段再送 TTS，减少“每句话单独请求一次”造成的上下句断裂。
+  const para = s.indexOf('\n')
+  if (para >= 20 && para <= 180) return para + 1
   const re = /[。！？!?；;\n]/g
   let m
   while ((m = re.exec(s))) {
     const end = m.index + 1
-    if (end >= 6) return end
+    if (end >= 54) return end
   }
-  if (s.length >= 64) {
+  if (s.length >= 120) {
     const comma = Math.max(s.lastIndexOf('，'), s.lastIndexOf(','), s.lastIndexOf('：'), s.lastIndexOf(':'))
-    return comma >= 12 ? comma + 1 : 48
+    return comma >= 60 ? comma + 1 : 96
   }
   return 0
 }
@@ -1680,6 +1694,21 @@ function autoSpeechBody(text) {
   if (t.replace(/\s+/g, '').length < 4) return false
   if (/^(?:```|<svg|function\s|const\s|import\s|class\s)/i.test(t)) return false
   return true
+}
+function prefetchNextAutoSpeech() {
+  const nextPiece = _autoSpeechQueue[0]
+  if (!nextPiece || nextPiece === _autoSpeechPrefetchText) return
+  const po = _autoSpeechStoredOpts || snapshotSpeechOpts()
+  _autoSpeechPrefetchText = nextPiece
+  prefetchTts(nextPiece, {
+    engine: po.engine,
+    voice: po.voice,
+    model: po.model,
+    voiceCustom: po.voiceCustom,
+    rate: po.rate,
+    speed: po.rate,
+    pitch: po.pitch
+  }).catch(() => {}).finally(() => { if (_autoSpeechPrefetchText === nextPiece) _autoSpeechPrefetchText = '' })
 }
 function drainAutoSpeech() {
   if (_autoSpeechBusy) return
@@ -1698,6 +1727,8 @@ function drainAutoSpeech() {
     _autoSpeechUsedSegments.push(piece)
   }
   if (trackIndex >= 0) speakingMsgIndex.value = trackIndex
+  // 当前语段播放期间预取下一段，避免等上一段播完才发起下一段 TTS 请求。
+  prefetchNextAutoSpeech()
   const done = () => {
     if (token !== _autoSpeechToken) return
     _autoSpeechBusy = false
@@ -1716,23 +1747,22 @@ function feedAutoSpeech(text, final = false) {
   if (store.cfg.ttsOn !== true) return
   const full = stripUnrelatedSpeech(String(text || ''), _autoSpeechQuestion)
   if (_autoSpeechCursor > full.length) _autoSpeechCursor = 0
-  const rest = full.slice(_autoSpeechCursor)
-  if (!rest) return
-  const cut = autoSpeechCut(rest, final)
-  if (!cut) return
-  const raw = rest.slice(0, cut)
-  _autoSpeechCursor += raw.length
-  const fenceCount = (raw.match(/```/g) || []).length
-  if (_autoSpeechInFence) {
-    if (fenceCount % 2 === 1) _autoSpeechInFence = false
+  if (!final) {
+    // 首句尽早开口；首句一旦开始，剩余正文留到回复完成后再一次性合成。
+    if (_autoSpeechBusy || _autoSpeechQueue.length || _autoSpeechUsedSegments.length) return
+    const rest = full.slice(_autoSpeechCursor)
+    const cut = autoSpeechCut(rest, false, true)
+    if (!cut) return
+    const raw = rest.slice(0, cut)
+    _autoSpeechCursor += raw.length
+    const cleaned = cleanSpeechText(raw).trim()
+    if (autoSpeechBody(cleaned)) _autoSpeechQueue.push(cleaned)
+    drainAutoSpeech()
     return
   }
-  if (fenceCount % 2 === 1) {
-    _autoSpeechInFence = true
-    return
-  }
-  const cleaned = cleanSpeechText(raw).trim()
-  if (autoSpeechBody(cleaned)) _autoSpeechQueue.push(cleaned)
+  const rest = cleanSpeechText(full.slice(_autoSpeechCursor)).trim()
+  _autoSpeechCursor = full.length
+  if (autoSpeechBody(rest)) _autoSpeechQueue.push(rest)
   drainAutoSpeech()
 }
 function finishAutoSpeech(text, onDone = null) {
@@ -1794,8 +1824,8 @@ async function verifySpeechCache(segments, opts) {
       speed: o.rate,
       rate: o.rate,
       pitch: o.pitch,
-      chunkSize: 240,
-      firstChunkSize: 42
+      chunkSize: o.singleRequest === false ? 240 : 4000,
+      firstChunkSize: o.singleRequest === false ? 42 : 0
     })
     if (!cov || !cov.full) return false
   }
@@ -1853,7 +1883,7 @@ let _msgSpeechToken = 0
 function makeMsgSpeechBase(rate, token, onEnd, onError, baseOverride = null) {
   const base = baseOverride
     ? Object.assign({}, baseOverride)
-    : { scene: store.cfg.ttsScene, rate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
+    : { ...snapshotSpeechOpts(), rate }
   base.onEnd = (spokenText) => {
     if (token !== _msgSpeechToken) return
     speakingMsgIndex.value = -1
@@ -1936,8 +1966,8 @@ async function toggleSpeak(ev) {
       speed: o.rate,
       rate: o.rate,
       pitch: o.pitch,
-      chunkSize: 240,
-      firstChunkSize: 42
+      chunkSize: o.singleRequest === false ? 240 : 4000,
+      firstChunkSize: o.singleRequest === false ? 42 : 0
     })
     if (m && cov && cov.full) {
       m._ttsCached = true
@@ -1968,13 +1998,14 @@ function toggleMsgPause() {
   else pauseSpeak()
 }
 function cycleMsgSpeed() {
-  const speeds = [0.75, 1, 1.25, 1.5]
+  const speeds = [0.75, 1, 1.1, 1.2, 1.3, 1.5, 1.8, 2]
   const cur = Number(store.cfg.ttsRate) || 1
   const i = speeds.indexOf(cur)
   const next = speeds[i >= 0 ? (i + 1) % speeds.length : 1]
   store.cfg.ttsRate = next
   try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
-  showToast('⏱ 倍速已设为 ' + Math.round(next * 100) + '%（下一条回复或重新朗读立即生效）', 'info')
+  if (speaking()) setGaplessRate(next)
+  showToast('⏱ 倍速已设为 ' + Math.round(next * 100) + '%' + (speaking() ? '（当前朗读已立即生效）' : ''), 'info')
 }
 function toggleMic() {
   const ok = startRecog((t) => {

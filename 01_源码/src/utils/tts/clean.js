@@ -111,10 +111,11 @@ function ensureSpeechBoundary(line) {
 // 分块之间的停顿时长：文本先补过边界标点，这里据此调度真实静音，避免“无标点连读”
 export function speechPauseMs(text) {
   const t = String(text || '').trim()
-  if (/[。！？…]$/.test(t)) return 150
-  if (/[；;]$/.test(t)) return 100
-  if (/[，,：:]$/.test(t)) return 70
-  return 50
+  // 分块音频本身已有自然收尾；调度层只补极短呼吸感，避免把独立 TTS 分块听成一句一顿。
+  if (/[。！？…]$/.test(t)) return 45
+  if (/[；;]$/.test(t)) return 25
+  if (/[，,：:]$/.test(t)) return 15
+  return 10
 }
 
 // 朗读去噪：按行去掉系统/功能提示横幅，只保留真正要听的内容

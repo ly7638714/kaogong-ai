@@ -173,7 +173,7 @@ export function spSetCallbacks(endCb, errCb) { _sp.endCb = endCb; _sp.errCb = er
 // ============ 无缝流式播放器（Web Audio 精确调度，采样点级无缝，零卡顿）============
 // 旧播放器每个分块单独建 Audio 元素，块间切换有加载/启动空隙 → 感觉卡顿。
 // 这里把每个分块解码成 AudioBuffer，按 ctx.currentTime 时间轴首尾精确衔接播放，像真人说话一样无缝隙。
-let _gap = { ctx: null, started: false, nextAt: 0, queue: [], sources: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0 }
+let _gap = { ctx: null, started: false, nextAt: 0, queue: [], sources: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0, synthRate: 1, playbackRate: 1 }
 // 解码串行链：decodeAudioData 是异步的，多个分块若并发解码会乱序完成，
 // 导致「后一块先开播、前一块解码完又叠加上来」（上一句没读完就响下一句）。
 // 用 promise 链把「解码+调度」严格串行化，保证永远按分块顺序无缝衔接。
@@ -458,6 +458,7 @@ function gapStart(audioBuf, meta) {
     }
     const src = ctx.createBufferSource()
     src.buffer = audioBuf
+    src.playbackRate.value = Number(_gap.playbackRate) || 1
     const gain = ctx.createGain()
     src.connect(gain)
     gain.connect(ctx.destination)
@@ -468,9 +469,10 @@ function gapStart(audioBuf, meta) {
     let start = _gap.nextAt
     const earliest = ctx.currentTime + 0.004
     if (!(start > earliest)) start = earliest
-    const end = start + audioBuf.duration
-    // 每个分块只做约 8ms 微淡化，消除“每句开头一声嘟”的硬切爆音；足够短，不会听成忽大忽小。
-    const fade = Math.min(0.012, Math.max(0.004, audioBuf.duration / 6))
+    const playDur = audioBuf.duration / (Number(_gap.playbackRate) || 1)
+    const end = start + playDur
+    // 分块之间只做约 3ms 抗爆音淡化；过长淡入淡出会产生明显的“忽断忽续”感。
+    const fade = Math.min(0.003, Math.max(0.0015, playDur / 20))
     gain.gain.setValueAtTime(0, start)
     gain.gain.linearRampToValueAtTime(1, start + fade)
     gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
@@ -510,12 +512,25 @@ export function gaplessStop() {
   _gap.errCb = null
   _gap.stopping = false
   _gap.fallback = false
+  _gap.synthRate = 1
+  _gap.playbackRate = 1
   resetLeadMemo() // 新一轮朗读重新识别提示音长度，不把上一次的结论带到别的引擎/音色
 }
 export function gaplessPlaying() {
   return !!(_gap.ctx && _gap.ctx.state === 'running' && _gap.active > 0)
 }
 export function gaplessSetCallbacks(endCb, errCb) { _gap.endCb = endCb; _gap.errCb = errCb }
+// 朗读中实时变速：按「新倍速 / 合成倍速」调整当前音频元素的播放速率。
+export function setGaplessRate(rate) {
+  const next = clampSpeed(rate)
+  const base = Number(_gap.synthRate) || 1
+  _gap.playbackRate = clampSpeed(next / base)
+  for (const src of _gap.sources) {
+    try { src.playbackRate.value = _gap.playbackRate } catch (e) {}
+  }
+  try { if (_player.audio) _player.audio.playbackRate = _gap.playbackRate } catch (e) {}
+  return next
+}
 
 function enqueueGapless(buf, text, mime) {
   gaplessEnqueue(buf, mime, { text: String(text || '') })
@@ -1384,15 +1399,55 @@ function guardToastOnce() {
 }
 function ttsAddForEngine(chars) { ttsAddChars(chars) }
 
+// 只合成并写入缓存，不播放：自动朗读当前语段时后台预取下一段，
+// 下一段真正开始时直接命中缓存/复用同一 in-flight 请求，消除句间断流。
+export async function prefetchTts(text, opts = {}) {
+  const t = cleanSpeechText(text)
+  if (!t) return { ok: false, msg: 'empty' }
+  const mode = String(opts.engine || (store.cfg && store.cfg.ttsMode) || 'sys')
+  const base = {
+    voice: opts.voice,
+    model: opts.model,
+    voiceCustom: opts.voiceCustom,
+    speed: opts.speed != null ? opts.speed : opts.rate,
+    rate: opts.rate,
+    pitch: opts.pitch,
+    chunkSize: opts.singleRequest === true ? 4000 : 240,
+    firstChunkSize: opts.singleRequest === true ? 0 : 42,
+    pinCache: true
+  }
+  try {
+    if (mode === 'openai') return await openaiSynthesize(t, base)
+    if (mode === 'dash') return await dashSynthesize(t, base)
+    if (mode === 'glm') return await glmSynthesize(t, base)
+    if (mode === 'edge') {
+      const ck = ttsCacheKey('edge', opts.voice || store.cfg.ttsEdgeVoice, opts.rate, opts.pitch, t)
+      const hit = await ttsCacheGet(ck)
+      if (hit && hit.bytes) return { ok: true, cached: true }
+      const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
+      if (r.ok && r.bytes) await ttsCacheSet(ck, r.bytes, r.mime, true)
+      return r
+    }
+  } catch (e) {
+    return { ok: false, msg: e.message }
+  }
+  return { ok: false, msg: 'uncacheable' }
+}
+
 // ============ 统一入口 ============
 // speakPro(text, { voice, rate, pitch, speed, onEnd, onError }) —— 按 store.cfg.ttsMode 分发
 export async function speakPro(text, opts = {}) {
   stopSpeakPro()
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
   gapInitOnGesture()
+  _gap.synthRate = clampSpeed(opts.speed != null ? opts.speed : (opts.rate != null ? opts.rate : 1))
+  _gap.playbackRate = 1
   // 允许单次朗读临时指定引擎（角色专属声线用），不改动全局 ttsMode
   const mode0 = opts.engine ? String(opts.engine) : (store.cfg.ttsMode || 'sys')
   let mode = mode0
+  const singleRequest = opts.singleRequest === true
+  const chunkSize = singleRequest ? 4000 : 240
+  const firstChunkSize = singleRequest ? 0 : 42
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
   // 省钱护栏：真人引擎超额度 → 自动退回免费系统语音（Edge/系统永不被拦）
@@ -1400,7 +1455,7 @@ export async function speakPro(text, opts = {}) {
   if (mode === 'glm' || mode === 'openai' || mode === 'dash') {
     let fullyCached = false
     try {
-      const cov = await ttsCacheCoverage(t, Object.assign({}, opts, { mode, chunkSize: 240, firstChunkSize: 42 }))
+      const cov = await ttsCacheCoverage(t, Object.assign({}, opts, { mode, chunkSize, firstChunkSize }))
       fullyCached = !!(cov && cov.full)
     } catch (e) {}
     if (opts.cacheOnly && !fullyCached) {
@@ -1417,12 +1472,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -1446,7 +1501,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)
