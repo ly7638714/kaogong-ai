@@ -120,10 +120,13 @@ export const QUALITY_PROFILE = {
       const errs = []
       const stem = String(q.stem || '')
       if (stem.length < 3 || !stem.includes('∶') && !stem.includes(':') && !stem.includes('：')) errs.push('类比题干应为"词A∶词B"形式')
+      if (stem.length > 100) errs.push('类比题干过长（真题只给词项或填空结构，不写故事/背景）')
+      const opts = (q.options || []).map((o) => String(o.t || o.text || '').trim()).filter(Boolean)
+      if (opts.some((t) => t.length > 32)) errs.push('类比选项过长（应为词、成语或短词组）')
       return errs
     },
-    aiHint: '；类比推理专项质检：①题干词对关系明确（集合/逻辑/对应/语义/语法等大类）；②正确项二级关系与题干精确一致；③干扰项一级关系看似相同但二级错配。',
-    learn: '类比常见失败：正确项二级关系不精确、干扰项一级关系迷惑性不足。出题时先定"一级+二级"关系再配词。'
+    aiHint: '；类比推理专项质检：①题干只允许两词、三词或“A∶（ ） 相当于 （ ）∶D”填空结构，不写故事、不堆背景；②正确项一级关系与一处二级辨析同时一致；③干扰项只在二级关系、词性、程度、方向或感情色彩上错配。',
+    learn: '类比常见失败：题干和选项写成长句、关系层级堆叠、二级关系不精确。出题时保持真题式短题干，先定一级再定一处二级关系。'
   }
 }
 

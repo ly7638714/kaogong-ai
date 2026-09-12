@@ -34,6 +34,7 @@ import { pickRetryReset } from '../utils/retryPlan' // 深化·续出：续出�
 import { calcRecheck, groupNumericRecheck } from '../utils/verifyCalc' // 深化·AI题可算必验（单题 + 材料题组子题）
 import { canRelaxDecision, needAiRecheck } from '../utils/quizGate' // 39号矩阵：闸门判定纯函数（可单测）
 import { savePending, loadPending, clearPending } from '../utils/pendingPaper' // 深化·断点续出：组卷失败/中断后持久化草稿
+import { qualityMatrixText } from '../api/qualityMatrix' // 命题质量矩阵：各板块/细分题型专属验收口径
 
 // 深化·速度护栏：单题时间预算（秒，默认45，可配 10..90）。所有出题/重试/流式/质检共用，超预算即止损。
 function genBudgetMS() {
@@ -140,7 +141,7 @@ export function useExamGen(ctx) {
     if (!c || !c.key) return { pass: true }
     try {
       const learn = genLogHint(plate, variant) // 历史质检学习：过去这类题常错在哪
-      let sys = '你是国省考行测命题质量总监，按真题命题标准逐题验收，不按“能读懂、差不多”放行。五项硬评分（每项1-5分）：①蓝图一致性：是否严格符合指定板块/细分题型和本题命题目标；②唯一答案：题干能否只推出一个正确项，选是/选非方向是否正确；③干扰项设计：三个错误项是否分别对应可点名的真实错因，且与正确项同层级、同维度、互斥；④分层选拔性：难度是否来自信息隐藏、逻辑力度、口径陷阱或专业判断，而非偏题怪题、文字绕口和空泛材料；⑤真题质感：语言是否像国省考命题人，无AI套话、机械排比、同义重复。只有五项均达到4分及以上才可 ok:true；任一项低于4分必须 ok:false，并指出具体选项和改法。' + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true,"scores":{"blueprint":5,"unique":5,"distractors":5,"discrimination":4,"authenticity":5}} 或 {"ok":false,"scores":{"blueprint":3,"unique":4,"distractors":2,"discrimination":3,"authenticity":4},"reason":"指出具体哪项不达标、哪个选项有问题、下一版应怎么改"}'
+      let sys = '你是国省考行测命题质量总监，按真题命题标准逐题验收，不按“能读懂、差不多”放行。五项硬评分（每项1-5分）：①蓝图一致性：是否严格符合指定板块/细分题型和本题命题目标；②唯一答案：题干能否只推出一个正确项，选是/选非方向是否正确；③干扰项设计：三个错误项是否分别对应可点名的真实错因，且与正确项同层级、同维度、互斥；④分层选拔性：难度是否来自信息隐藏、逻辑力度、口径陷阱或专业判断，而非偏题怪题、文字绕口和空泛材料；⑤真题质感：语言是否像国省考命题人，无AI套话、机械排比、同义重复。只有五项均达到4分及以上才可 ok:true；任一项低于4分必须 ok:false，并指出具体选项和改法。' + qualityMatrixText(plate, variant) + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true,"scores":{"blueprint":5,"unique":5,"distractors":5,"discrimination":4,"authenticity":5}} 或 {"ok":false,"scores":{"blueprint":3,"unique":4,"distractors":2,"discrimination":3,"authenticity":4},"reason":"指出具体哪项不达标、哪个选项有问题、下一版应怎么改"}'
       // 深化(选项2)：数量/资料 AI 计算题强制“答案代回题干重算”复核（在既有唯一性复核内追加，不新增调用次数）
       // 言语·选词填空专属复核口径（v3.8.146）：防“意思相近但搭配/语境不符”被误判为两可或多解而反复否决
       if (plate === '言语理解') {
@@ -160,7 +161,16 @@ export function useExamGen(ctx) {
       // AI 只在明确返回 false 且给出具体证据时作为“重修建议”，否则放行。
       if (!m) return { pass: true, advisory: true, reason: 'AI质检返回格式不可解析，已由确定性硬校验放行' }
       const rm = String(r || '').match(/"reason"\s*:\s*"([\s\S]*?)"/)
-      return { pass: m[1] === 'true', reason: rm ? rm[1].replace(/\\n/g, ' ').trim().slice(0, 180) : '' }
+      const scores = {}
+      const scoreBlock = String(r || '').match(/"scores"\s*:\s*\{([^}]*)\}/)
+      if (scoreBlock) {
+        for (const pair of scoreBlock[1].matchAll(/"([A-Za-z]+)"\s*:\s*(\d+)/g)) scores[pair[1]] = Number(pair[2])
+      }
+      const requiredScores = ['blueprint', 'unique', 'distractors', 'discrimination', 'authenticity']
+      const allScored = requiredScores.every((k) => Number.isFinite(scores[k]))
+      const scorePass = allScored && requiredScores.every((k) => scores[k] >= 4)
+      const reason = rm ? rm[1].replace(/\\n/g, ' ').trim().slice(0, 180) : ''
+      return { pass: m[1] === 'true' && scorePass, reason: reason || (!scorePass && allScored ? '命题质量总监五维评分未全部达到4分' : '') }
     } catch (e) { return { error: true } } // 调用/网络异常≠内容否决
   }
 
@@ -362,7 +372,7 @@ export function useExamGen(ctx) {
           if (bpEntries.length) bpText = blueprintPrompt(item.subject, variant, bpEntries)
         } catch (e) {}
       }
-      let ask = askBase + (bpText ? '\n\n' + bpText : '') + calcReq + trapDesign(item.subject) + '\n【国省考命题人精修硬标准】①先确定唯一考点和命题意图，再写题干；不得先套模板再硬凑考点。②题干信息必须足以唯一推出答案，不允许依赖题干外知识（常识/政治按官方公认可核查表述除外）。③四个选项必须同层级、同维度、互斥；正确项克制准确，三个干扰项分别对应三种可点名的错误路径。④严禁空泛套话、机械排比、同义重复、绝对化凑错项。⑤完成后逐项自检“为什么正确/为什么三个都错”；任一项讲不通就重写。' + ((item.subject === '言语理解' && variant === '逻辑填空') ? '\n（请像资深命题人出【逻辑填空】（成语/实词选词填空）：语境自然，空位用 ____ 标出；选项为词或成语（多空按序对应），正确项由语境唯一托住，干扰项像真题那种“沾边但搭配/感情色彩不对”的词；选项不要写成完整句子（那是语句填空题型）。）' : '')
+      let ask = askBase + (bpText ? '\n\n' + bpText : '') + calcReq + trapDesign(item.subject) + '\n【国省考命题人精修硬标准】①先确定唯一考点和命题意图，再写题干；不得先套模板再硬凑考点。②题干信息必须足以唯一推出答案，不允许依赖题干外知识（常识/政治按官方公认可核查表述除外）。③四个选项必须同层级、同维度、互斥；正确项克制准确，三个干扰项分别对应三种可点名的错误路径。④严禁空泛套话、机械排比、同义重复、绝对化凑错项。⑤完成后逐项自检“为什么正确/为什么三个都错”；任一项讲不通就重写。' + ((item.subject === '言语理解' && variant === '逻辑填空') ? '\n（请像资深命题人出【逻辑填空】（成语/实词选词填空）：语境自然，空位用 ____ 标出；选项为词或成语（多空按序对应），正确项由语境唯一托住，干扰项像真题那种“沾边但搭配/感情色彩不对”的词；选项不要写成完整句子（那是语句填空题型）。）' : '') + (item.subject === '类比推理' ? '\n（类比推理严格按真题出：题干只给两词、三词或“A∶（ ） 相当于 （ ）∶D”填空结构，词项可快速读清；只考一级关系加一处二级辨析。不得写故事、不得堆背景、不得用长句解释，不得为了新颖而增加复杂关系层级。）' : '')
       // 深度命题两段式（cfg.deepPlan 默认关）：先让子命题人设计(板块专属：数据结构/坑点/配图与SVG布局/官方表述等)再成题——质感更强；任何失败回退普通单次
         const _deepPlates = ['言语理解', '逻辑判断', '定义判断', '类比推理', '常识判断', '数量关系', '资料分析', '图形推理', '政治理论']
       if (store.cfg.deepPlan && !item.group && _deepPlates.includes(item.subject) && variant !== '真假话') {
@@ -410,7 +420,7 @@ export function useExamGen(ctx) {
       let lastParsed = null // 解析成功的题先记下，作为放宽兜底（避免 AI 质检过严反复“多次重出”）
       let calcBad = false // 数量/资料【验算】复核不过 → 禁止放宽兜底复活数值错误题
       const aiGate = !!((store.cfg.strictGen || store.cfg.dualCheck) || (store.cfg.fastAutoQC !== false && isFastGenMode())) // 是否有 AI 复核门（strict/双检/快模型质量门）
-      const aiReviewLimit = store.cfg.dualCheck ? 2 : 1 // 默认只复核一个候选；复核否决不无限重出，后续靠程序硬门收口
+      const aiReviewLimit = 3 // 国省考质量模式：三个候选逐版复核，未经命题质量总监验收的题绝不入卷
       let aiReviews = 0
       let qcHardFail = false // 质检“内容否决”硬标记：仅真否决才禁止放宽兜底（调用失败不算）
       const stage = (attempt, label) => { genStatus.value = (attempt > 0 ? '第 ' + (attempt + 1) + ' 次重出 · ' : '') + label }

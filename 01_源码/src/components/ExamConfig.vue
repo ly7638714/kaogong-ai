@@ -17,7 +17,7 @@ const {
   mixMode, paperDir, paperDirText, paperYtN, paperYtNGroup, difficulty, singleGroup, singlePlate,
   singleVariant, singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType,
   autoNext, imgs, textFiles, qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit,
-  onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx,
+  onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, zhentiErr, zhentiLoading, loadZhentiIndex,
   selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates, retryInfo
 } = toRefs(props.ctx)
 
@@ -513,11 +513,15 @@ function toggleStrengthen(v) {
       <div class="ep-block-hd">📋 真题快练</div>
       <div class="ep-note">💡 真题库首批：国考2017-2026+贵州卷 <b>28套 {{ zhentiIdx?.papers?.reduce((n, p) => n + p.totalQ, 0) || 3583 }}题</b>（网友回忆版）。<b style="color:var(--hud-amber,#fbbf24)">当前收录不全</b>——省考专项/资料分析图表题等持续补充。真题多数无官方答案，作答后由AI判题并给解析。</div>
       <div class="ep-param">
-        <label>选择真题卷（{{ zhentiIdx ? (zhentiIdx.papers?.length || 0) + ' 卷' : '加载中…' }}）</label>
+        <label>选择真题卷（{{ zhentiIdx ? (zhentiIdx.papers?.length || 0) + ' 卷' : zhentiErr ? '加载失败' : '加载中…' }}）</label>
         <select v-model="zhentiSel" class="tb-sel">
           <option value="">— 选择年份卷 —</option>
           <option v-for="p in (zhentiIdx?.papers || [])" :key="p.id" :value="p.id">{{ p.title }}（{{ p.totalQ }}题）</option>
         </select>
+        <div v-if="zhentiErr" class="ep-note" style="color:var(--hud-amber,#fbbf24);display:flex;align-items:center;gap:8px">
+          <span>真题索引加载失败：{{ zhentiErr }}</span>
+          <button class="btn btn-gh" :disabled="zhentiLoading" @click="loadZhentiIndex().catch(() => {})">重试</button>
+        </div>
         <button v-if="zhentiPdfName" class="btn btn-gh" style="margin-top:8px" @click="pdfLibShow = true">📄 查看原卷 PDF（来源：{{ zhentiPdfName }}）</button>
       </div>
       <div class="ep-param">

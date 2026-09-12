@@ -102,10 +102,13 @@ export function buildTaskSys(kind, opts = {}) {
     const difficulty = opts.difficulty || 'mid'
     const variant = opts.variant || ''
     const prof = buildProfessorPrompt(plate, difficulty, variant)
+    let qmText = ''
+    try { qmText = qualityMatrixText(plate, variant) } catch (e) {}
     return (
       QUIZ_SYS +
       '\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n【本次任务·模拟出题（命题专家模式）】\n' +
       prof +
+      (qmText ? '\n\n' + qmText : '') +
       '\n\n输出格式（严格按此结构）：\n### 📝 题目\n（题干/材料）\n（【问法】单独一行：真题提问方式，如"这段文字意在强调（　）。""以下哪项如果为真，最能削弱上述结论？""从所给的四个选项中，选择最合适的一个填入问号处…"）\nA. … B. … C. … D. …\n【正确答案】X\n### ✅ 答案解析\n（按【解析输出协议】名师方法论分步讲解，与对话界面一致：题型判定 → 名师分步 → 正确项剖析 → 干扰项逐项点名陷阱 → 陷阱提示+⚡秒杀 → 📌高效复盘指引）\n### 🎯 考点\n（所属考点/题型 + 近年真题考频标注：高频/中频/低频）\n### ⚡ 秒杀规律\n（一句话，真正能提速的）\n### 📊 难度自评\n（本档难度是否达成 + 一句话说明达标点；图表数据题数据用 Markdown 表格呈现，图推用文字精确描述图形特征）\n### 🧠 命题人设计说明\n（本题出题意图 + 考点选择理由 + 3 个干扰项各用哪种陷阱设计（逐项点名）+ 反套路/难度设计点 + 用本板块名师方法一句话快速破题，100-200 字，讲清命题人为什么这么出、怎么用名师方法秒破）'
     )
   }

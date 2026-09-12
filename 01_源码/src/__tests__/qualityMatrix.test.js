@@ -1,47 +1,68 @@
 import { describe, test, expect } from 'vitest'
-import { qualityMatrixText } from '../api/qualityMatrix'
+import { qualityMatrixText, qualityRubric, hasDedicatedQualityRubric } from '../api/qualityMatrix'
+import { SUB_VARIANTS, EXTRA_VARIANTS } from '../components/examData'
 
-describe('批次7·命题人质量矩阵', () => {
-  test('六大盘块均有默认质量要求', () => {
-    for (const p of ['逻辑判断', '言语理解', '资料分析', '数量关系', '常识判断', '政治理论']) {
+const PLATES = ['判断推理', '逻辑判断', '图形推理', '定义判断', '类比推理', '言语理解', '资料分析', '数量关系', '常识判断', '政治理论']
+
+describe('命题质量矩阵·全题型专属覆盖', () => {
+  test('每个板块都能生成基础质量矩阵', () => {
+    for (const p of PLATES) {
       const t = qualityMatrixText(p, '')
-      expect(t.length, p + ' 缺默认要求').toBeGreaterThan(20)
-      expect(t).toContain('命题质量矩阵')
+      expect(t.length, p + ' 缺默认要求').toBeGreaterThan(80)
+      expect(t).toContain('五维验收硬线')
     }
   })
-  test('子题型命中专属要求', () => {
-    expect(qualityMatrixText('逻辑判断', '削弱型')).toContain('因果倒置')
-    expect(qualityMatrixText('言语理解', '逻辑填空')).toContain('语境呼应')
-    expect(qualityMatrixText('资料分析', '增长率')).toContain('百化分')
+
+  test('SUB_VARIANTS 每个 canonical 题型都有专属 rubric', () => {
+    const missing = []
+    for (const [plate, variants] of Object.entries(SUB_VARIANTS)) {
+      for (const variant of variants) {
+        if (!hasDedicatedQualityRubric(plate, variant)) missing.push(plate + ' / ' + variant)
+      }
+    }
+    expect(missing).toEqual([])
   })
-  test('未知板块返回空（不注噪音）', () => {
+
+  test('EXTRA_VARIANTS 每个扩展轮换题型都有专属 rubric', () => {
+    const missing = []
+    for (const [plate, variants] of Object.entries(EXTRA_VARIANTS)) {
+      for (const variant of variants) {
+        if (!hasDedicatedQualityRubric(plate, variant)) missing.push(plate + ' / ' + variant)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  test('专属 rubric 必须包含五轴且不是板块默认兜底', () => {
+    for (const [plate, variants] of Object.entries(SUB_VARIANTS)) {
+      for (const variant of variants) {
+        const r = qualityRubric(plate, variant)
+        expect(r, plate + ' / ' + variant + ' 缺 rubric').toBeTruthy()
+        for (const key of ['blueprint', 'correct', 'distractors', 'difficulty', 'authenticity']) {
+          expect(String(r[key] || '').length, plate + ' / ' + variant + ' 缺 ' + key).toBeGreaterThan(12)
+        }
+      }
+    }
+  })
+
+  test('典型题型命中真题命题结构', () => {
+    expect(qualityMatrixText('逻辑判断', '削弱型')).toContain('论证')
+    expect(qualityMatrixText('言语理解', '逻辑填空')).toContain('语境')
+    expect(qualityMatrixText('资料分析', '隔年增长')).toContain('交叉项')
+    expect(qualityMatrixText('资料分析', '两期比重差')).toContain('百分点')
+    expect(qualityMatrixText('类比推理', '二词型')).toContain('一级')
+    expect(qualityMatrixText('图形推理', '空间重构')).toContain('展开图')
+  })
+
+  test('类比推理强调真题短题干，不把词项关系复杂化', () => {
+    const t = qualityMatrixText('类比推理', '二词型')
+    expect(t).toContain('两个词')
+    expect(t).toContain('不写故事')
+    expect(t).toContain('一处二级辨析')
+  })
+
+  test('未知板块返回空，不注入噪音', () => {
     expect(qualityMatrixText('不存在板块', '')).toBe('')
+    expect(hasDedicatedQualityRubric('不存在板块', '削弱型')).toBe(false)
   })
 })
-
-
-// 批次8·C2 质量矩阵补全（前提/语句/态度/平均数/倍数/隔年/地理/人文/时政年内）
-describe('批次8·C2 质量矩阵补全', () => {
-  test('逻辑-前提/假设命中专属规格', () => {
-    expect(qualityMatrixText('逻辑判断', '前提型')).toContain('必要前提')
-    expect(qualityMatrixText('逻辑判断', '假设')).toContain('过度假设')
-  })
-  test('言语-语句表达/态度命中专属规格', () => {
-    expect(qualityMatrixText('言语理解', '语句排序')).toContain('连贯')
-    expect(qualityMatrixText('言语理解', '语句填空')).toContain('契合')
-    expect(qualityMatrixText('言语理解', '态度')).toContain('态度词')
-  })
-  test('资料-平均数/倍数/隔年命中专属规格', () => {
-    expect(qualityMatrixText('资料分析', '平均数')).toContain('分母')
-    expect(qualityMatrixText('资料分析', '倍数')).toContain('-1')
-    expect(qualityMatrixText('资料分析', '隔年增长率')).toContain('乘积')
-  })
-  test('常识-地理/人文命中专属规格', () => {
-    expect(qualityMatrixText('常识判断', '地理')).toContain('行政区划')
-    expect(qualityMatrixText('常识判断', '人文历史')).toContain('错配')
-  })
-  test('政治-时政年内大事命中专属规格', () => {
-    expect(qualityMatrixText('政治理论', '时政')).toContain('原文提法')
-  })
-})
-

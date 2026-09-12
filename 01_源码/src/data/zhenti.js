@@ -1,10 +1,31 @@
+/* global atob */
 // 真题库加载器：public/zhenti/*.json 按需加载（不进bundle）
 // 数据来源：03_资料/5_真题套卷 28卷3583题（网友回忆版，无官方答案→AI判题）；收录不全持续补充
 import { classifyZhentiType } from '../utils/zhentiType'
+
+function decodeB64Utf8(b64) {
+  const bin = atob(String(b64 || '').replace(/\s+/g, ''))
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+// Web/PWA 用 fetch；Android 原生宿主的 file:// WebView 用 xcnative 直接读随包 assets，避免本地文件跨域失败。
+async function readAssetText(rel) {
+  const clean = String(rel || '').replace(/^\/+/, '')
+  try {
+    if (typeof window !== 'undefined' && window.xcnative && typeof window.xcnative.readAssetB64 === 'function') {
+      const b64 = window.xcnative.readAssetB64(clean)
+      if (b64 && String(b64).indexOf('ERR:') !== 0) return decodeB64Utf8(b64)
+    }
+  } catch (e) {}
+  const r = await fetch('./' + clean, { cache: 'no-cache' })
+  if (!r.ok) throw new Error('HTTP ' + r.status + '：' + clean)
+  return await r.text()
+}
+
 export async function zhentiIndex() {
-  const r = await fetch('./zhenti/index.json')
-  if (!r.ok) throw new Error('真题索引加载失败')
-  return r.json()
+  return JSON.parse(await readAssetText('zhenti/index.json'))
 }
 
 // ===== 真题卷 id 兼容（2026-09 文件名英文化：副省级→fushu 等）=====
@@ -24,20 +45,19 @@ export function normalizeZhentiId(id) {
 }
 export async function zhentiPaper(id) {
   const raw = String(id || '')
-  let r = await fetch('./zhenti/' + raw + '.json').catch(() => null)
-  if (!r || !r.ok) {
+  let txt = await readAssetText('zhenti/' + raw + '.json').catch(() => null)
+  if (txt == null) {
     const mapped = normalizeZhentiId(raw)
-    if (mapped !== raw) r = await fetch('./zhenti/' + mapped + '.json').catch(() => null)
+    if (mapped !== raw) txt = await readAssetText('zhenti/' + mapped + '.json').catch(() => null)
   }
-  if (!r || !r.ok) throw new Error('真题卷加载失败: ' + raw)
-  return r.json()
+  if (txt == null) throw new Error('真题卷加载失败: ' + raw)
+  return JSON.parse(txt)
 }
 
 // 真题题型 sidecar（规则打标结果；缺失时回退运行时分类）
 export async function zhentiTypes() {
-  const r = await fetch('./zhenti/types.json')
-  if (!r.ok) return null
-  return r.json()
+  const txt = await readAssetText('zhenti/types.json').catch(() => null)
+  return txt ? JSON.parse(txt) : null
 }
 
 // 真题记录 → ExamPanel items（板块筛选 + 材料继承：同材料组的后续题自动补齐【材料】块）

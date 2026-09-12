@@ -75,22 +75,30 @@ const zhentiSel = ref('')
 const zhentiPlates = ref([])
 const zhentiLimit = ref(20)
 const zhentiLoading = ref(false)
+const zhentiErr = ref('')
 const zhentiSecs = ['常识判断', '言语理解', '数量关系', '判断推理', '资料分析']
-watch(srcMode, async (v) => {
-  window.__ztLog = (window.__ztLog || []).concat('watch:' + v)
-  if (v === 'zhenti') {
-    try {
-      zhentiLoading.value = true
-      const idx = await zhentiIndex()
-      zhentiIdx.value = idx
-      window.__ztLog = (window.__ztLog || []).concat('loaded:' + (idx.papers?.length || 0))
-    } catch (e) {
-      window.__ztLog = (window.__ztLog || []).concat('err:' + e.message)
-      showToast('真题索引加载失败: ' + e.message, 'error')
-    }
+let zhentiLoadPromise = null
+function loadZhentiIndex() {
+  if (zhentiIdx.value) return Promise.resolve(zhentiIdx.value)
+  if (zhentiLoadPromise) return zhentiLoadPromise
+  zhentiLoading.value = true
+  zhentiErr.value = ''
+  zhentiLoadPromise = zhentiIndex().then((idx) => {
+    if (!idx || !Array.isArray(idx.papers) || !idx.papers.length) throw new Error('真题索引为空')
+    zhentiIdx.value = idx
+    if (!zhentiSel.value) zhentiSel.value = idx.papers[0].id
+    return idx
+  }).catch((e) => {
+    zhentiErr.value = String((e && e.message) || e || '未知错误')
+    showToast('真题索引加载失败: ' + zhentiErr.value, 'error')
+    throw e
+  }).finally(() => {
     zhentiLoading.value = false
-  }
-})
+    zhentiLoadPromise = null
+  })
+  return zhentiLoadPromise
+}
+watch(srcMode, (v) => { if (v === 'zhenti') loadZhentiIndex().catch(() => {}) }, { immediate: true })
 function toggleZhentiPlate(p) {
   zhentiPlates.value = zhentiPlates.value.includes(p) ? zhentiPlates.value.filter(x => x !== p) : zhentiPlates.value.concat(p)
 }
@@ -1013,7 +1021,7 @@ const examCtx = reactive({
   paperDir, paperDirText, paperYtN, paperYtNGroup, difficulty, singleGroup, singlePlate, singleVariant,
   singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType, autoNext, imgs, textFiles,
   qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit, onlyPend, byWrongCount, papers,
-  openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, selTmpl, tmplJudgeNote, judgeSplitHint,
+  openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, zhentiErr, zhentiLoading, loadZhentiIndex, selTmpl, tmplJudgeNote, judgeSplitHint,
   totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates,
   q, cur, questions, qLeft, qElapsed, marks, modLeft, modTotal, modDone, totalLeft, totalElapsed,
   paperMode, sheetShow, answeredCount, genStatus, qHtml, optHtmls, hasSvgOpts, qExplainHtml, score, rate,

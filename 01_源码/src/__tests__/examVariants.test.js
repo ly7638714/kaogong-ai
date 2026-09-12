@@ -18,7 +18,7 @@ describe('EXTRA_VARIANTS 自动轮换扩展题型池', () => {
     }
   })
   it('覆盖主要文字/可AI出题板块，总数足够支撑“不限”轮换多样', () => {
-    const want = ['言语理解', '数量关系', '逻辑判断', '定义判断', '类比推理', '资料分析', '常识判断', '政治理论']
+    const want = ['言语理解', '数量关系', '逻辑判断', '定义判断', '资料分析', '常识判断', '政治理论']
     for (const w of want) expect(Array.isArray(EXTRA_VARIANTS[w]) && EXTRA_VARIANTS[w].length >= 4, w + ' 扩展不足').toBe(true)
     const n = Object.values(EXTRA_VARIANTS).reduce((a, l) => a + l.length, 0)
     expect(n).toBeGreaterThanOrEqual(20)
