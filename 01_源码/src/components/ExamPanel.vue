@@ -460,15 +460,15 @@ function start() {
   startAi()
 }
 function applyRecommendedAiSettings() {
-  // AI 出题走“无脑稳定路径”：快模型自动路由、硬校验 + 一次复核、失败修复；用户不再管理工程开关。
+  // 高质量出题路径：命题设计两段式 + 真题蓝本参考 + 程序硬校验 + AI 复核；用户不再管理工程开关。
   store.cfg.strictGen = true
   store.cfg.fastAutoQC = true
-  store.cfg.deepPlan = false
-  store.cfg.blueprintRag = false
+  store.cfg.deepPlan = true
+  store.cfg.blueprintRag = true
   store.cfg.dualCheck = false
   store.cfg.preferLocalDet = true
-  store.cfg.propStyle = 'standard'
-  store.cfg.genTimeoutSec = 45
+  store.cfg.propStyle = 'strong'
+  store.cfg.genTimeoutSec = 60
   saveCfg()
   fastGenModel.value = ''
   try { localStorage.removeItem('xc_fast_gen_model'); localStorage.removeItem('xc_chat_fast_model') } catch (e) {}

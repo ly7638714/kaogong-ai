@@ -28,7 +28,7 @@ const EXAM_META = {
   import: { c: '#fbbf24', name: '📂 导入材料', tag: '把本地真题/讲义（图片/PDF/Word/txt/tex）识别成可做题。', pts: ['OCR 后先“预览校对”再入库', '可一键存入错题本'] },
   wrong: { c: '#fb7185', name: '📚 错题集组卷', tag: '拿错题本组卷二刷：只看未复盘 / 按错次优先。', pts: ['联动 今日复习中枢 / 补弱任务'] },
   zhenti: { c: '#a78bfa', name: '📋 真题快练', tag: '真题库（网友回忆版）快速练，AI 判题。', pts: ['支持按年份/板块选题'] },
-  morning: { c: '#f97316', name: '🌅 每日必刷 · 三大块', tag: '资料分析10 + 言语理解20 + 逻辑判断与推理35，共65题一次生成直接开刷。', pts: ['细分题型全覆盖', '图推本地确定性出图'] },
+  morning: { c: '#f97316', name: '🌅 每日必刷 · 三大块', tag: '资料分析10 + 言语理解20 + 逻辑判断与推理30，共60题一次生成直接开刷。', pts: ['细分题型全覆盖', 'AI图推已暂停'] },
   weekRedo: { c: '#22d3ee', name: '📅 每周重做', tag: '每周重做卷：把本周到期/复错题按规则再卷一遍。', pts: ['到期与复错优先'] },
   anchor: { c: '#60a5fa', name: '📐 锚点自测', tag: '每板块固定真题锚点，校准能力值（累计作答后解锁）。', pts: ['与 AI 出题同一套题型体系'] }
 }
@@ -113,7 +113,7 @@ function toggleStrengthen(v) {
         <button class="fp-b" style="margin-left: 6px" @click="discardDraft()">✕ 丢弃此草稿</button>
       </div>
     </div>
-    <div v-if="srcMode === 'morning'" class="ep-note">🌅 每日必刷三大块：资料分析10题（2篇×5题）、言语理解20题（逻辑填空10 + 片段阅读10）、逻辑判断与推理35题（图推5 + 类比10 + 定义10 + 逻辑10），共65题一次生成。</div>
+    <div v-if="srcMode === 'morning'" class="ep-note">🌅 每日必刷三大块：资料分析10题（2篇×5题）、言语理解20题（逻辑填空10 + 片段阅读10）、逻辑判断与推理30题（类比10 + 定义10 + 逻辑10），共60题一次生成。AI图推质量未达标，已暂停止自动生成，请使用真题快练中的真实图形题。</div>
 
     <div v-if="false" class="ep-param" style="margin: 10px 0 2px">
       <label>

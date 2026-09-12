@@ -362,7 +362,7 @@ export function useExamGen(ctx) {
           if (bpEntries.length) bpText = blueprintPrompt(item.subject, variant, bpEntries)
         } catch (e) {}
       }
-      let ask = askBase + (bpText ? '\n\n' + bpText : '') + calcReq + trapDesign(item.subject) + ((item.subject === '言语理解' && variant === '逻辑填空') ? '\n（请像资深命题人出【逻辑填空】（成语/实词选词填空）：语境自然，空位用 ____ 标出；选项为词或成语（多空按序对应），正确项由语境唯一托住，干扰项像真题那种“沾边但搭配/感情色彩不对”的词；选项不要写成完整句子（那是语句填空题型）。）' : '')
+      let ask = askBase + (bpText ? '\n\n' + bpText : '') + calcReq + trapDesign(item.subject) + '\n【国省考命题人精修硬标准】①先确定唯一考点和命题意图，再写题干；不得先套模板再硬凑考点。②题干信息必须足以唯一推出答案，不允许依赖题干外知识（常识/政治按官方公认可核查表述除外）。③四个选项必须同层级、同维度、互斥；正确项克制准确，三个干扰项分别对应三种可点名的错误路径。④严禁空泛套话、机械排比、同义重复、绝对化凑错项。⑤完成后逐项自检“为什么正确/为什么三个都错”；任一项讲不通就重写。' + ((item.subject === '言语理解' && variant === '逻辑填空') ? '\n（请像资深命题人出【逻辑填空】（成语/实词选词填空）：语境自然，空位用 ____ 标出；选项为词或成语（多空按序对应），正确项由语境唯一托住，干扰项像真题那种“沾边但搭配/感情色彩不对”的词；选项不要写成完整句子（那是语句填空题型）。）' : '')
       // 深度命题两段式（cfg.deepPlan 默认关）：先让子命题人设计(板块专属：数据结构/坑点/配图与SVG布局/官方表述等)再成题——质感更强；任何失败回退普通单次
         const _deepPlates = ['言语理解', '逻辑判断', '定义判断', '类比推理', '常识判断', '数量关系', '资料分析', '图形推理', '政治理论']
       if (store.cfg.deepPlan && !item.group && _deepPlates.includes(item.subject) && variant !== '真假话') {
@@ -678,7 +678,9 @@ export function useExamGen(ctx) {
     const getAtt = () => { if (strengthenAttempts == null) { try { strengthenAttempts = readAttempts() } catch (e) { strengthenAttempts = [] } } return strengthenAttempts }
     let total = 0
     const modN = (m) => { const c = Math.max(0, Number(m.count) || 0); return aiCap.value > 0 ? Math.min(c, aiCap.value) : c }
-    const exp = expandModules(modules.value)
+    const expAll = expandModules(modules.value)
+    const exp = expAll.filter((m) => m.subject !== '图形推理')
+    if (exp.length !== expAll.length) showToast('图形推理已暂停 AI 生成，避免低质量图形题；本卷其余模块继续生成', 'info')
     exp.forEach((m) => { total += modN(m) })
     let gi = 0
     let gid = 0
@@ -789,6 +791,7 @@ export function useExamGen(ctx) {
     return items
   }
   function startSingle() {
+    if (singlePlate.value === '图形推理') { showToast('AI 图形推理已暂停生成：当前自动绘图质量不稳定，请改用「真题快练」中的真实图形题', 'info'); return }
     try { localStorage.setItem('xc_single_plate', singlePlate.value) } catch (e) {}
     singleMode.value = true
     const items = buildSingleItems()
@@ -832,20 +835,7 @@ export function useExamGen(ctx) {
     for (let i = 0; i < 10; i++) pushAi('言语理解', '逻辑填空')
     const fragVariants = ['中心理解', '意图判断', '标题填入', '态度观点', '细节判断', '词句理解', '语句填空', '下文推断', '语句排序']
     for (let i = 0; i < 10; i++) pushAi('言语理解', fragVariants[i % fragVariants.length])
-    // 三、逻辑判断与推理 35 题：图推5 + 类比10 + 定义10 + 逻辑10。
-    const tutuVariants = ['位置规律', '样式规律', '属性规律', '数量规律', '空间重构']
-    for (let i = 0; i < tutuVariants.length; i++) {
-      let q = null
-      for (let tryN = 0; tryN < 8 && !q; tryN++) {
-        const nq = genTutuQuestion()
-        if (nq && nq.stem && Array.isArray(nq.options) && nq.options.length >= 4 && nq.answer) q = nq
-      }
-      if (!q) { showToast('每日必刷生成失败：图形推理本地出图异常，请重试', 'error'); return }
-      plan.push({
-        subject: '图形推理', difficulty: 'real', variant: tutuVariants[i], dir: '', dirText: '', local: true,
-        stem: q.stem, options: q.options, answer: q.answer, explain: q.explain || '', picked: null, correct: null, timeout: false, err: false
-      })
-    }
+    // 图形推理在当前阶段停止自动生成：没有稳定达到国省考质量的生成器时不拿垃圾图浪费用户时间。
     const analogyVariants = [...(SUB_VARIANTS['类比推理'] || []), '二词型', '三词型'].slice(0, 10)
     analogyVariants.forEach((v) => pushAi('类比推理', v))
     const defVariants = SUB_VARIANTS['定义判断'] || []
@@ -853,8 +843,8 @@ export function useExamGen(ctx) {
     const logicVariants = (SUB_VARIANTS['逻辑判断'] || []).slice(0, 10)
     logicVariants.forEach((v) => pushAi('逻辑判断', v))
     if (!plan.length) { showToast('晨练包生成失败：请先收纳错题或配置模型', 'error'); return }
-    if (plan.length !== 65) { showToast('每日必刷题量校验异常：' + plan.length + ' 题，已停止出卷', 'error'); return }
-    const p = makePaper('🌅 每日必刷·三大块（65题）', plan)
+    if (plan.length !== 60) { showToast('每日必刷题量校验异常：' + plan.length + ' 题，已停止出卷', 'error'); return }
+    const p = makePaper('🌅 每日必刷·三大块（60题）', plan)
     genAll(p)
   }
   // 每周错题重做卷（批次8）：近 7 天新错的题一键重做（含未复盘优先）
