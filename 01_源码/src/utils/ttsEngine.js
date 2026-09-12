@@ -601,20 +601,22 @@ export async function glmSynthesize(text, opts = {}) {
   const cfg = gmCfg()
   if (!cfg) return { ok: false, msg: '未配置智谱 Key（可在设置·语音里填写，或一键复用图形增强 Key）' }
   const voice = opts.voice || cfg.voice
+  const model = String(opts.model || cfg.model || 'glm-tts').trim() || 'glm-tts'
+  const keyCfg = Object.assign({}, cfg, { model })
   const speed = clampSpeed(opts.speed != null ? opts.speed : cfg.speed)
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
-  try { beginCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', kind: 'audio' }) } catch (e) {}
+  try { beginCost({ feature: 'tts', provider: 'glm', model, kind: 'audio' }) } catch (e) {}
   // 统计本次「真正请求」与「缓存命中」的字数：只有真正请求的字数需要付费，缓存命中的不再计费
   const stats = { hitChars: 0, missChars: 0 }
   // 滑动窗口预取：第一块立即发出（开口更快），最多 3 个请求在途（更稳、衔接更顺）
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => synthChunkCached('glm', cfg, voice, speed, c, async () => {
+    async (c) => synthChunkCached('glm', keyCfg, voice, speed, c, async () => {
       const r = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-        body: JSON.stringify({ model: cfg.model, input: c, voice, speed, volume: 1.0, response_format: 'wav' })
+        body: JSON.stringify({ model, input: c, voice, speed, volume: 1.0, response_format: 'wav' })
       })
       if (!r.ok) {
         const e = await r.json().catch(() => ({}))
@@ -631,7 +633,7 @@ export async function glmSynthesize(text, opts = {}) {
   const savedChars = Math.max(0, chars - billChars)
   if (billChars > 0) {
     try {
-      recordCost({ feature: 'tts', provider: 'glm', model: cfg.model || 'glm-tts', cost: Math.round((billChars / 1000) * getTtsPrice('glm') * 100000) / 100000, note: billChars + ' 字' + (savedChars > 0 ? '（缓存命中 ' + savedChars + ' 字，未重复计费）' : '') })
+      recordCost({ feature: 'tts', provider: 'glm', model, cost: Math.round((billChars / 1000) * getTtsPrice('glm') * 100000) / 100000, note: billChars + ' 字' + (savedChars > 0 ? '（缓存命中 ' + savedChars + ' 字，未重复计费）' : '') })
     } catch (e) {}
     ttsAddForEngine(billChars)
   }
@@ -659,7 +661,7 @@ async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, 
   try {
     const hit = await ttsCacheGet(ck)
     if (hit && hit.bytes) {
-      if (pin) ttsCachePin(ck)
+      if (pin) await ttsCachePin(ck)
       if (stats) stats.hitChars += String(text || '').length
       return hit.bytes
     }
@@ -673,7 +675,8 @@ async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, 
   const task = (async () => {
     const bytes = await fetchFn()
     if (bytes && bytes.byteLength > 0) {
-      try { ttsCacheSet(ck, bytes, mime, pin) } catch (e) {}
+      // 必须等 IndexedDB 写事务完成再交付音频，否则首轮刚播完就刷新会丢缓存。
+      try { await ttsCacheSet(ck, bytes, mime, pin) } catch (e) {}
     }
     return bytes
   })()
@@ -697,13 +700,28 @@ export async function ttsCacheCoverage(text, opts = {}) {
   let makeKey = null
   if (mode === 'glm') {
     const cfg = gmCfg()
-    if (cfg) makeKey = (c) => ttsChunkKey('glm', cfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    if (cfg) {
+      const keyCfg = Object.assign({}, cfg, { model: String(opts.model || cfg.model || 'glm-tts').trim() || 'glm-tts' })
+      makeKey = (c) => ttsChunkKey('glm', keyCfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    }
   } else if (mode === 'openai') {
     const cfg = openaiCfg()
-    if (cfg) makeKey = (c) => ttsChunkKey('openai', cfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    if (cfg) {
+      const model = String(opts.model || cfg.model || '').trim() || cfg.model
+      const keyCfg = Object.assign({}, cfg, { model })
+      makeKey = (c) => ttsChunkKey('openai', keyCfg, opts.voice || cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    }
   } else if (mode === 'dash') {
     const cfg = dashCfg()
-    if (cfg) makeKey = (c) => ttsChunkKey('dash', cfg, opts.voice != null ? opts.voice : cfg.voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    if (cfg) {
+      const voiceCustom = String(opts.voiceCustom != null ? opts.voiceCustom : cfg.voiceCustom || '').trim()
+      const useCustom = voiceCustom && cfg.model.includes('instruct')
+      const voice = useCustom ? ('design:' + voiceCustom) : (opts.voice != null ? opts.voice : cfg.voice)
+      makeKey = (c) => ttsChunkKey('dash', cfg, voice, clampSpeed(opts.speed != null ? opts.speed : cfg.speed), c)
+    }
+  } else if (mode === 'edge') {
+    const voice = opts.voice || (store.cfg && store.cfg.ttsEdgeVoice)
+    makeKey = () => ttsCacheKey('edge', voice, opts.rate, opts.pitch, t)
   }
   if (!makeKey) return { total: chunks.length, cached: 0, full: false }
   let cached = 0
@@ -883,13 +901,14 @@ export async function dashSynthesize(text, opts = {}) {
   // 不再固定某预设音色，实现「自定义 + 多角色」而不依赖本账号未开通的 qwen3-tts-vc/vd 模型。
   const voiceCustom = String((opts.voiceCustom != null ? opts.voiceCustom : cfg.voiceCustom) || '').trim()
   const useCustom = voiceCustom && cfg.model.includes('instruct')
+  const cacheVoice = useCustom ? ('design:' + voiceCustom) : voice
   const chunks = chunkForTts(text, Number(opts.chunkSize) || 380, Number(opts.firstChunkSize) || 0)
   if (!chunks.length) return { ok: false, msg: '没有可朗读的内容' }
   try { beginCost({ feature: 'tts', provider: 'dash', model: cfg.model, kind: 'audio' }) } catch (e) {}
   const stats = { hitChars: 0, missChars: 0 }
   const { bytesAll, firstErr } = await slideSynthesize(
     chunks,
-    async (c) => synthChunkCached('dash', cfg, voice, speed, c, async () => {
+    async (c) => synthChunkCached('dash', cfg, cacheVoice, speed, c, async () => {
       const body = { model: cfg.model, input: { text: c }, parameters: { format: 'mp3' } }
       if (useCustom) body.parameters.voice_design = voiceCustom
       else if (voice) body.input.voice = voice
@@ -1398,12 +1417,12 @@ export async function speakPro(text, opts = {}) {
   try {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
-      const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
-      const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
+      const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
       return await streamFinish(r, opts)
     }
     if (mode === 'edge') {
@@ -1411,14 +1430,14 @@ export async function speakPro(text, opts = {}) {
       const ck = ttsCacheKey('edge', opts.voice || store.cfg.ttsEdgeVoice, opts.rate, opts.pitch, t)
       const hit = await ttsCacheGet(ck)
       if (hit && hit.bytes) {
-        if (opts.pinCache === true) ttsCachePin(ck)
+        if (opts.pinCache === true) await ttsCachePin(ck)
         const played = await playBytes(hit.bytes, hit.mime)
         setStatus(played ? 'done' : 'error', played ? '🔁 已从缓存播放（未重复合成）' : '❌ 播放失败（浏览器拦截自动播放）')
         if (played && opts.onEnd) opts.onEnd()
         return { ok: played, cached: true }
       }
       const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
-      if (r.ok && r.bytes) ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
+      if (r.ok && r.bytes) await ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
       return finishSpeak(r, opts)
     }
     if (mode === 'sys') {
@@ -1427,7 +1446,7 @@ export async function speakPro(text, opts = {}) {
       return { ok }
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
-    const r = await glmSynthesize(t, { voice: opts.voice, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
+    const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize: 240, firstChunkSize: 42, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)

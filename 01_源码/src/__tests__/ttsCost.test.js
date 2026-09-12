@@ -11,7 +11,7 @@ vi.mock('../utils/ttsCache', () => ({
 }))
 
 import { store } from '../store'
-import { glmSynthesize, speakPro } from '../utils/ttsEngine'
+import { glmSynthesize, speakPro, ttsCacheCoverage } from '../utils/ttsEngine'
 import { ttsCacheGet, ttsCacheSet, ttsCachePin } from '../utils/ttsCache'
 import { DEF_PRICES, getTtsPrice } from '../utils/costTrack'
 
@@ -108,5 +108,31 @@ describe('朗读缓存命中不重复计费', () => {
     await glmSynthesize('这条缓存需要从普通缓存升级为永久缓存。', { chunkSize: 240, firstChunkSize: 42, pinCache: true })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(ttsCachePin).toHaveBeenCalled()
+  })
+
+  it('OpenAI 兼容缓存覆盖校验按角色指定 model 生成同一条 key，不串到默认模型', async () => {
+    store.cfg.ttsOpenAI = { key: 'k', url: 'https://example.com/v1', model: 'default-model', voice: 'default' }
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/mpeg' })
+    await ttsCacheCoverage('角色模型缓存校验。', { mode: 'openai', model: 'role-model', voice: 'role-voice', speed: 1 })
+    const keys = ttsCacheGet.mock.calls.map((c) => String(c[0]))
+    expect(keys.length).toBeGreaterThan(0)
+    expect(keys.every((k) => k.includes('role-model') && k.includes('role-voice'))).toBe(true)
+  })
+
+  it('阿里百炼自定义声线写入独立缓存 key，避免与预设音色串音', async () => {
+    store.cfg.ttsDash = { key: 'k', url: 'https://example.com', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', voiceCustom: '' }
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/mpeg' })
+    await ttsCacheCoverage('自定义声线缓存校验。', { mode: 'dash', voiceCustom: '温柔女老师', speed: 1 })
+    const keys = ttsCacheGet.mock.calls.map((c) => String(c[0]))
+    expect(keys.length).toBeGreaterThan(0)
+    expect(keys.every((k) => k.includes('design:温柔女老师'))).toBe(true)
+  })
+
+  it('智谱角色指定 model 时缓存 key 固定使用该 model，重读不会串到默认模型', async () => {
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/wav' })
+    await glmSynthesize('角色模型缓存校验。', { model: 'glm-role-tts', chunkSize: 240, firstChunkSize: 42 })
+    const keys = ttsCacheGet.mock.calls.map((c) => String(c[0]))
+    expect(keys.length).toBeGreaterThan(0)
+    expect(keys.every((k) => k.includes('glm-role-tts'))).toBe(true)
   })
 })

@@ -61,6 +61,7 @@ import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
 import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
 import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
 import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, ttsStatus, startRecog, recogActive } from '../utils/tts'
+import { ttsCacheCoverage } from '../utils/ttsEngine'
 import { speakReadyText, stripUnrelatedSpeech } from '../utils/speechScript'
 import { cleanSpeechText } from '../utils/tts/clean'
 import { MODE_NAMES } from '../kb'
@@ -761,11 +762,10 @@ addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     if (!hasRealSvg && _isTutu && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
       drawTutuAnno(lastAi2, curTxt)
     }
-    finishAutoSpeech(_withSrc, () => {
+    finishAutoSpeech(_withSrc, async () => {
       if (!lastAiForSpeech) return
-      lastAiForSpeech._ttsCached = true
-      lastAiForSpeech._ttsCacheKind = 'stream'
-      saveMsgs()
+      const ok = await finalizeMessageSpeechCache(lastAiForSpeech, _autoSpeechUsedSegments, _autoSpeechStoredOpts)
+      if (!ok && store.cfg.ttsOn === true) showToast('语音已播放，但缓存未完整落盘；下次重读前请保持本页片刻', 'warning')
     })
   } catch (e) {
     resetAutoSpeech()
@@ -1628,6 +1628,19 @@ let _autoSpeechCacheOnly = false
 let _autoSpeechPinCache = false
 let _autoSpeechTrackIndex = -1
 let _autoSpeechOnDone = null
+let _autoSpeechUsedSegments = []
+let _autoSpeechStoredOpts = null
+
+function snapshotSpeechOpts() {
+  const cfg = store.cfg || {}
+  return {
+    scene: cfg.ttsScene,
+    rate: Number(cfg.ttsRate) || 1,
+    pitch: cfg.ttsPitch,
+    engine: cfg.ttsMode || 'sys',
+    ...petSpeakOpts()
+  }
+}
 
 function resetAutoSpeech(question = '') {
   _autoSpeechToken += 1
@@ -1640,6 +1653,8 @@ function resetAutoSpeech(question = '') {
   _autoSpeechPinCache = false
   _autoSpeechTrackIndex = -1
   _autoSpeechOnDone = null
+  _autoSpeechUsedSegments = []
+  _autoSpeechStoredOpts = null
   stopSpeak()
 }
 function autoSpeechCut(text, final) {
@@ -1675,6 +1690,10 @@ function drainAutoSpeech() {
   const piece = _autoSpeechQueue.shift()
   _autoSpeechBusy = true
   const trackIndex = _autoSpeechTrackIndex
+  if (trackIndex >= 0) {
+    if (!_autoSpeechStoredOpts) _autoSpeechStoredOpts = snapshotSpeechOpts()
+    _autoSpeechUsedSegments.push(piece)
+  }
   if (trackIndex >= 0) speakingMsgIndex.value = trackIndex
   const done = () => {
     if (token !== _autoSpeechToken) return
@@ -1688,7 +1707,7 @@ function drainAutoSpeech() {
     if (trackIndex >= 0) speakingMsgIndex.value = -1
     showToast(msg === 'cache-miss' ? '♻️ 语音缓存已失效，请重新点一次朗读生成缓存' : '语音缓存播放失败，请重新朗读', 'info')
   }
-  speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache)
+  speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache, _autoSpeechStoredOpts)
 }
 function feedAutoSpeech(text, final = false) {
   if (store.cfg.ttsOn !== true) return
@@ -1757,6 +1776,46 @@ function speechTextFromMessage(msg) {
   })
   return c.innerText || ''
 }
+async function verifySpeechCache(segments, opts) {
+  const list = (segments || []).map((s) => String(s || '').trim()).filter(Boolean)
+  if (!list.length) return false
+  const o = opts || snapshotSpeechOpts()
+  const mode = String(o.engine || (store.cfg && store.cfg.ttsMode) || 'sys')
+  if (mode === 'sys') return false
+  for (const seg of list) {
+    const cov = await ttsCacheCoverage(seg, {
+      mode,
+      voice: o.voice,
+      model: o.model,
+      voiceCustom: o.voiceCustom,
+      speed: o.rate,
+      rate: o.rate,
+      pitch: o.pitch,
+      chunkSize: 240,
+      firstChunkSize: 42
+    })
+    if (!cov || !cov.full) return false
+  }
+  return true
+}
+async function finalizeMessageSpeechCache(m, segments, opts) {
+  if (!m) return false
+  const list = (segments || []).map((s) => String(s || '').trim()).filter(Boolean)
+  const o = Object.assign({}, opts || snapshotSpeechOpts())
+  const ok = await verifySpeechCache(list, o)
+  if (!ok) {
+    m._ttsCached = false
+    m._ttsSegments = []
+    saveMsgs()
+    return false
+  }
+  m._ttsCached = true
+  m._ttsCacheKind = 'segments'
+  m._ttsSegments = list
+  m._ttsSpeakOpts = Object.assign({}, o)
+  saveMsgs()
+  return true
+}
 function replayMessageSpeech(m, idx) {
   if (!m || !m._ttsCached) {
     showToast('这条回复还没有完整语音缓存，请先点一次「🔊 朗读」', 'info')
@@ -1766,14 +1825,20 @@ function replayMessageSpeech(m, idx) {
   const text = speechTextFromMessage(msg)
   if (!text) return
   const question = questionBeforeMessage(idx)
-  const segments = m._ttsCacheKind === 'stream'
-    ? buildAutoSpeechSegments(text, question)
-    : [cleanSpeechText(stripUnrelatedSpeech(text, question)).trim()].filter(Boolean)
+  const frozen = Array.isArray(m._ttsSegments) ? m._ttsSegments.filter(Boolean) : []
+  const segments = frozen.length
+    ? frozen
+    : (m._ttsCacheKind === 'stream'
+        ? buildAutoSpeechSegments(text, question)
+        : [cleanSpeechText(stripUnrelatedSpeech(text, question)).trim()].filter(Boolean))
   if (!segments.length) return
   resetAutoSpeech(question)
   _autoSpeechCacheOnly = true
+  _autoSpeechPinCache = true
   _autoSpeechTrackIndex = Number(idx)
+  _autoSpeechStoredOpts = m._ttsSpeakOpts && typeof m._ttsSpeakOpts === 'object' ? Object.assign({}, m._ttsSpeakOpts) : snapshotSpeechOpts()
   _autoSpeechQueue = segments
+  _autoSpeechUsedSegments = []
   drainAutoSpeech()
 }
 // v3.8.225：自动朗读与手动「🔊 朗读消息」统一走讲稿链路；
@@ -1782,8 +1847,10 @@ const speakingMsgIndex = ref(-1)
 const speechPreparing = ref(false)
 let _msgSpeechToken = 0
 
-function makeMsgSpeechBase(rate, token, onEnd, onError) {
-  const base = { scene: store.cfg.ttsScene, rate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
+function makeMsgSpeechBase(rate, token, onEnd, onError, baseOverride = null) {
+  const base = baseOverride
+    ? Object.assign({}, baseOverride)
+    : { scene: store.cfg.ttsScene, rate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
   base.onEnd = () => {
     if (token !== _msgSpeechToken) return
     speakingMsgIndex.value = -1
@@ -1799,7 +1866,7 @@ function makeMsgSpeechBase(rate, token, onEnd, onError) {
   return base
 }
 
-function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, onError = null, question = '', cacheOnly = false, pinCache = false) {
+function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, onError = null, question = '', cacheOnly = false, pinCache = false, baseOverride = null) {
   // 对话页朗读同样使用「当前萌宠」的专属声线（与萌宠朗读、读题保持同一套声音）
   const raw = String(txt || '').trim()
   if (!raw) return Promise.resolve()
@@ -1813,8 +1880,8 @@ function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, 
   }
   const token = _msgSpeechToken
   const base = trackMessage
-    ? makeMsgSpeechBase(store.cfg.ttsRate, token, onEnd, onError)
-    : { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, ...petSpeakOpts(), onEnd, onError, cacheOnly, pinCache }
+    ? makeMsgSpeechBase(store.cfg.ttsRate, token, onEnd, onError, baseOverride)
+    : Object.assign({ scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }, baseOverride || {}, { onEnd, onError, cacheOnly, pinCache })
   if (trackMessage) { base.cacheOnly = cacheOnly; base.pinCache = pinCache }
   const playReady = (ready) => {
     if (trackMessage && token !== _msgSpeechToken) return
@@ -1848,11 +1915,11 @@ function toggleSpeak(ev) {
   if (!txt) return
   const m = store.msgs[idx]
   speakingMsgIndex.value = idx
-  speakMsgTxt(txt, () => {
-    if (!m) return
-    m._ttsCached = true
-    m._ttsCacheKind = 'message'
-    saveMsgs()
+  const ready = cleanSpeechText(stripUnrelatedSpeech(txt, question)).trim()
+  speakMsgTxt(txt, async () => {
+    if (!m || !ready) return
+    const ok = await finalizeMessageSpeechCache(m, [ready], snapshotSpeechOpts())
+    if (!ok) showToast('本次语音已播放，但未形成可验证的永久缓存；请检查当前朗读引擎设置', 'warning')
   }, true, question, false, true)
 }
 function stopMsgSpeak() {
