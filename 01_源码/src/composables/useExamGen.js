@@ -107,7 +107,7 @@ export function useExamGen(ctx) {
   function resolveDir(d) { if (d === 'is' || d === 'not') return d; return Math.random() < 0.5 ? 'is' : 'not' }
   function dirFor(subject, d) { return subject === '类比推理' ? '' : resolveDir(d) }
   function dirHint(subject, dir, dirText) {
-    if (subject === '类比推理') return '\n【问法】本题统一问法：下列选项中，与题干逻辑关系最为相似的是（　）。（必须逐字使用此问法，不得改成最不相似、最接近、关系一致等变体）。'
+    if (subject === '类比推理') return '\n【类比推理输出铁律】题干直接给词项关系本身：二词型如“轮胎∶汽车”，三词型如“树∶木材∶书桌”，填空型如“A∶（　） 相当于 （　）∶D”；不得再输出任何问法行。选项只给平行词项、成语或古诗对应关系。'
     if (dirText) return '\n【问法】本题问法：' + dirText + '（严格按此问法出题）。'
     if (subject === '定义判断' || subject === '图形推理' || subject === '空间重构') return ''
     return dir === 'is'
@@ -283,9 +283,9 @@ export function useExamGen(ctx) {
           const reply = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: ask + groupFix }], 6000, genBudgetMS(), genCtrl && genCtrl.signal)
           const parsed = parseMaterialQuiz(reply, gn)
           const okN = parsed && parsed.qs.length ? Math.min(gn, parsed.qs.length) : 0
-          const badIdx = (parsed && parsed.qs || []).findIndex((qq) => !localQuizVerify(qq).ok)
+          const badIdx = (parsed && parsed.qs || []).findIndex((qq) => !localQuizVerify(qq, item.subject).ok)
           let reason = ''
-          if (okN >= Math.min(2, gn) && badIdx >= 0) reason = '本组第 ' + (badIdx + 1) + ' 题未过本地唯一单选质检：' + localQuizVerify(parsed.qs[badIdx]).reason
+          if (okN >= Math.min(2, gn) && badIdx >= 0) reason = '本组第 ' + (badIdx + 1) + ' 题未过本地唯一单选质检：' + localQuizVerify(parsed.qs[badIdx], item.subject).reason
           else if (isZL && okN >= Math.min(2, gn) && parsed.material && /```svg/i.test(parsed.material)) { const sc = checkFigureText(parsed.material); if (!sc.ok) reason = '材料 SVG 不合法：' + sc.issue }
           else if (isZL && okN >= Math.min(2, gn)) { const gcr = groupNumericRecheck(reply, parsed.qs); if (gcr && gcr.ok === false) reason = '本组第 ' + (gcr.idx + 1) + ' 题【验算】复核未过：' + gcr.reason }
           else if (okN >= Math.min(2, gn) && !parsed.material) reason = '材料缺失'
@@ -440,7 +440,7 @@ export function useExamGen(ctx) {
         }
         if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
         // 本地唯一单选质检（确定性 skill）：通用硬规则 + 本板块/题型「质检子命题人」专属检查
-        const lv = localQuizVerify(cur)
+        const lv = localQuizVerify(cur, item.subject)
         const plateErr = plateChecks(cur, item.subject, variant)
         const allErr = [...(lv.ok ? [] : [lv.reason]), ...plateErr]
         // 优化④配图强校验：图形推理 题干+选项必须含合法 SVG（无图/坏图不入卷）
@@ -501,7 +501,7 @@ export function useExamGen(ctx) {
       // 写入出题历史（供 AI 学习：板块/题型/尝试次数/失败原因/是否成功）
       recordGenLog({ plate: item.subject, variant, difficulty: item.difficulty || '', ok: !!qz, attempts: genAttempts, reasons: failReasons, src: 'single' })
       // 放宽兜底仅在【无 AI 复核门】时允许：开启 strict/双检/快模型质量门后，被 AI 复核否决(非唯一/多解/多选)的题绝不兜底放行——宁可判失败重出，也不把有争议的题发给用户
-      if (!qz && canRelaxDecision({ hasLastParsed: !!lastParsed, lastOk: lastParsed ? localQuizVerify(lastParsed).ok : false, calcBad, isTruthTable: variant === '真假话', qcHardFail })) qz = lastParsed // 仅“内容真被否决”才不放行；调用失败等可按本地兜底收下
+      if (!qz && canRelaxDecision({ hasLastParsed: !!lastParsed, lastOk: lastParsed ? localQuizVerify(lastParsed, item.subject).ok : false, calcBad, isTruthTable: variant === '真假话', qcHardFail })) qz = lastParsed // 仅“内容真被否决”才不放行；调用失败等可按本地兜底收下
       if (qz && qz.options && qz.options.length >= 4) {
         item.stem = qz.stem
         item.options = qz.options

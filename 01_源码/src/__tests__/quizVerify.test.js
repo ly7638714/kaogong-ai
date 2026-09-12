@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { localQuizVerify, askDirection } from '../utils/quizVerify'
+import { plateChecks } from '../utils/quizVerifyProfiles'
 
 const good = {
   stem: '2023年某省GDP为5.2万亿元，同比增长6%。2023年该省GDP比2022年约增加多少万亿元？',
@@ -68,6 +69,27 @@ describe('本地出题质检 skill quizVerify（严格单选·唯一正确项）
   it('图推题带 SVG 时题干短可接受', () => {
     const q = { ...good, stem: '选择最合适的一个填入问号处，使之呈现一定规律性。```svg\n<svg width="620" height="140" viewBox="0 0 620 140"></svg>\n```' }
     expect(localQuizVerify(q).ok).toBe(true)
+  })
+
+  it('类比推理直接给词项，短题干可接受', () => {
+    const q = {
+      stem: '轮胎∶汽车',
+      options: [
+        { k: 'A', t: '屏幕∶手机' },
+        { k: 'B', t: '苹果∶水果' },
+        { k: 'C', t: '医生∶患者' },
+        { k: 'D', t: '茶杯∶茶壶' }
+      ],
+      answer: 'A',
+      explain: '轮胎是汽车的组成部分，屏幕是手机的组成部分，故正确答案是A。'
+    }
+    expect(localQuizVerify(q, '类比推理').ok).toBe(true)
+    expect(plateChecks(q, '类比推理', '二词型')).toEqual([])
+  })
+
+  it('类比推理出现附加问法行 → 判不合格', () => {
+    const q = { stem: '轮胎∶汽车\n下列选项中，与题干逻辑关系最为相似的是（　）。' }
+    expect(plateChecks(q, '类比推理', '二词型').some((x) => x.includes('不得输出附加问法行'))).toBe(true)
   })
 
   it('askDirection 识别 选非/选是 问法', () => {

@@ -24,12 +24,13 @@ export function askDirection(q) {
 }
 
 // 本地质检：返回 { ok, reason }；ok=false 时必须重出
-export function localQuizVerify(q) {
+export function localQuizVerify(q, plate = '') {
   const errs = []
   if (!q) return { ok: false, reason: '题目为空' }
   const opts = Array.isArray(q.options) ? q.options : []
   const ans = String(q.answer || q.ans || q.correct || '').trim()
   const stem = String(q.stem || q.q || q.text || '').trim()
+  const subject = String(plate || (q && (q.subject || q.plate)) || '')
 
   // 1) 结构
   if (!stem) errs.push('题干缺失')
@@ -65,7 +66,7 @@ export function localQuizVerify(q) {
 
   // 6) 题干过短（一般行测题干至少几十字；图推题可有图形但题干也应说明问法）
   const hasSvg = /<svg|```svg/.test(stem) || opts.some((o) => /<svg|```svg/.test(String(o.t || '')))
-  if (stem.length < 15 && !hasSvg) errs.push('题干过短')
+  if (stem.length < 15 && !hasSvg && subject !== '类比推理') errs.push('题干过短')
 
   // 7) 选项内容过短/雷同题干
   const optLens = opts.map((o) => String(o.t || o.text || '').trim().length)

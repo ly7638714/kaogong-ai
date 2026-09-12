@@ -120,6 +120,7 @@ export const QUALITY_PROFILE = {
       const errs = []
       const stem = String(q.stem || '')
       if (stem.length < 3 || !stem.includes('∶') && !stem.includes(':') && !stem.includes('：')) errs.push('类比题干应为"词A∶词B"形式')
+      if (/下列选项中|与题干逻辑关系|关系最相似|关系最不相似|最为相似的是/.test(stem)) errs.push('类比推理题干不得输出附加问法行，应直接给词项、成语、古诗或填空结构')
       if (stem.length > 100) errs.push('类比题干过长（真题只给词项或填空结构，不写故事/背景）')
       const opts = (q.options || []).map((o) => String(o.t || o.text || '').trim()).filter(Boolean)
       if (opts.some((t) => t.length > 32)) errs.push('类比选项过长（应为词、成语或短词组）')

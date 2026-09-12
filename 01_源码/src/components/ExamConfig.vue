@@ -384,7 +384,7 @@ function toggleStrengthen(v) {
 
     <div v-if="srcMode === 'single'" class="ep-block">
       <div class="ep-block-hd">⚡ 单题快练</div>
-      <div class="ep-note">💡 专项速刷 · {{ singlePlate === '类比推理' ? '四层配置：六大板块 → 细分板块 → 题型 → 组量（类比推理按真题固定问法，不设是/非与自定义问法）' : '五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量' }}，碎片时间快速突破。</div>
+      <div class="ep-note">💡 专项速刷 · {{ singlePlate === '类比推理' ? '四层配置：六大板块 → 细分板块 → 题型 → 组量（类比推理题干直接给词项结构，不出现问法行）' : '五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量' }}，碎片时间快速突破。</div>
       <div class="ep-param">
         <label>① 六大板块</label>
         <select v-model="singleGroup" class="tb-sel" @change="onSingleGroup()">
