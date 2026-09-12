@@ -115,7 +115,7 @@ function toggleStrengthen(v) {
     </div>
     <div v-if="srcMode === 'morning'" class="ep-note">🌅 每日晨练包：资料速算 5 题（真题材料）+ 常识速测 5 题 + 错题本未复盘 5 题（二刷），一键生成 15 题组合卷。</div>
 
-    <div class="ep-param" style="margin: 10px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 10px 0 2px">
       <label>
         <input v-model="sheetMode" type="checkbox" />
         📋 仿真考试答题卡模式（填涂姓名/考场/准考证号 + 2B铅笔逐题填涂，交卷后统一看答案与解析）
@@ -123,7 +123,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">关闭 = 恢复「答完即时看对错 + 萌宠错因分析」原体验（单题快练更轻快）；开启 = 先答卷再交卷，仿真真实考试</span>
     </div>
 
-    <div v-if="srcMode === 'ai'" class="ep-param" style="margin: 8px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 8px 0 2px">
       <label>
         <input type="checkbox" :checked="!!(store.cfg && store.cfg.strengthen)" :disabled="!strengthenUnlock" @change="toggleStrengthen($event.target.checked)" />
         🎯 补短模式（组卷向薄弱考点加权，λ = 0.6）
@@ -132,7 +132,7 @@ function toggleStrengthen(v) {
       <span v-else class="ep-hint">开启后整卷题量 = 真题考频 × (1 + 0.6·薄弱度)：答得差的变体多出，答得好的让位；各板块作答不足 30 时自动退化为纯考频分配</span>
     </div>
 
-    <div class="ep-param" style="margin: 4px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 4px 0 2px">
       <label>
         <input type="checkbox" :checked="!!(store.cfg && store.cfg.blueprintRag)" @change="store.cfg.blueprintRag = $event.target.checked; saveCfg()" />
         📚 真题蓝本 RAG（few-shot 学结构 · 出题默认关）
@@ -140,7 +140,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">开启后出题前按同板块/题型检索 2 道近年真题作骨架参考（只学考点切入/干扰结构，禁止照抄——生成后程序做连续 12 字重合检测，违规自动重出）。代价：每题约 +0.4~0.7k token，属可选 AI 功能，默认关闭以守住默认路径零成本红线</span>
     </div>
 
-    <div class="ep-param" style="margin: 2px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 2px 0 2px">
       <label>
         <input type="checkbox" :checked="!!(store.cfg && store.cfg.dualCheck)" @change="store.cfg.dualCheck = $event.target.checked; saveCfg()" />
         🔍 双模型互检（第二厂商复核唯一性 · 默认关）
@@ -148,7 +148,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">开启后每道 AI 出题在过闸基础上，用「图增强模型」配置里的独立厂商模型（若存在且与出题模型不同）再做一次唯一解复核；未通过即重出。代价：每题 +1 次快模型调用（计入 costTrack），仅在有独立复核模型时建议开启</span>
     </div>
 
-    <div class="ep-param" style="margin: 2px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 2px 0 2px">
       <label>
         <input type="checkbox" :checked="!!(store.cfg && store.cfg.keepSame)" @change="store.cfg.keepSame = $event.target.checked; saveCfg()" />
         🎯 同类连做（单题快练·答错钉住同考点巩固 · 默认关）
@@ -156,7 +156,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">开启后单题快练答错 → 下一题仍出同考点/题型（换素材不换考点）直到答对；连续答对 3 题 → 自动换下一考点。用于把“错题打击”下沉到单题练习（doc35 §5.3）</span>
     </div>
 
-    <div class="ep-param" style="margin: 2px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 2px 0 2px">
       <label>
         <input type="checkbox" :checked="!!(store.cfg && store.cfg.preferLocalDet)" @change="store.cfg.preferLocalDet = $event.target.checked; saveCfg()" />
         🎛️ 本地优先（确定性出题 · 推荐开启）
@@ -164,7 +164,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">开启后单题快练“自由练（不限题型）”的 图推/数量/政治 直接用本地确定性生成器（答案程序可重算、零错题、零额度）；需要具体题型的 AI 题不受影响。追求“无错题”建议开启</span>
     </div>
 
-    <div class="ep-param" style="margin: 2px 0 2px">
+    <div v-if="false" class="ep-param" style="margin: 2px 0 2px">
       <label style="display: flex; align-items: center; gap: 6px">
         ⏱️ 单题时间预算（秒/题）
         <input v-model.number="store.cfg.genTimeoutSec" type="number" min="10" max="90" style="width: 64px" @change="store.cfg.genTimeoutSec = Math.max(10, Math.min(90, Number(store.cfg.genTimeoutSec) || 45)); saveCfg()" />
@@ -172,7 +172,7 @@ function toggleStrengthen(v) {
       <span class="ep-hint">默认 45 秒：每次出题/重试/质检共用该预算，超预算自动止损（最多重试 2 次 → 本地回退或拦截残缺卷）。用思考模型嫌慢时：降到 40-45 并把“出题并发”调到 ≤2，整卷时长更可控；不想要残缺卷就保持默认拦截</span>
     </div>
 
-    <div v-if="srcMode === 'ai'" class="ep-block">
+    <div v-if="false" class="ep-block">
       <div class="ep-block-hd">📐 卷面构成（国考/省考模板，均可自由编辑）</div>
       <div class="ep-note">💡 全真模考：按国考/省考模板题量与时限整卷组题，考点/题型自动轮换，出完直接开考计时。</div>
       <div class="ep-tmpl-row">
@@ -204,8 +204,64 @@ function toggleStrengthen(v) {
       </div>
     </div>
 
-    <div class="ep-block">
+    <div v-if="srcMode === 'ai'" class="ep-block ep-ai-simple">
+      <div class="ep-block-hd">一键高质量出题</div>
+      <div class="ep-note" style="border-left:3px solid var(--hud-green);background:rgba(52,211,153,.08)">系统已自动开启：快速模型、稳定质检、唯一答案校验、真题感设计、失败自动修复。你只需要选择题量和难度。</div>
+      <div class="ep-param">
+        <label>出题范围</label>
+        <select v-model="aiCap" class="tb-sel">
+          <option :value="3">精练 3 题/板块（推荐，出得快且更稳）</option>
+          <option :value="5">标准 5 题/板块（专项强化）</option>
+          <option :value="0">全卷模考（按当前卷面真实题量）</option>
+        </select>
+        <span class="ep-hint">{{ aiCap === 0 ? '按默认国考卷面构成出完整套卷；更适合整卷模考。' : '每个板块稳定出 ' + aiCap + ' 题，减少等待和失败概率。' }}</span>
+      </div>
+      <div class="ep-param">
+        <label>题目难度</label>
+        <select v-model="difficulty" class="tb-sel">
+          <option value="real">真题级（推荐：反套路、强干扰、真题质感）</option>
+          <option value="mid">标准训练（一处拐弯，适合日常巩固）</option>
+          <option value="easy">基础巩固（单一考点，先找回手感）</option>
+          <option value="hard">强化提升（复合考点，适合冲刺）</option>
+          <option value="curve">智能曲线（前易后难）</option>
+        </select>
+        <span class="ep-hint">默认“真题级”。系统会优先保证题目成立、唯一答案和干扰项质量，再追求难度。</span>
+      </div>
+      <div class="ep-param">
+        <label>答题方式</label>
+        <div class="ep-chips">
+          <button class="fp-b" :class="{ on: !sheetMode }" @click="sheetMode = false">即时解析（推荐）</button>
+          <button class="fp-b" :class="{ on: sheetMode }" @click="sheetMode = true">仿真答题卡</button>
+        </div>
+        <span class="ep-hint">即时解析：答完马上看对错和错因。仿真答题卡：先填涂后交卷，适合完整模考。</span>
+      </div>
+      <div class="ep-note">直接点下方“开始考试（AI 出题）”即可。没有必须理解的工程参数，也不需要手动切换质检和快模式。</div>
+    </div>
+    <div v-else class="ep-block">
       <div class="ep-block-hd">⚙️ 出题设置</div>
+      <div class="ep-param">
+        <label>题目难度</label>
+        <select v-model="difficulty" class="tb-sel">
+          <option value="real">真题级（推荐）</option>
+          <option value="mid">标准训练</option>
+          <option value="easy">基础巩固</option>
+          <option value="hard">强化提升</option>
+          <option value="curve">智能曲线</option>
+        </select>
+      </div>
+      <div class="ep-param">
+        <label>每题限时</label>
+        <select v-model="perQ" class="tb-sel">
+          <option :value="45">45 秒</option>
+          <option :value="60">60 秒（推荐）</option>
+          <option :value="75">75 秒</option>
+          <option :value="90">90 秒</option>
+        </select>
+      </div>
+      <div class="ep-note">稳定质检和快模式由系统自动配置，无需手动设置。</div>
+    </div>
+    <div v-if="false" class="ep-block">
+      <div class="ep-block-hd">旧版高级设置（已隐藏）</div>
       <div class="ep-param">
         <label>训练档位</label>
         <select v-model="difficulty" class="tb-sel">

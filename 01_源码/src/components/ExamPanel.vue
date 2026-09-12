@@ -39,10 +39,11 @@ const SUBJECTS = ['政治理论', '常识判断', '言语理解', '数量关系'
 const templateId = ref('gk_ds')
 const modules = ref((TEMPLATES.find((t) => t.id === 'gk_ds') || TEMPLATES[0]).modules.map((m) => ({ subject: m.subject, count: m.count, refMin: m.refMin, matType: m.matType || 'auto' })))
 const perQ = ref(60)            // 每题限时（秒），默认 60 秒（≤1分钟）
-const aiCap = ref(0)            // 每板块题量：0=全量（按卷面模板/用户设定），>0=抽样上限（快速）
+const aiCap = ref((() => { try { const s = localStorage.getItem('xc_ai_cap'); return s === null ? 3 : (Number(s) === 0 ? 0 : Number(s) || 3) } catch (e) { return 3 } })()) // 每板块题量：0=全量；默认 3 题精练，优先保证稳定与速度
 const genConcur = ref(3)        // 出卷并发度：并发出题请求数（视模型 API 限流调整）
 const fastGenModel = ref(localStorage.getItem('xc_fast_gen_model') || '') // 出题快模型：填非思考模型名(如 deepseek-flash)，出题/预生成用它提速；留空=跟随文字模型
 watch(fastGenModel, (v) => { try { localStorage.setItem('xc_fast_gen_model', String(v || '').trim()) } catch (e) {} })
+watch(aiCap, (v) => { try { localStorage.setItem('xc_ai_cap', String(Number(v) || 0)) } catch (e) {} })
 const useFigGen = ref(localStorage.getItem('xc_use_fig_gen') === '1') // 出题用智谱快模型（复用图形增强配置）
 watch(useFigGen, (v) => { try { localStorage.setItem('xc_use_fig_gen', v ? '1' : '0') } catch (e) {} })
 // 出题/预生成/解析/质检统一取生成模型：智谱快模型 > 出题快模型 > 对话快模型 > 文字模型
@@ -455,7 +456,27 @@ function start() {
     startPaper(p)
     return
   }
+  if (srcMode.value === 'ai') applyRecommendedAiSettings()
   startAi()
+}
+function applyRecommendedAiSettings() {
+  // AI 出题走“无脑稳定路径”：快模型自动路由、硬校验 + 一次复核、失败修复；用户不再管理工程开关。
+  store.cfg.strictGen = true
+  store.cfg.fastAutoQC = true
+  store.cfg.deepPlan = false
+  store.cfg.blueprintRag = false
+  store.cfg.dualCheck = false
+  store.cfg.preferLocalDet = true
+  store.cfg.propStyle = 'standard'
+  store.cfg.genTimeoutSec = 45
+  saveCfg()
+  fastGenModel.value = ''
+  useFigGen.value = false
+  genConcur.value = 3
+  paperDir.value = 'auto'
+  paperYtNGroup.value = 0
+  mixMode.value = 'module'
+  saveFastGenModel()
 }
 // 预生成所有题目：并发 2，进度条 + 预计剩余时间（用户可随时取消）
 const readyAsk = ref(false) // 组卷出完，等用户确认开考
