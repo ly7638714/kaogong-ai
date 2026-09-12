@@ -1255,8 +1255,10 @@ const examShow = ref(false) // 统一：模拟组卷
 const examPanelSrc = ref('ai') // ai=AI出题 / import=导入 / wrong=错题
 const examOffline = ref(false) // 离线练习：打开单题快练并默认启用本地生成器
 const examPaperData = ref(null) // 外部传入待重做/查看的卷子
-function openExam(src) {
+const examAutoStart = ref(false) // 一键高质量模拟题：进入后直接按推荐配置开做
+function openExam(src, opts = {}) {
   examPanelSrc.value = src || 'ai'
+  examAutoStart.value = opts && opts.autoStart === true
   examShow.value = true
   store.examOpen = true
   store.uiCtx.panel = 'exam'
@@ -1265,6 +1267,7 @@ function openExam(src) {
 }
 function closeExam() {
   examShow.value = false
+  examAutoStart.value = false
   store.examOpen = false
   store.uiCtx.panel = null
   examPaperData.value = null
@@ -2516,7 +2519,7 @@ Object.assign(fpctx, { backLayerOpen })
     </div>
   </Teleport>
   <AskWizard v-if="wzOpen" @close="wzOpen = false" @confirm="wzConfirm" />
-  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" :initial-local="examOffline" @close="closeExam" />
+  <ExamPanel v-if="examShow" :initial-src="examPanelSrc" :initial-paper="examPaperData" :initial-local="examOffline" :auto-start="examAutoStart" @close="closeExam" />
   
   <SolidTrain v-if="solidShow" @close="closeSolid" @send-question="onSolidQuestion" />
   <DataTrain v-if="dtShow" @close="closeDataTrain" @send-question="onSolidQuestion" />

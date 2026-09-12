@@ -25,6 +25,11 @@ function startOffline() {
   examOffline.value = true
   openExam.value('single')
 }
+function startOneClickQuiz() {
+  trainPickShow.value = false
+  utilsOpen.value = false
+  openExam.value('ai', { autoStart: true })
+}
 const {
   isNarrow,
   toolsCollapsed,
@@ -83,6 +88,7 @@ const {
               <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
             </select>
             <button class="btn btn-pri tb-btn train-launch" title="统一入口：先选模块，再进入对应训练配置" @click="trainPickShow = true">🎯 训练中心</button>
+            <button class="btn btn-pri tb-btn" title="一键按推荐配置生成高质量模拟题，无需设置参数" @click="startOneClickQuiz()">⚡ 一键高质量模拟题</button>
             <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="startOffline()">📴 离线练习</button>
           </div>
           <div class="train-utils">

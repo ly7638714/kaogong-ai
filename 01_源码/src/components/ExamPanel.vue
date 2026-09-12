@@ -24,7 +24,7 @@ import ExamAnswer from './ExamAnswer.vue'
 import ExamReport from './ExamReport.vue'
 
 const emit = defineEmits(['close'])
-const props = defineProps({ initialSrc: { type: String, default: 'ai' }, initialPaper: { type: Object, default: null }, initialLocal: { type: Boolean, default: false } })
+const props = defineProps({ initialSrc: { type: String, default: 'ai' }, initialPaper: { type: Object, default: null }, initialLocal: { type: Boolean, default: false }, autoStart: { type: Boolean, default: false } })
 
 // ===== 试卷模板库（基于国考/省考最新考情调研，均可自由编辑）=====
 // 2025 起国考新增「政治理论」：副省 135 / 地市·执法 130；判断推理含 图推/定义/类比/逻辑 子板块
@@ -975,6 +975,8 @@ onMounted(() => {
     const p = props.initialPaper
     if (!papers.value.some((x) => x.id === p.id)) { papers.value.unshift(p); savePapers() }
     setTimeout(() => startPaper(p), 50)
+  } else if (props.autoStart && srcMode.value === 'ai') {
+    setTimeout(() => start(), 80)
   }
 })
 function onSinglePlate() {
