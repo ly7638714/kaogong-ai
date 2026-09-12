@@ -60,8 +60,9 @@ import { loadSrs } from '../utils/memorySrs' // v3.8.205 记忆召回数据源
 import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
 import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
 import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
-import { speak, stopSpeak, speaking, startRecog, recogActive } from '../utils/tts'
-import { speakReadyText } from '../utils/speechScript'
+import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, ttsStatus, startRecog, recogActive } from '../utils/tts'
+import { speakReadyText, stripUnrelatedSpeech } from '../utils/speechScript'
+import { cleanSpeechText } from '../utils/tts/clean'
 import { MODE_NAMES } from '../kb'
 import { collectChat } from '../utils/chat'
 import { showToast } from '../utils/toast'
@@ -706,6 +707,8 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
     const _rb = recallBlock({ wqs: store.wqs, srs: loadSrs(), query: curTxt, plate6: _pp6r })
     if (_rb) sys += _rb
   } catch (e) {}
+  resetAutoSpeech(curTxt)
+  _autoSpeechPinCache = true
   live.value = { text: '', think: '', thinkOpen: false }
   scroll()
   try {
@@ -715,6 +718,7 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
       } else {
         // 出题中（提问助手「出一道题」）：流式预览同样只展示题目，解析作答后才揭晓
         live.value.text = lastMsg && lastMsg._askQuiz ? quizHideAnalysis(d.text) : d.text
+        if (store.cfg.ttsOn === true) feedAutoSpeech(d.text)
       }
       scrollThrottled()
     }, abortCtrl.signal)
@@ -744,6 +748,7 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
     } catch (e) {}
     const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '')
 addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
+    const lastAiForSpeech = store.msgs[store.msgs.length - 1]
     // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
     if (sentImgs.length && shouldFigEnhance(curTxt, lastMsg && lastMsg._imgType)) {
       const lastAi = store.msgs[store.msgs.length - 1]
@@ -756,8 +761,14 @@ addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     if (!hasRealSvg && _isTutu && detectBanKuai(curTxt) === '图形推理' && !curIsImg) {
       drawTutuAnno(lastAi2, curTxt)
     }
-    if (store.cfg.ttsOn === true) autoSpeak(finalContent)
+    finishAutoSpeech(_withSrc, () => {
+      if (!lastAiForSpeech) return
+      lastAiForSpeech._ttsCached = true
+      lastAiForSpeech._ttsCacheKind = 'stream'
+      saveMsgs()
+    })
   } catch (e) {
+    resetAutoSpeech()
     live.value = null
     if (e.name === 'AbortError') {
       addMsg({ role: 'assistant', content: live.value && live.value.text ? live.value.text : '⏹ 已停止生成。', stopped: true, _vt: _vtType })
@@ -1598,53 +1609,271 @@ function trainWeak() {
   train('quiz', { plate: w.plate, mode: w.mode, difficulty: 'mid' })
 }
 async function autoSpeak(t) {
-  if (store.cfg.ttsOn === true && t) await speakWithScript(t, null)
+  if (store.cfg.ttsOn === true && t) await speakWithScript(t, null, false)
 }
 function toggleTts() {
   store.cfg.ttsOn = !(store.cfg.ttsOn === true)
   saveCfg()
-  if (store.cfg.ttsOn !== true) stopSpeak()
+  if (store.cfg.ttsOn !== true) resetAutoSpeech()
   showToast(store.cfg.ttsOn === true ? '🔊 自动朗读已开启' : '🔇 自动朗读已关闭', 'info')
+}
+// 自动朗读流式队列：回答还在生成时，按完整句子依次开读；不等待整段完成。
+let _autoSpeechToken = 0
+let _autoSpeechCursor = 0
+let _autoSpeechQueue = []
+let _autoSpeechBusy = false
+let _autoSpeechInFence = false
+let _autoSpeechQuestion = ''
+let _autoSpeechCacheOnly = false
+let _autoSpeechPinCache = false
+let _autoSpeechTrackIndex = -1
+let _autoSpeechOnDone = null
+
+function resetAutoSpeech(question = '') {
+  _autoSpeechToken += 1
+  _autoSpeechCursor = 0
+  _autoSpeechQueue = []
+  _autoSpeechBusy = false
+  _autoSpeechInFence = false
+  _autoSpeechQuestion = String(question || '')
+  _autoSpeechCacheOnly = false
+  _autoSpeechPinCache = false
+  _autoSpeechTrackIndex = -1
+  _autoSpeechOnDone = null
+  stopSpeak()
+}
+function autoSpeechCut(text, final) {
+  const s = String(text || '')
+  if (final) return s.length
+  const re = /[。！？!?；;\n]/g
+  let m
+  while ((m = re.exec(s))) {
+    const end = m.index + 1
+    if (end >= 6) return end
+  }
+  if (s.length >= 64) {
+    const comma = Math.max(s.lastIndexOf('，'), s.lastIndexOf(','), s.lastIndexOf('：'), s.lastIndexOf(':'))
+    return comma >= 12 ? comma + 1 : 48
+  }
+  return 0
+}
+function autoSpeechBody(text) {
+  const t = String(text || '').trim()
+  if (t.replace(/\s+/g, '').length < 4) return false
+  if (/^(?:```|<svg|function\s|const\s|import\s|class\s)/i.test(t)) return false
+  return true
+}
+function drainAutoSpeech() {
+  if (_autoSpeechBusy) return
+  if (!_autoSpeechQueue.length) {
+    const cb = _autoSpeechOnDone
+    _autoSpeechOnDone = null
+    if (cb) cb()
+    return
+  }
+  const token = _autoSpeechToken
+  const piece = _autoSpeechQueue.shift()
+  _autoSpeechBusy = true
+  const trackIndex = _autoSpeechTrackIndex
+  if (trackIndex >= 0) speakingMsgIndex.value = trackIndex
+  const done = () => {
+    if (token !== _autoSpeechToken) return
+    _autoSpeechBusy = false
+    drainAutoSpeech()
+  }
+  const fail = (msg) => {
+    if (token !== _autoSpeechToken) return
+    _autoSpeechBusy = false
+    _autoSpeechQueue = []
+    if (trackIndex >= 0) speakingMsgIndex.value = -1
+    showToast(msg === 'cache-miss' ? '♻️ 语音缓存已失效，请重新点一次朗读生成缓存' : '语音缓存播放失败，请重新朗读', 'info')
+  }
+  speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache)
+}
+function feedAutoSpeech(text, final = false) {
+  if (store.cfg.ttsOn !== true) return
+  const full = stripUnrelatedSpeech(String(text || ''), _autoSpeechQuestion)
+  if (_autoSpeechCursor > full.length) _autoSpeechCursor = 0
+  const rest = full.slice(_autoSpeechCursor)
+  if (!rest) return
+  const cut = autoSpeechCut(rest, final)
+  if (!cut) return
+  const raw = rest.slice(0, cut)
+  _autoSpeechCursor += raw.length
+  const fenceCount = (raw.match(/```/g) || []).length
+  if (_autoSpeechInFence) {
+    if (fenceCount % 2 === 1) _autoSpeechInFence = false
+    return
+  }
+  if (fenceCount % 2 === 1) {
+    _autoSpeechInFence = true
+    return
+  }
+  const cleaned = cleanSpeechText(raw).trim()
+  if (autoSpeechBody(cleaned)) _autoSpeechQueue.push(cleaned)
+  drainAutoSpeech()
+}
+function finishAutoSpeech(text, onDone = null) {
+  if (store.cfg.ttsOn !== true) return
+  _autoSpeechOnDone = onDone
+  feedAutoSpeech(text, true)
+}
+function buildAutoSpeechSegments(text, question = '') {
+  const full = stripUnrelatedSpeech(String(text || ''), question)
+  const out = []
+  let cursor = 0
+  let inFence = false
+  while (cursor < full.length) {
+    const rest = full.slice(cursor)
+    const cut = autoSpeechCut(rest, false)
+    if (!cut) break
+    const raw = rest.slice(0, cut)
+    cursor += raw.length
+    const fenceCount = (raw.match(/```/g) || []).length
+    if (inFence) {
+      if (fenceCount % 2 === 1) inFence = false
+      continue
+    }
+    if (fenceCount % 2 === 1) { inFence = true; continue }
+    const cleaned = cleanSpeechText(raw).trim()
+    if (autoSpeechBody(cleaned)) out.push(cleaned)
+  }
+  const tail = cleanSpeechText(full.slice(cursor)).trim()
+  if (autoSpeechBody(tail)) out.push(tail)
+  return out
+}
+function questionBeforeMessage(idx) {
+  for (let k = idx - 1; k >= 0; k--) {
+    const mm = store.msgs[k]
+    if (mm && mm.role === 'user') return typeof mm.content === 'string' ? mm.content : (mm.content && mm.content.text) || ''
+  }
+  return ''
+}
+function speechTextFromMessage(msg) {
+  if (!msg) return ''
+  const c = msg.cloneNode(true)
+  ;['.msg-actions', '.ans-tag', '.fold-btn', '.fig-hd', '.fig-busy', '.fig-fail', '.quiz-acts', '.think-box', '.code-copy'].forEach((sel) => {
+    c.querySelectorAll(sel).forEach((el) => el.remove())
+  })
+  return c.innerText || ''
+}
+function replayMessageSpeech(m, idx) {
+  if (!m || !m._ttsCached) {
+    showToast('这条回复还没有完整语音缓存，请先点一次「🔊 朗读」', 'info')
+    return
+  }
+  const msg = document.querySelector('.msg[data-i="' + Number(idx) + '"]')
+  const text = speechTextFromMessage(msg)
+  if (!text) return
+  const question = questionBeforeMessage(idx)
+  const segments = m._ttsCacheKind === 'stream'
+    ? buildAutoSpeechSegments(text, question)
+    : [cleanSpeechText(stripUnrelatedSpeech(text, question)).trim()].filter(Boolean)
+  if (!segments.length) return
+  resetAutoSpeech(question)
+  _autoSpeechCacheOnly = true
+  _autoSpeechTrackIndex = Number(idx)
+  _autoSpeechQueue = segments
+  drainAutoSpeech()
 }
 // v3.8.225：自动朗读与手动「🔊 朗读消息」统一走讲稿链路；
 // 启用语音阅读大模型 → 先改口语讲稿再朗读；未启用/失败 → 原文直读
-function speakWithScript(txt, onEnd) {
+const speakingMsgIndex = ref(-1)
+const speechPreparing = ref(false)
+let _msgSpeechToken = 0
+
+function makeMsgSpeechBase(rate, token, onEnd, onError) {
+  const base = { scene: store.cfg.ttsScene, rate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
+  base.onEnd = () => {
+    if (token !== _msgSpeechToken) return
+    speakingMsgIndex.value = -1
+    speechPreparing.value = false
+    if (onEnd) onEnd()
+  }
+  base.onError = (msg) => {
+    if (token !== _msgSpeechToken) return
+    speakingMsgIndex.value = -1
+    speechPreparing.value = false
+    if (onError) onError(msg)
+  }
+  return base
+}
+
+function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, onError = null, question = '', cacheOnly = false, pinCache = false) {
   // 对话页朗读同样使用「当前萌宠」的专属声线（与萌宠朗读、读题保持同一套声音）
-  const base = { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, ...petSpeakOpts() }
-  if (onEnd) base.onEnd = onEnd
   const raw = String(txt || '').trim()
   if (!raw) return Promise.resolve()
-  const rd = store.cfg && store.cfg.rd
-  if (rd && rd.on && rd.key && rd.url && rd.model) {
-    return speakReadyText(raw)
-      .then((t) => speak((t && t.trim()) || raw, base))
-      .catch(() => speak(raw, base))
+  if (trackMessage) {
+    _msgSpeechToken += 1
+    speechPreparing.value = true
+  } else if (speakingMsgIndex.value >= 0) {
+    _msgSpeechToken += 1
+    speakingMsgIndex.value = -1
+    speechPreparing.value = false
   }
-  speak(raw, base)
+  const token = _msgSpeechToken
+  const base = trackMessage
+    ? makeMsgSpeechBase(store.cfg.ttsRate, token, onEnd, onError)
+    : { scene: store.cfg.ttsScene, rate: store.cfg.ttsRate, pitch: store.cfg.ttsPitch, ...petSpeakOpts(), onEnd, onError, cacheOnly, pinCache }
+  if (trackMessage) { base.cacheOnly = cacheOnly; base.pinCache = pinCache }
+  const playReady = (ready) => {
+    if (trackMessage && token !== _msgSpeechToken) return
+    if (trackMessage) speechPreparing.value = false
+    speak(ready, base)
+  }
+  const rd = store.cfg && store.cfg.rd
+  if (!skipRewrite && rd && rd.on && rd.key && rd.url && rd.model) {
+    return speakReadyText(raw, { question })
+      .then((t) => playReady((t && t.trim()) || raw))
+      .catch(() => playReady(raw))
+  }
+  playReady(raw)
   return Promise.resolve()
 }
-function speakMsgTxt(txt, onEnd) {
-  return speakWithScript(txt, onEnd)
+function speakMsgTxt(txt, onEnd, trackMessage = false, question = '', cacheOnly = false, pinCache = false) {
+  return speakWithScript(txt, onEnd, trackMessage, false, null, question, cacheOnly, pinCache)
 }
 function toggleSpeak(ev) {
   const btn = ev.currentTarget
   const msg = btn.closest('.msg')
   if (!msg) return
-  if (speaking()) {
-    stopSpeak()
-    btn.textContent = '🔊 朗读'
+  const idx = Number(msg.dataset.i)
+  if (speaking() && speakingMsgIndex.value === idx) {
+    stopMsgSpeak()
     return
   }
-  const c = msg.cloneNode(true)
-  // 只朗读「回复正文」：移除功能按钮行 / 元信息标签（AI批改·时间·板块）/ 折叠按钮 / 图形头部与加载失败提示 / 思考过程
-  ;['.msg-actions', '.ans-tag', '.fold-btn', '.fig-hd', '.fig-busy', '.fig-fail', '.quiz-acts', '.think-box', '.code-copy'].forEach((sel) => {
-    c.querySelectorAll(sel).forEach((el) => el.remove())
-  })
-  const txt = c.innerText || ''
-  btn.textContent = txt && store.cfg.rd && store.cfg.rd.on ? '⏳ 准备讲稿…' : '🔇 停止'
+  const question = questionBeforeMessage(idx)
+  resetAutoSpeech(question)
+  const txt = speechTextFromMessage(msg)
+  if (!txt) return
+  const m = store.msgs[idx]
+  speakingMsgIndex.value = idx
   speakMsgTxt(txt, () => {
-    btn.textContent = '🔊 朗读'
-  })
+    if (!m) return
+    m._ttsCached = true
+    m._ttsCacheKind = 'message'
+    saveMsgs()
+  }, true, question, false, true)
+}
+function stopMsgSpeak() {
+  _msgSpeechToken += 1
+  stopSpeak()
+  speakingMsgIndex.value = -1
+  speechPreparing.value = false
+}
+function toggleMsgPause() {
+  if (!speaking()) return
+  if (speakPaused()) resumeSpeak()
+  else pauseSpeak()
+}
+function cycleMsgSpeed() {
+  const speeds = [0.75, 1, 1.25, 1.5]
+  const cur = Number(store.cfg.ttsRate) || 1
+  const i = speeds.indexOf(cur)
+  const next = speeds[i >= 0 ? (i + 1) % speeds.length : 1]
+  store.cfg.ttsRate = next
+  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg)) } catch (e) {}
+  showToast('⏱ 倍速已设为 ' + Math.round(next * 100) + '%（下一条回复或重新朗读立即生效）', 'info')
 }
 function toggleMic() {
   const ok = startRecog((t) => {
@@ -2030,7 +2259,7 @@ onUnmounted(() => window.removeEventListener('resize', onToolsResize))
 defineEmits(['export-review'])
 
 // v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
-const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, speakPaused, ttsStatus, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, speakingMsgIndex, speechPreparing, toggleMsgPause, cycleMsgSpeed, stopMsgSpeak, replayMessageSpeech, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
 Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 Object.assign(fpctx, { backLayerOpen })
 

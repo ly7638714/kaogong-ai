@@ -111,6 +111,7 @@ function scenePitch(scene) {
 
 let _lastErrToast = 0
 function errToast(msg) {
+  if (String(msg || '') === 'cache-miss') return
   const now = Date.now()
   if (now - _lastErrToast < 8000) return
   _lastErrToast = now
@@ -130,6 +131,8 @@ export function speak(text, opts) {
     rate: opts.rate != null ? opts.rate : 0.98,
     pitch: opts.pitch != null ? opts.pitch : scenePitch(opts.scene),
     speed: opts.rate != null ? opts.rate : 1,
+    cacheOnly: opts.cacheOnly === true,
+    pinCache: opts.pinCache === true,
     onEnd: opts.onEnd,
     onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
   })
@@ -142,13 +145,24 @@ export function primeTts() {
 }
 export function stopSpeak() {
   stopSpeakPro()
+  ttsStatus.state = 'idle'
+  ttsStatus.msg = ''
+  ttsStatus.at = Date.now()
 }
 export function speaking() {
   return speakingPro()
 }
-// 暂停 / 继续朗读（集成到萌宠悬浮面板）
-export function pauseSpeak() { return pauseSpeakPro() }
-export function resumeSpeak() { return resumeSpeakPro() }
+// 暂停 / 继续朗读（萌宠悬浮面板与消息工具栏共用）
+export function pauseSpeak() {
+  const ok = pauseSpeakPro()
+  if (ok) { ttsStatus.state = 'paused'; ttsStatus.msg = '⏸ 已暂停朗读'; ttsStatus.at = Date.now() }
+  return ok
+}
+export function resumeSpeak() {
+  const ok = resumeSpeakPro()
+  if (ok) { ttsStatus.state = 'speaking'; ttsStatus.msg = '▶ 继续朗读'; ttsStatus.at = Date.now() }
+  return ok
+}
 export function speakPaused() { return isSpeakPaused() }
 
 // ===== 真人引擎辅助（设置页「音色市场」用）=====

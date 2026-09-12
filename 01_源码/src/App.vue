@@ -4170,17 +4170,17 @@ onUnmounted(() => {
       <PetAvatar :size="40" class="pet-emoji-av" />
       <span class="pet-mood">{{ petMood.emoji }}</span>
       <div class="pet-act" @click.stop @pointerdown.stop>
-        <button class="pa-btn" title="朗读当前页面内容（题干/错题等）" @click="petReadCurrent()">🔊</button>
-        <button class="pa-btn" :title="petReadPaused() ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="petPauseToggle()">{{ petReadPaused() ? '▶️' : '⏸' }}</button>
-        <button class="pa-btn" :title="'朗读倍速：' + Math.round((store.cfg.ttsRate || 1) * 100) + '%（点击切换）'" @click="petNextSpeed()">⏱</button>
-        <button class="pa-btn" title="停止朗读" @click="petStop()">⏹</button>
+        <button class="pa-btn" aria-label="朗读当前页面内容" title="朗读当前页面内容（题干/错题等）" @click="petReadCurrent()">朗读</button>
+        <button class="pa-btn" :aria-label="petReadPaused() ? '继续朗读' : '暂停朗读'" :title="petReadPaused() ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="petPauseToggle()">{{ petReadPaused() ? '继续' : '暂停' }}</button>
+        <button class="pa-btn" :aria-label="'切换朗读倍速，当前 ' + Math.round((store.cfg.ttsRate || 1) * 100) + '%'" :title="'朗读倍速：' + Math.round((store.cfg.ttsRate || 1) * 100) + '%（点击切换）'" @click="petNextSpeed()">{{ Math.round((store.cfg.ttsRate || 1) * 100) }}%</button>
+        <button class="pa-btn" aria-label="停止朗读" title="停止朗读" @click="petStop()">停止</button>
         <!-- 考场计时：开关 + 实时倒计时（v3.8.31x 起从对话工具栏迁入萌宠常用悬浮） -->
         <button
           class="pa-btn pa-timer"
           :class="{ on: examMode, warn: examMode && left === 0 }"
           :title="examMode ? '考场计时进行中 · 点此关闭' : '考场计时：开启后按问数限时（1问=1分钟），AI 回复后统计用时'"
           @click="toggleExamTimer()"
-        >⏲ {{ examMode ? (left === 0 ? '超时' : fmtSec(left)) : '计时' }}</button>
+        >{{ examMode ? (left === 0 ? '超时' : fmtSec(left)) : '计时' }}</button>
       </div>
     </div>
         <!-- 萌宠智能助理面板（可拖拽小窗 · 不遮题） -->

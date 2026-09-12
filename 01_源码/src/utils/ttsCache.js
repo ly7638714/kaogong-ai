@@ -45,18 +45,36 @@ export async function ttsCacheGet(key) {
   } catch (e) { return null }
 }
 // 写入缓存（写入后按 LRU 淘汰超额部分）
-export async function ttsCacheSet(key, bytes, mime) {
+export async function ttsCacheSet(key, bytes, mime, pinned = false) {
   try {
     const db = await open()
     await new Promise((res) => {
       const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).put({ key, bytes, mime, at: Date.now(), size: (bytes && bytes.byteLength) || 0 }, key)
+      tx.objectStore(STORE).put({ key, bytes, mime, at: Date.now(), size: (bytes && bytes.byteLength) || 0, pinned: pinned === true }, key)
       tx.oncomplete = () => res()
       tx.onerror = () => res()
       tx.onabort = () => res()
     })
     await evictOld(db)
   } catch (e) { /* 缓存失败不影响朗读 */ }
+}
+// 固定缓存：命中旧缓存时也可升级为永久保留，LRU 不再淘汰
+export async function ttsCachePin(key) {
+  try {
+    const db = await open()
+    await new Promise((res) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      const os = tx.objectStore(STORE)
+      const rq = os.get(key)
+      rq.onsuccess = () => {
+        const v = rq.result
+        if (v) os.put(Object.assign({}, v, { pinned: true, at: Date.now() }), key)
+      }
+      tx.oncomplete = () => res()
+      tx.onerror = () => res()
+      tx.onabort = () => res()
+    })
+  } catch (e) {}
 }
 function collectMeta(db) {
   return new Promise((res) => {
@@ -68,7 +86,7 @@ function collectMeta(db) {
         const c = cur.result
         if (c) {
           const v = c.value || {}
-          out.push({ key: c.key, at: Number(v.at) || 0, size: Number(v.size) || 0 })
+          out.push({ key: c.key, at: Number(v.at) || 0, size: Number(v.size) || 0, pinned: v.pinned === true })
           c.continue()
         } else res(out)
       }
@@ -82,9 +100,10 @@ async function evictOld(db) {
   let total = metas.reduce((s, m) => s + m.size, 0)
   if (metas.length <= MAX && total <= MAX_BYTES) return
   metas.sort((a, b) => a.at - b.at)
+  const evictable = metas.filter((m) => !m.pinned)
   const kill = []
   let count = metas.length
-  for (const m of metas) {
+  for (const m of evictable) {
     if (count <= MAX && total <= MAX_BYTES) break
     kill.push(m.key)
     count--

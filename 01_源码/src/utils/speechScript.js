@@ -31,7 +31,28 @@ const SCRIPT_SYS =
   '三、语气和节奏要像真人上课：句子长短交错，不能每句都是同等长度；把最重要的结论或最容易错的地方放在最后或单独短句里，但不额外添加提示语。' +
   '四、口语词只允许用来替换原文里的书面表达，不得新增语气填充（如“那么”“好的”“来”），也不得卖萌。' +
   '五、内容不变形：题干里的年份、数字、单位、字母、专有名词、逻辑关系和选项原文必须保留；解析、知识点允许换说法，但考点、结论和易错点不得丢失，也不得增编原文没有的结论。' +
-  '六、把“/”“→”“%”“≤”等符号按口语读法写出来（如“百分之”“推出”“小于等于”），不要照抄符号。'
+  '六、把“/”“→”“%”“≤”等符号按口语读法写出来（如“百分之”“推出”“小于等于”），不要照抄符号。' +
+  '七、相关性过滤：只保留直接回答用户问题的正文；复盘指引、知识卡/依据卡/命中卡、来源标注、学习建议、拓展延伸、系统说明等，只要用户没有明确问到，全部删除。'
+
+const SPEECH_EXTRA_RULES = [
+  { key: 'review', re: /(?:^|\n)\s*(?:#{1,6}\s*)?(?:📌|📊|🧭|💡|⚠️)?\s*(?:高效)?复盘(?:指引|总结|建议)/i, ask: /复盘|错因|复习|总结|二刷/ },
+  { key: 'card', re: /(?:^|\n)\s*(?:#{1,6}\s*)?(?:📚|📖|🧠|🔖)?\s*(?:知识卡|依据卡|命中卡|参考卡|资料卡|方法卡|教材依据|卡片来源)/i, ask: /知识卡|考点|知识点|方法|依据|来源|出处/ },
+  { key: 'source', re: /(?:^|\n)\s*(?:#{1,6}\s*)?(?:📊|📚|🔗)?\s*(?:组卷来源|材料来源|数据来源|资料来源|来源|出处)\s*[：:]/i, ask: /来源|出处|组卷|材料|数据/ },
+  { key: 'help', re: /(?:^|\n)\s*(?:#{1,6}\s*)?(?:⚠️|💡|ℹ️)?\s*(?:系统提示|免责声明|温馨提示|使用说明|以上说明|学习建议|拓展延伸)/i, ask: /系统提示|免责声明|使用说明|学习建议|拓展/ }
+]
+
+// 自动朗读/讲稿生成前的相关性硬过滤：默认删掉回复尾部附加的复盘、卡片、来源和系统说明。
+export function stripUnrelatedSpeech(text, question = '') {
+  const raw = String(text || '')
+  const q = String(question || '')
+  let cut = raw.length
+  for (const rule of SPEECH_EXTRA_RULES) {
+    if (rule.ask.test(q)) continue
+    const m = rule.re.exec(raw)
+    if (m && m.index >= 0) cut = Math.min(cut, m.index)
+  }
+  return raw.slice(0, cut).trim()
+}
 
 // 改写上限（字符）：readCtx 一般已截到 ~1400 字，这里多留余量
 const MAX_CHARS = 1800
@@ -67,7 +88,7 @@ export function speechScriptKind(raw, hint) {
 // 把原文转成“可直接朗读的讲稿”；不可用/失败一律返回原文
 export async function speakReadyText(raw, opts = {}) {
   // 先做一次统一正文清洗和符号/公式口语化，再交给讲稿模型；防止“依据卡”、来源标注、代码和公式原样混入朗读。
-  const src = cleanSpeechText(String(raw || '').trim())
+  const src = cleanSpeechText(stripUnrelatedSpeech(String(raw || '').trim(), opts.question || ''))
   if (!src) return src
   const c = rdCfg()
   if (!c) return src
@@ -90,7 +111,7 @@ export async function speakReadyText(raw, opts = {}) {
         { role: 'system', content: SCRIPT_SYS },
         {
           role: 'user',
-          content: '请把下面的内容改写成可直接朗读的口语讲稿。\n' + speechUserRule(kind) + '\n原文：\n' + snippet
+          content: '请把下面的内容改写成可直接朗读的口语讲稿。\n' + speechUserRule(kind) + (opts.question ? '\n用户原问题：' + String(opts.question).slice(0, 500) : '') + '\n只保留直接回答该问题的正文；与问题无关的复盘指引、知识卡、来源、学习建议、拓展和系统说明必须删除。\n原文：\n' + snippet
         }
       ],
       maxTokens, // 输出上限：随原文长度动态收紧，避免模型“加戏”扩写

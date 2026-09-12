@@ -6,7 +6,7 @@ import { reactive } from 'vue'
 import { store } from '../store'
 import { recordCost, getTtsPrice, getCloneFee, beginCost, getBudget, todaySpend } from './costTrack'
 import { showToast } from './toast'
-import { ttsCacheKey, ttsCacheGet, ttsCacheSet } from './ttsCache'
+import { ttsCacheKey, ttsCacheGet, ttsCacheSet, ttsCachePin } from './ttsCache'
 import { cleanSpeechText, chunkForTts, speechPauseMs } from './tts/clean'
 import { smoothWavBytes } from './tts/wav'
 // 批次6B拆分：纯函数移至 tts/ 子模块，此处回导出保持既有 import 路径兼容
@@ -621,7 +621,7 @@ export async function glmSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    }, 'audio/wav', stats),
+    }, 'audio/wav', stats, opts.pinCache === true),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -654,11 +654,12 @@ function ttsChunkKey(engine, cfg, voice, speed, text) {
 // 同一分块并发请求去重：多个入口同时朗读同一段内容时只发一次请求，避免重复计费
 const _ttsInflight = new Map()
 // stats: { hitChars, missChars } —— 只对「真正发起请求」的字数计费，缓存命中的字数省下来
-async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, stats) {
+async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, stats, pin = false) {
   const ck = ttsChunkKey(engine, cfg, voice, speed, text)
   try {
     const hit = await ttsCacheGet(ck)
     if (hit && hit.bytes) {
+      if (pin) ttsCachePin(ck)
       if (stats) stats.hitChars += String(text || '').length
       return hit.bytes
     }
@@ -672,7 +673,7 @@ async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, 
   const task = (async () => {
     const bytes = await fetchFn()
     if (bytes && bytes.byteLength > 0) {
-      try { ttsCacheSet(ck, bytes, mime) } catch (e) {}
+      try { ttsCacheSet(ck, bytes, mime, pin) } catch (e) {}
     }
     return bytes
   })()
@@ -773,7 +774,7 @@ export async function openaiSynthesize(text, opts = {}) {
         throw new Error((e.error && (e.error.message || e.error.code)) || 'HTTP ' + r.status)
       }
       return await r.arrayBuffer()
-    }, 'audio/mpeg', stats),
+    }, 'audio/mpeg', stats, opts.pinCache === true),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -911,7 +912,7 @@ export async function dashSynthesize(text, opts = {}) {
         return await ar.arrayBuffer()
       }
       throw new Error('音频字段缺失')
-    }, 'audio/mpeg', stats),
+    }, 'audio/mpeg', stats, opts.pinCache === true),
     opts.onChunk
   )
   if (!bytesAll.length) return { ok: false, msg: firstErr || '合成失败' }
@@ -1383,6 +1384,11 @@ export async function speakPro(text, opts = {}) {
       const cov = await ttsCacheCoverage(t, Object.assign({}, opts, { mode, chunkSize: 240, firstChunkSize: 42 }))
       fullyCached = !!(cov && cov.full)
     } catch (e) {}
+    if (opts.cacheOnly && !fullyCached) {
+      setStatus('error', '语音缓存已失效，请重新朗读一次')
+      if (opts.onError) opts.onError('cache-miss')
+      return { ok: false, msg: 'cache-miss', cacheOnly: true }
+    }
     if (!fullyCached && paidTtsBlocked(t.length)) {
       guardToastOnce()
       mode = 'sys'
@@ -1405,13 +1411,14 @@ export async function speakPro(text, opts = {}) {
       const ck = ttsCacheKey('edge', opts.voice || store.cfg.ttsEdgeVoice, opts.rate, opts.pitch, t)
       const hit = await ttsCacheGet(ck)
       if (hit && hit.bytes) {
+        if (opts.pinCache === true) ttsCachePin(ck)
         const played = await playBytes(hit.bytes, hit.mime)
         setStatus(played ? 'done' : 'error', played ? '🔁 已从缓存播放（未重复合成）' : '❌ 播放失败（浏览器拦截自动播放）')
         if (played && opts.onEnd) opts.onEnd()
         return { ok: played, cached: true }
       }
       const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
-      if (r.ok && r.bytes) ttsCacheSet(ck, r.bytes, r.mime)
+      if (r.ok && r.bytes) ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
       return finishSpeak(r, opts)
     }
     if (mode === 'sys') {

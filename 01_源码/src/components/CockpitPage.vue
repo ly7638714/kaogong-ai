@@ -19,6 +19,7 @@ const ck = computed(() => {
   const r = store.wqs.filter((x) => x.reviewed).length
   return { q, w, r, revRate: w ? Math.round((r / w) * 100) : 0 }
 })
+const hasStudyData = computed(() => Number(ck.value.q) > 0 || Number(ck.value.w) > 0 || Number(ck.value.r) > 0)
 // 复盘健康分（深化）：复错率/到期/消化/复盘率 → 看板小结
 const health = computed(() => {
   try { return reviewHealth(store.wqs) } catch (e) { return { score: 0, grade: '—', t: 0, tips: [], reviewedRate: 0, digestRate: 0, overdue: 0, repRate: null } }
@@ -402,11 +403,20 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
       <span style="flex:1"></span>
       <span style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">进度 {{ ps.pct }}%</span>
     </div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;align-items:center">
-      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">复习到期 <b style="color:#fb7185">{{ tp.due }}</b></span>
-      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">做题 <b>{{ tp.q }}/{{ planCfg.quiz }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.quiz" @change="setPlanGoal('quiz', $event.target.value)" /></span>
-      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">复盘 <b>{{ tp.rev }}/{{ planCfg.review }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.review" @change="setPlanGoal('review', $event.target.value)" /></span>
-      <span style="font-size: calc(12px * var(--ui-fs-scale, 1))">时长分 <b>{{ tp.minutes }}/{{ planCfg.minutes }}</b> <input type="number" min="0" style="width:46px;color:var(--text);background:var(--bg3,rgba(127,127,127,.12))" :value="planCfg.minutes" @change="setPlanGoal('minutes', $event.target.value)" /></span>
+    <div class="ck-goal-row">
+      <span class="ck-goal-pill" :title="'待复习 ' + tp.due + ' 道'"><em>复习到期</em><b>{{ tp.due }}</b><span>道</span></span>
+      <span class="ck-goal-pill" :title="'已完成 ' + tp.q + ' 道，目标 ' + planCfg.quiz + ' 道'">
+        <em>做题</em><span>已完成</span><b>{{ tp.q }}</b><span>道 / 目标</span>
+        <input aria-label="每日做题目标" type="number" min="0" :value="planCfg.quiz" @change="setPlanGoal('quiz', $event.target.value)" /><span>道</span>
+      </span>
+      <span class="ck-goal-pill" :title="'已完成 ' + tp.rev + ' 道，目标 ' + planCfg.review + ' 道'">
+        <em>复盘</em><span>已完成</span><b>{{ tp.rev }}</b><span>道 / 目标</span>
+        <input aria-label="每日复盘目标" type="number" min="0" :value="planCfg.review" @change="setPlanGoal('review', $event.target.value)" /><span>道</span>
+      </span>
+      <span class="ck-goal-pill" :title="'已学习 ' + tp.minutes + ' 分钟，目标 ' + planCfg.minutes + ' 分钟'">
+        <em>学习时长</em><span>已完成</span><b>{{ tp.minutes }}</b><span>分钟 / 目标</span>
+        <input aria-label="每日学习目标分钟数" type="number" min="0" :value="planCfg.minutes" @change="setPlanGoal('minutes', $event.target.value)" /><span>分钟</span>
+      </span>
     </div>
     <div style="height:6px;border-radius:4px;background:rgba(127,127,127,.15);margin-top:8px;overflow:hidden"><i :style="{ display:'block', height:'6px', width: ps.pct + '%', background:'linear-gradient(90deg,#34d399,#fbbf24)' }"></i></div>
     <div style="display:flex;gap:6px;margin-top:8px;align-items:flex-end">
@@ -512,8 +522,8 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         <div v-if="tasks.length && tasks.every((t) => t.done)" class="ct-all">🎉 今日任务全部完成，去休息或加练吧！</div>
       </div>
 
-      <!-- 概览四卡 -->
-      <div class="ck-cards">
+      <!-- 概览卡：新用户先展示行动入口，有数据后再展示累计统计 -->
+      <div v-if="hasStudyData" class="ck-cards">
         <div class="ck-card">
           <div class="ck-n">{{ ck.q }}</div>
           <div class="ck-l">累计提问</div>
@@ -529,6 +539,16 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         <div class="ck-card b">
           <div class="ck-n">{{ daysLeft != null ? daysLeft : '—' }}</div>
           <div class="ck-l">备考倒计时</div>
+        </div>
+      </div>
+      <div v-else class="ck-start">
+        <div class="ck-start-copy">
+          <b>今天从第一道题开始</b>
+          <span>做完后这里会显示提问、错题和复盘进度</span>
+        </div>
+        <div class="ck-start-acts">
+          <button class="btn btn-pri" @click="goQuizAsk()">⚡ 开始第一题</button>
+          <button class="btn btn-gh" @click="openHub()">🗓️ 复习中枢</button>
         </div>
       </div>
 

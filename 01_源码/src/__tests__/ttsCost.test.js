@@ -5,13 +5,14 @@ vi.mock('../utils/ttsCache', () => ({
   ttsCacheKey: (...a) => 'k_' + a.join('|'),
   ttsCacheGet: vi.fn(async () => null),
   ttsCacheSet: vi.fn(async () => {}),
+  ttsCachePin: vi.fn(async () => {}),
   ttsCacheClear: vi.fn(async () => {}),
   ttsCacheCount: vi.fn(async () => 0)
 }))
 
 import { store } from '../store'
-import { glmSynthesize } from '../utils/ttsEngine'
-import { ttsCacheGet } from '../utils/ttsCache'
+import { glmSynthesize, speakPro } from '../utils/ttsEngine'
+import { ttsCacheGet, ttsCacheSet, ttsCachePin } from '../utils/ttsCache'
 import { DEF_PRICES, getTtsPrice } from '../utils/costTrack'
 
 const mem = new Map()
@@ -40,6 +41,8 @@ describe('朗读缓存命中不重复计费', () => {
   beforeEach(() => {
     mem.clear()
     ttsCacheGet.mockReset()
+    ttsCacheSet.mockReset()
+    ttsCachePin.mockReset()
     store.cfg.ttsGm = { key: 'k', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
     store.cfg.fig = { key: '', url: '' }
     store.cfg.ttsRate = 1
@@ -69,5 +72,41 @@ describe('朗读缓存命中不重复计费', () => {
     expect(r.billChars).toBeGreaterThan(0)
     const led = JSON.parse(localStorage.getItem('xc_tts_chars') || '{}')
     expect(Number(led.c)).toBe(r.billChars)
+  })
+
+  it('缓存重读模式遇到未命中时直接停止，不发请求也不扣费', async () => {
+    ttsCacheGet.mockResolvedValue(null)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const onError = vi.fn()
+    const r = await speakPro('这段重读内容没有缓存，不能回退到付费合成。', {
+      engine: 'glm',
+      voice: 'tongtong',
+      cacheOnly: true,
+      onError
+    })
+    expect(r.ok).toBe(false)
+    expect(r.msg).toBe('cache-miss')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem('xc_cost')).toBeNull()
+    expect(onError).toHaveBeenCalledWith('cache-miss')
+  })
+
+  it('首次完整朗读会把音频分块标记为永久固定缓存', async () => {
+    ttsCacheGet.mockResolvedValue(null)
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(32), json: async () => ({}) })))
+    const r = await glmSynthesize('这条语音需要在首次完整朗读后永久保留。', { chunkSize: 240, firstChunkSize: 42, pinCache: true })
+    expect(r.ok).toBe(true)
+    expect(ttsCacheSet).toHaveBeenCalled()
+    expect(ttsCacheSet.mock.calls.every((c) => c[3] === true)).toBe(true)
+  })
+
+  it('已有缓存升级为永久固定缓存时不会重新请求音频', async () => {
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/wav' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await glmSynthesize('这条缓存需要从普通缓存升级为永久缓存。', { chunkSize: 240, firstChunkSize: 42, pinCache: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(ttsCachePin).toHaveBeenCalled()
   })
 })

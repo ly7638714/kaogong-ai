@@ -1,7 +1,7 @@
 <script setup>
 /* eslint-disable no-unused-vars */
 // v3.8.195 6B·ChatPage 拆分：消息列表渲染区子组件
-import { toRefs } from 'vue'
+import { computed, onMounted, onUnmounted, ref as vueRef, toRefs } from 'vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 defineEmits(['export-review'])
 const {
@@ -62,10 +62,25 @@ const {
   collectMsg,
   toggleFb,
   toggleSpeak,
+  speakingMsgIndex,
+  speechPreparing,
+  toggleMsgPause,
+  cycleMsgSpeed,
+  stopMsgSpeak,
+  replayMessageSpeech,
   atBottom,
   blStyle,
   onBlDown
 } = toRefs(props.ctx)
+const ttsUi = vueRef({ active: false, paused: false })
+let ttsUiTimer = null
+onMounted(() => {
+  ttsUiTimer = setInterval(() => {
+    ttsUi.value = { active: !!props.ctx.speaking(), paused: !!props.ctx.speakPaused() }
+  }, 250)
+})
+onUnmounted(() => { if (ttsUiTimer) clearInterval(ttsUiTimer) })
+const msgRatePct = computed(() => Math.round((Number(props.ctx.store.cfg.ttsRate) || 1) * 100))
 </script>
 
 <template>
@@ -74,7 +89,7 @@ const {
           <div class="hero-badge">六大板块 · 名师方法论 · 命题人视角</div>
           <h2><span>行测智能助教</span></h2>
           <p>文字题走 DeepSeek · 图表公式走视觉模型 · 给你名师级的做题思路与错题复盘</p>
-          <div class="hero-stats">
+          <div v-if="dStat.q || dStat.w || dStat.r" class="hero-stats">
             <div class="hs">
               <div class="hs-n">{{ dStat.q }}</div>
               <div class="hs-l">累计提问</div>
@@ -87,6 +102,9 @@ const {
               <div class="hs-n g">{{ dStat.r }}</div>
               <div class="hs-l">已复盘</div>
             </div>
+          </div>
+          <div v-else class="hero-first">
+            <button class="btn btn-pri hero-first-btn" @click="askQuick(quickCards[0])">⚡ 开始第一题</button>
           </div>
           <div class="hero-grid">
             <div v-for="c in quickCards" :key="c.t" class="hero-card" @click="askQuick(c)">
@@ -239,6 +257,11 @@ const {
                 <button :class="{ 'fb-on': m.fb === -1 }" title="这条回复需改进" @click="toggleFb(m, -1)">👎</button>
                 <button @click="copyMsg($event)">📋 复制</button>
                 <button @click="toggleSpeak($event)">🔊 朗读</button>
+                <button v-if="speakingMsgIndex === i && speechPreparing" disabled>⏳ 准备讲稿…</button>
+                <button v-if="ttsUi.active && speakingMsgIndex === i" :title="ttsUi.paused ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="toggleMsgPause()">{{ ttsUi.paused ? '▶ 继续' : '⏸ 暂停' }}</button>
+                <button v-if="ttsUi.active && speakingMsgIndex === i" :title="'消息朗读倍速：' + msgRatePct + '%（点击切换）'" @click="cycleMsgSpeed()">⏱ {{ msgRatePct }}%</button>
+                <button v-if="ttsUi.active && speakingMsgIndex === i" title="停止当前消息朗读" @click="stopMsgSpeak()">⏹ 停止</button>
+                <button v-if="m._ttsCached" title="这条语音已永久保存在本机缓存，可直接重读，不调用模型、不消耗 token" @click="replayMessageSpeech(m, i)">♻️ 永久重读</button>
                 <button title="把这条 AI 回复整屏截成高清图：发给同学/群里看（无需对方装本项目）" @click="capMsg(m, i)">📸 截图分享</button>
               </div>
 </template>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
 import { chatOnce } from '../api/client'
-import { rdCfg, speechScriptKind, speakReadyText } from '../utils/speechScript'
+import { rdCfg, speechScriptKind, speakReadyText, stripUnrelatedSpeech } from '../utils/speechScript'
 
 vi.mock('../api/client', () => ({ chatOnce: vi.fn(async () => '') }))
 
@@ -100,5 +100,24 @@ describe('speechScript 语音阅读讲稿改写', () => {
     expect(speechScriptKind('题干', 'wrong')).toBe('quiz')
     expect(speechScriptKind('知识点', 'kb')).toBe('explain')
     expect(speechScriptKind('知识点', 'lesson')).toBe('lesson')
+  })
+
+  it('相关性过滤删除与问题无关的复盘、卡片和来源段落', () => {
+    const raw = '增长量是绝对差，增长率是相对比。\n📌 高效复盘指引\n先圈出提问词。\n📚 依据卡：[资料分析·增长量]\n来源：示例讲义'
+    expect(stripUnrelatedSpeech(raw, '增长量和增长率有什么区别')).toBe('增长量是绝对差，增长率是相对比。')
+  })
+
+  it('用户明确询问复盘或来源时保留对应段落', () => {
+    const raw = '第一步先看时间。\n📌 高效复盘指引\n圈出提问词再找数。\n来源：示例讲义'
+    expect(stripUnrelatedSpeech(raw, '复盘指引和来源在哪里')).toContain('高效复盘指引')
+    expect(stripUnrelatedSpeech(raw, '复盘指引和来源在哪里')).toContain('来源：示例讲义')
+  })
+
+  it('讲稿请求会携带用户原问题，要求模型剔除无关内容', async () => {
+    const raw = '资料分析先看时间和单位，再判断题干问的是增长量还是增长率，最后按对应公式计算，注意单位一致，不要把亿元当成万元。'.repeat(2)
+    await speakReadyText(raw, { question: '增长率怎么判断' })
+    const msgs = vi.mocked(chatOnce).mock.calls[0][1]
+    expect(msgs[1].content).toContain('用户原问题：增长率怎么判断')
+    expect(msgs[1].content).toContain('与问题无关的复盘指引、知识卡、来源、学习建议、拓展和系统说明必须删除')
   })
 })

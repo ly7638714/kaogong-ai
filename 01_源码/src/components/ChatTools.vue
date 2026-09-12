@@ -5,6 +5,7 @@ import ZhentiPdfLib from './ZhentiPdfLib.vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 const pdfLibShow = ref(false)
 const trainPickShow = ref(false)
+const utilsOpen = ref(false)
 const TRAIN_MODULES = [
   { id: 'single', ic: '⚡', name: '单题快练', c: '#34d399', tag: '专项速刷：选板块和题型逐题突破，答完即批、错题入库。', pts: ['本地/离线可用', '答错钉同考点', '自动进“出题集”可二刷'] },
   { id: 'ai', ic: '🎲', name: 'AI 整卷出题', c: '#5cc8ff', tag: '按真实卷面结构 AI 智能组卷：模块、题量、难度、补短都能调。', pts: ['断点续出 / 只补失败', '仿真答题卡模式', '成绩单多格式导出'] },
@@ -16,9 +17,11 @@ const TRAIN_MODULES = [
 ]
 function startTrainModule(id) {
   trainPickShow.value = false
+  utilsOpen.value = false
   openExam.value(id)
 }
 function startOffline() {
+  utilsOpen.value = false
   examOffline.value = true
   openExam.value('single')
 }
@@ -83,15 +86,34 @@ const {
             <button class="btn btn-gh tb-btn" title="📴 离线练习：无 Key / 断网也能做。图推/数量/政治/资料 用本地确定性生成器（零额度、唯一解质检）出题，随做随批" @click="startOffline()">📴 离线练习</button>
           </div>
           <div class="train-utils">
-            <span class="tu-l">🧰 快捷工具</span>
-            <button class="btn btn-gh tb-btn" title="📐 锚点自测：每板块10道固定真题校准能力值（累计作答100题后解锁）" @click="openAnchor()">📐 锚点自测</button>
-            <button class="btn btn-gh tb-btn" title="📄 本地真题PDF卷库：选择存有历年真题 PDF 的文件夹(国考/各省)，App 内置阅读器直接翻阅；也可用其它 APP 打开/分享" @click="pdfLibShow = true">📄 真题PDF库</button>
-            <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="openSolid()">🧊 立体图推</button>
-            <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算（LY四层能力，本地零额度）" @click="openDataTrain()">📊 资料速算</button>
-            <button class="btn btn-gh tb-btn" title="片段阅读结构四步拆解：主题词→句子功能→行文结构→主旨意图（郭熙×花生十三×张弓）" @click="openYanTrain()">📖 片段结构</button>
-            <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
-            <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
-            <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
+            <button class="btn btn-gh tb-btn util-toggle" :aria-expanded="utilsOpen" @click="utilsOpen = !utilsOpen">
+              🧰 专项工具 <span class="util-caret">{{ utilsOpen ? '▴' : '▾' }}</span>
+            </button>
+            <div v-if="utilsOpen" class="util-panel">
+              <div class="util-group">
+                <span class="util-group-t">🧪 能力诊断</span>
+                <div class="util-group-items">
+                  <button class="btn btn-gh tb-btn" @click="utilsOpen = false; train('diag')">📊 学习诊断</button>
+                  <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="utilsOpen = false; trainWeak()">🎯 攻克薄弱</button>
+                  <button class="btn btn-gh tb-btn" title="每板块10道固定真题校准能力值" @click="utilsOpen = false; openAnchor()">📐 锚点自测</button>
+                </div>
+              </div>
+              <div class="util-group">
+                <span class="util-group-t">🧩 专项训练</span>
+                <div class="util-group-items">
+                  <button class="btn btn-gh tb-btn" title="立体图推训练：3D旋转查看 + 三视图/展开图/切面/补缺 + AI出题" @click="utilsOpen = false; openSolid()">🧊 立体图推</button>
+                  <button class="btn btn-gh tb-btn" title="资料分析四层能力训练：判题型→找数据→选公式→速算估算" @click="utilsOpen = false; openDataTrain()">📊 资料速算</button>
+                  <button class="btn btn-gh tb-btn" title="片段阅读结构四步拆解：主题词→句子功能→行文结构→主旨意图" @click="utilsOpen = false; openYanTrain()">📖 片段结构</button>
+                </div>
+              </div>
+              <div class="util-group">
+                <span class="util-group-t">📚 学习资源</span>
+                <div class="util-group-items">
+                  <button class="btn btn-gh tb-btn" title="本地真题PDF卷库" @click="utilsOpen = false; pdfLibShow = true">📄 真题PDF库</button>
+                  <button class="btn btn-gh tb-btn" title="对话功能使用说明书" @click="utilsOpen = false; guideShow = true">📖 使用说明书</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
