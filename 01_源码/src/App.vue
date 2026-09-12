@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveNotes } from './store'
+import { useExamTimer } from './composables/useExamTimer'
 import { speak, stopSpeak, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
 import { costStats, clearCost, fmtCost, fmtTime, fmtTok, getPrices, savePrices, COST_FEATURES, COST_KINDS, DEF_PRICES, costLive, getBudget, setBudget } from './utils/costTrack'
 import { queryProviderBalance } from './utils/apiBalance'
@@ -51,8 +52,8 @@ const tabs = [
 ]
 // 界面自定义：被隐藏的板块/功能入口不渲染（功能仍在，可从深链/更多菜单进入）
 const visibleTabs = computed(() => tabs.filter((t) => !(store.cfg.uiHidden && store.cfg.uiHidden['tab_' + t.k])))
-// ===== URL 深链（hash 路由）：#/ck #/chat #/kb #/ths #/stat #/wq，可收藏/分享、浏览器返回键切页 =====
-const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1 }
+// ===== URL 深链（hash 路由）：#/ck #/chat #/kb #/ths #/stat #/wq #/sync，可收藏/分享、浏览器返回键切页 =====
+const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1, sync: 1 }
 function tabFromHash() {
   try {
     const h = String(location.hash || '').replace(/^#\/?/, '')
@@ -664,38 +665,44 @@ const GUIDES = {
   ck: {
     key: 'ck', icon: '🚀', title: '学习驾驶舱',
     desc: '每天打开先看这里，让学习有方向、有节奏。',
-    features: ['🎯 今日任务：自动生成"刷题/复盘/积累"3 件事，打勾打卡', '⏳ 备考倒计时 + 板块练习分布 + 复盘率'],
+    features: ['🎯 今日任务：自动生成“刷题/复盘/积累”3 件事，打勾打卡', '💗 复盘健康分：按复盘率/消化率/到期积压/复错率给建议', '⏳ 备考倒计时 + 板块掌握度分布'],
     tips: ['① 先完成今日任务 3 件事，再自由练习', '② 优先练错题最多的弱板块', '③ 每天坚持打卡，连续天数是你最好的动力']
   },
   chat: {
     key: 'chat', icon: '💬', title: '对话刷题（核心页）',
     desc: '所有提问、讲题、训练都在这里，是主战场。',
-    features: ['🧠 10 个专项模式（逻辑/言语/图推/资料/数量…）', '🎲 模拟出题 / 📝 模拟组卷（国考·省考真实卷面·AI/导入/错题三源）', '📷 图片题走视觉模型，公式图表都能看'],
-    tips: ['① 先在设置配好 API Key 和视觉模型', '② 刷题开「考场限时」练速度', '③ 答完点「📌 存错题」，用「🔁 出变式题」检验是否真懂']
+    features: ['🧠 10 个专项模式（逻辑/言语/图推/资料/数量…）', '🎯 训练中心：单题快练 / AI 整卷出题 / 导入材料 / 错题集组卷 / 真题快练', '📖 使用说明书 + 四步发题向导，按板块锁定题型', '🔊 朗读支持暂停/继续、倍速、换音色'],
+    tips: ['① 先在设置配好 API Key 和视觉模型', '② 刷题开「考场限时」练速度', '③ 答完点「📌 存错题」，用「🔁 变式题」检验是否真懂']
   },
   kb: {
     key: 'kb', icon: '📚', title: '知识速查',
     desc: '名师方法论按板块整理成卡片，考前突击靠它。',
-    features: ['📚 按板块速查：点卡片看核心要点', '💬 点「问 AI 讲透」让 AI 展开讲', '📚 点「让 AI 举例」现场生成完整检验题'],
+    features: ['📚 437 张名师方法卡，按 大板块→细分→题型 分层', '💬 点「问 AI 讲透」让 AI 展开讲', '🎓 点「AI 动画微课」看教师动画分镜讲解'],
     tips: ['① 考前把每张卡片的「秒杀规律」过一遍', '② 不会的方法点「问 AI 讲透」', '③ 想实战检验就点「让 AI 举例」']
   },
   ths: {
     key: 'ths', icon: '🗂️', title: '常识·时政积累',
-    desc: '每天记一点，靠"重复"打败遗忘。',
-    features: ['🔁 艾宾浩斯复习：记住了按 1/2/4/7/15/30 天排期', '⭐ 收藏进我的记忆库，✏️ AI 出题自测', '📥 可导入自己的 Obsidian/Markdown 笔记'],
+    desc: '每天记一点，靠“重复”打败遗忘。',
+    features: ['🔁 艾宾浩斯复习：记住了按 1/2/4/7/15/30 天排期', '🧪 记忆训练营：主动回忆 / 易混辨析 / 到期巩固 / 错误回炉', '📥 可导入自己的 Obsidian/Markdown 笔记'],
     tips: ['① 每天用「复习」模式刷到期条目，比随机刷记得牢', '② 答错的会自动进错题本', '③ 时政可按 国内/贵州/时间范围 筛选']
   },
   stat: {
     key: 'stat', icon: '📊', title: '学习统计',
     desc: '数据会告诉你：坚持得怎么样、弱在哪。',
-    features: ['📈 近 7/14/30 天趋势折线（提问/错题/复盘）', '🎯 板块掌握度雷达图 + 🔥 15 周热力图', '⏱ 今日/累计学习时长'],
+    features: ['📈 近 7/14/30 天趋势折线（提问/错题/复盘）', '🎯 板块掌握度雷达图 + 🔥 15 周热力图', '📄 周报/月报：带复盘率与消化率'],
     tips: ['① 每周看一次趋势，确认自己在进步', '② 雷达图最凹的就是下一周重点', '③ 热力图越连续，上岸概率越高']
   },
   wq: {
     key: 'wq', icon: '📋', title: '错题本（提分关键）',
     desc: '错题不复习等于白做，这里是第二战场。',
-    features: ['✍️ 二刷/三刷：带选项的直接点选作答、自动判对错', '掌握度 + 连续答对 2 次自动「已消化」', '🎴 抽认卡 / 📤 导出 Word·PDF·Obsidian·Anki'],
+    features: ['✍️ 二刷/三刷：带选项的直接点选作答、自动判对错', '💗 吃透进度卡：实时显示掌握度、证据链与下一步动作', '🧭 分步引导复盘：选状态/卡点/下次动作，一键自动归档错因', '🎴 抽认卡 / 📤 导出 Word·PDF·Obsidian·Anki'],
     tips: ['① 晚上集中复盘当天错题，别攒着', '② 二刷点选项作答，别凭记忆自评', '③ 每周导出打印/推 Anki，考前集中看']
+  },
+  sync: {
+    key: 'sync', icon: '💾', title: '数据同步与保存',
+    desc: '换设备怎么接着用、数据怎么不丢，都在这页。',
+    features: ['⬆️ 上传本机备份 / ⬇️ 下载云端最新 / 🔀 智能合并（三键独立，不会误覆盖）', '☁️ Gitee / GitHub / WebDAV 三选一，可开自动互通', '💾 保存到本地文件夹（桌面端）+ 自动备份', '📤 导出全部数据 JSON / 手机端保存分享'],
+    tips: ['① 换设备时两端用同一种方案，然后点「🔀 智能合并」', '② API Key 与密码在备份/同步前会自动打码，不会进云端文件', '③ 重要数据建议再定期导出一次 JSON 兜底']
   }
 }
 const guide = ref(null)
@@ -801,6 +808,8 @@ function doRename() {
 const musicPos = ref(null) // {x, y}
 const petPos = ref(null)
 const petDock = ref('') // pet 贴边隐藏方向：left / right（触碰先唤出完整浮球）
+// 考场计时（单例）：萌宠悬浮条控制开关 + 实时倒计时展示
+const { examMode, left, fmtSec, toggleExamTimer } = useExamTimer()
 // 位置记忆按视口分档存储（手机拖的位置不影响桌面），兼容旧单档 key
 const vpBucket = () => vpB()
 const readPos = (k) => { try { return JSON.parse(localStorage.getItem(k + '_' + vpBucket()) || localStorage.getItem(k) || 'null') } catch (e) { return null } }
@@ -1109,13 +1118,16 @@ const SET_GUIDE = [
   { id: 'set-api', t: '💬 文本大模型', d: '纯文字题的 AI 大脑：下拉选服务商 + 下拉选模型（新→旧），填 Key 即可。', tips: '推荐 DeepSeek（便宜中文好）；换服务商自动带官方 API 地址与最新模型；卡片内「🧪 测试连通性」一键验证。' },
   { id: 'set-vision', t: '👁️ 视觉大模型', d: '图片/截图题的 AI 大脑（图推图形、资料表格、数学公式）。', tips: 'DeepSeek-V4.1-Flash 原生多模态，用同一个 Key、模型填 deepseek-flash 即可识图；不配则发图题无法识别。' },
   { id: 'set-fig', t: '🖼 图像增强大模型（可选）', d: '用独立的开源视觉模型把题目截图复刻成图贴进回复，辅助看懂图推/几何/表格题。', tips: '可选功能，不配置完全不影响现有功能；推荐硅基流动免费额度或 Ollama 本地。' },
-  { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：场景音色、语速、音调、本机语音。', tips: '💰 省钱：默认 Edge 免费神经语音（不花钱）；智谱超拟人收费；系统语音完全免费。重复朗读命中本地缓存不重复合成。' },
+  { id: 'set-rd', t: '📝 朗读讲稿改写（可选）', d: '朗读前先把 AI 回复/题干/解析改写成口语化讲稿，再交给语音引擎读出来。', tips: '开了更像“老师讲课”而不是“念资料”；有硬护栏：改写后比原文长或结尾没标点就自动退回原文朗读，不会多花朗读费。' },
+  { id: 'set-voice', t: '🗣️ 语音朗读', d: 'AI 讲解的朗读：朗读引擎、场景音色、语速音调、本机语音、开头提示音处理。', tips: '省钱优先「🆓 一键接入本机免费开源 TTS」（CosyVoice2 / GPT-SoVITS，模型免费且可克隆）；智谱 GLM-TTS 超拟人收费；系统语音完全免费离线。注意：Edge 免费神经语音在部分网络会被拦截，若试听失败请改用系统语音或自建开源引擎。重复朗读命中本地缓存不重复计费。' },
   { id: 'set-look', t: '🎨 外观', d: '强调色、护眼模式、高亮、红黑局长风主题、字体大小、壁纸。', tips: '白天/黑夜各自独立配色；红黑主题只做红色点缀不动字体主色。' },
   { id: 'set-bg', t: '🖼️ 背景', d: '主界面背景：默认 / 纯色 8 种 / 图片壁纸 + 模糊 + 在线自动轮换。', tips: '图片支持 png/jpg/webp/gif；在线壁纸每 5 分钟换一张，可随时关。' },
-  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、本地/Gitee/GitHub/WebDAV 互通、导入笔记、时政时间范围。', tips: '换设备想保留原数据：网页端用 Gitee 或 GitHub，原生/坚果云用户也可用 WebDAV 自动互通；也可导出/导入 JSON。' },
+  { id: 'set-data', t: '💾 数据', d: '备份/导入/清空、本地/Gitee/GitHub/WebDAV 互通、导入笔记、出题历史、时政时间范围。', tips: '同步已拆成三个独立按钮：「⬆️ 上传本机备份 / ⬇️ 下载云端最新 / 🔀 智能合并」，不会再一按就覆盖；换设备想保留原数据用智能合并即可。API Key 与密码在备份和云同步前会自动打码，绝不进云端文件。' },
   { id: 'set-account', t: '🔐 账号', d: '本地登录门：注册/登录、修改密码、退出、删除账号、重置本地账号。', tips: '账号仅存本机（无服务器）；忘记密码可「重置本地账号」重新注册；不想每次登录可关闭登录门。' },
+  { id: 'set-ui', t: '🧩 界面自定义', d: 'DIY 你的主页：隐藏/显示看板、对话、知识库、积累、统计、错题、数据同步、萌宠、背景音乐等入口。', tips: '只隐藏不删除功能，随时可开回来；隐藏当前所在板块时会自动切到仍可见的板块，不会出现空白页。' },
+  { id: 'set-fun', t: '🎵 趣味与陪伴', d: '萌宠（形象/声线/人设/养成）、背景音乐与曲目管理。', tips: '内置薛神/章若楠/李星云/姬如雪等锁定角色；角色可「🔗 绑定已有克隆声线」复用你已克隆的音色，不必重复克隆花钱。' },
   { id: 'set-help', t: '🧭 帮助', d: '六步学习闭环、快捷键、常见问题、新手引导开关。', tips: '考前把快捷键和闭环过一遍；引导可一键全关或重开。' },
-  { id: 'set-about', t: '📜 关于', d: '免责声明与开发者说明。', tips: '仅供个人学习使用，切勿商用；隐私与开发者信息见此处。' }
+  { id: 'set-about', t: '📜 关于', d: '免责声明、隐私与版本信息、开发者说明、最近错误日志。', tips: '仅供个人学习使用，切勿商用；隐私与开发者信息见此处。' }
 ]
 
 // ===== 设置面板顶部状态总览（一键看清哪些没配）=====
@@ -1126,7 +1138,7 @@ const stCfg = computed(() => {
   const figOk = !!f.on && !!f.url && !!f.model && (!!f.key || ['ollama', 'lmstudio', 'jan'].includes(f.prov))
   const r = store.cfg.rd || {}
   const rdOk = !!r.on && !!r.url && !!r.model && !!r.key
-  const ttsMode = store.cfg.ttsMode || 'glm'
+  const ttsMode = store.cfg.ttsMode || 'sys'
   const eng = TTS_ENGINES.find((e) => e.id === ttsMode)
   const ttsLabel = (eng && eng.name.split('（')[0].split('·')[0].trim()) || ttsMode
   const dataLoc = dirLabel.value || (store.cfg.dataDir ? store.cfg.dataDir : '本机')
@@ -1164,12 +1176,13 @@ const setNav = SET_GROUP_META
 // ===== 设置分组手风琴：把超长设置面板分成 4 组，点击标题展开/收起 =====
 // ===== 设置分组手风琴：把设置面板分成 6 组，点击标题展开/收起 =====
 const SEC_GROUP = {
-  'set-api': 'ai', 'set-vision': 'ai', 'set-fig': 'ai',
+  'set-api': 'ai', 'set-vision': 'ai', 'set-fig': 'ai', 'set-rd': 'ai',
   'set-voice': 'voice',
   'set-look': 'look', 'set-bg': 'look',
   'set-data': 'data',
   'set-account': 'account',
   'set-ui': 'ui',
+  'set-fun': 'fun',
   'set-help': 'help', 'set-about': 'help'
 }
 const chatFastModel = ref(localStorage.getItem('xc_chat_fast_model') || '')
@@ -1253,6 +1266,7 @@ const edgeVoiceList = ref(EDGE_PRESET_VOICES)
 const edgeVoiceStat = ref('')
 function setTtsMode(id) {
   store.cfg.ttsMode = id
+  store.cfg.ttsEngineChosen = true // 记下「用户手动选过引擎」，避免换设备/恢复备份后被省钱默认迁移静默改写
   saveCfg()
   savePetGlobalVoice()
   if (id === 'glm') loadGmVoices()
@@ -2277,10 +2291,10 @@ function onKey(e) {
     if (nav.stack.length) { const e2 = navBack(); if (e2) window.dispatchEvent(new CustomEvent('app:nav-back', { detail: [e2.id] })); return }
     if (searchDrop.value) { searchDrop.value = false; if (document.activeElement === searchInput.value) searchInput.value.blur() }
   }
-  // Ctrl/Cmd+1..5 切换页签
-  if ((e.ctrlKey || e.metaKey) && /^[1-6]$/.test(e.key)) {
+  // Ctrl/Cmd+1..N 切换页签（N 跟随板块数量，含「数据同步」，共 7 个）
+  if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
     const idx = Number(e.key) - 1
-    if (tabs[idx]) {
+    if (idx < tabs.length && tabs[idx]) {
       e.preventDefault()
       store.tab = tabs[idx].k
     }
@@ -2836,11 +2850,12 @@ onUnmounted(() => {
         <div class="mk-tip" style="border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 10px; padding: 10px 12px; margin: 8px 0">
           <b style="font-size: calc(12.5px * var(--ui-fs-scale, 1))">📖 选哪个朗读引擎？（小白必读）</b>
           <ul style="margin: 6px 0 0; padding-left: 18px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.85; color: var(--text2)">
-            <li>🆓 <b>完全免费、不想折腾 Key</b>：直接选「Edge 免费神经」或「系统语音」，开箱即用、0 成本，适合先体验。</li>
+            <li>🆓 <b>完全免费、不想折腾 Key</b>：选「系统语音」（本机离线、最稳）；「Edge 免费神经」音色更好，但<b>在部分网络会被拦截</b>——点「🔊 试听朗读」如果失败，说明被拦了，换系统语音即可。</li>
+            <li>🆓 <b>想免费又要能克隆自己的音色</b>：选「OpenAI 兼容」→ 点「🆓 一键接入本机免费开源 TTS」，配合自建 <b>CosyVoice2 / GPT-SoVITS</b>，模型免费、音色克隆免费、按字付费彻底归零（详见 tools/free-tts-server 搭建文档）。</li>
             <li>🌟 <b>想要最像真人的效果（推荐）</b>：选「智谱 GLM-TTS」或「阿里百炼 Qwen3-TTS」，它们是语音大模型，有情绪有语气、几乎听不出机器味；按字数计费（读几万字才几分钱），<b>新人都有免费额度</b>。</li>
-            <li>🎨 <b>想克隆你自己的声音 / 用 CosyVoice2</b>：选「OpenAI 兼容」，自备 Key 与服务地址。</li>
-            <li>🐾 <b>让萌宠用专属声线</b>：去「趣味与陪伴 → 萌宠」给角色克隆/绑定音色即可，切到该角色自动换声。</li>
-            <li>💰 <b>怕超支</b>：开启下方「省钱护栏」，真人引擎每天有免费朗读额度，用完后自动退回免费 Edge，怎么读都不花冤枉钱。</li>
+            <li>🎨 <b>想克隆你自己的声音 / 用 CosyVoice2</b>：选「OpenAI 兼容」，自备 Key 与服务地址；也可用上面的「🆓 一键接入本机免费开源 TTS」。</li>
+            <li>🐾 <b>让萌宠用专属声线</b>：去「趣味与陪伴 → 萌宠」给角色克隆/绑定音色即可，切到该角色自动换声；已克隆过的音色可「🔗 绑定已有克隆声线」，不必重复克隆花钱。</li>
+            <li>💰 <b>怕超支</b>：开启下方「省钱护栏」，真人引擎每天有免费朗读额度，用完后自动退回免费系统语音（本机离线、永不被拦）；同一段内容重复朗读命中本地缓存也不计费。</li>
           </ul>
         </div>
 
@@ -2872,7 +2887,7 @@ onUnmounted(() => {
             </label>
             <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); flex: 1; min-width: 220px; line-height: 1.6">
               真人引擎（智谱 GLM / CosyVoice）每日免费朗读 {{ (Number(store.cfg.ttsDayCap) || 20000) >= 10000 ? (Number(store.cfg.ttsDayCap) / 10000) + ' 万' : store.cfg.ttsDayCap }} 字，
-              用完后<b>自动退回免费 Edge</b> 继续读，绝不乱扣费；Edge / 系统语音永久免费、永不被拦。
+              用完后<b>自动退回免费系统语音（本机离线）</b> 继续读，绝不乱扣费；Edge / 系统语音永久免费、永不被拦。
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px">
@@ -2882,7 +2897,7 @@ onUnmounted(() => {
               <input v-model.number="store.cfg.ttsDayCap" type="number" min="1000" step="1000" style="width: 84px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--surface); color: var(--text); font-size: calc(12px * var(--ui-fs-scale, 1))" @change="saveCfg()" />
               字
             </label>
-            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">真人朗读成本约 ¥2 / 百万字量级（智谱/CosyVoice 类），日常几万字仅几分钱；额度用完自动退回免费 Edge，怎么用都不超支。</span>
+            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">真人朗读成本约 ¥2 / 百万字量级（智谱/CosyVoice 类），日常几万字仅几分钱；额度用完自动退回免费系统语音（本机离线），怎么用都不超支。</span>
           </div>
         </div>
 
@@ -2972,7 +2987,7 @@ onUnmounted(() => {
           </div>
           <div class="mk-act">
             <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" @click="previewVoice('dash', store.cfg.ttsDash.voice)">🧪 试听当前音色</button>
-            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">额度/预算护栏同样适用（每日真人朗读额度用完后自动退回免费 Edge）。</span>
+            <span style="font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3)">额度/预算护栏同样适用（每日真人朗读额度用完后自动退回免费系统语音（本机离线））。</span>
           </div>
         </div>
 
@@ -3464,7 +3479,7 @@ onUnmounted(() => {
         </div>
 </div>
 <button class="set-group-hd" :class="{ on: setGroup === 'fun' }" @click="toggleSetGroup('fun')"><span class="sg-t">🎵 趣味与陪伴</span><span class="sg-desc">萌宠 / 背景音乐 / 曲目</span><span class="sg-arrow">{{ setGroup === 'fun' ? '▾' : '▸' }}</span></button>
-<div v-show="setGroup === 'fun'" class="set-group-bd">
+<div v-show="setGroup === 'fun'" id="set-fun" class="set-group-bd">
         <div class="sec-t">🎵 学习背景音乐</div>
         <div class="fld">
           <label>播放控制</label>
@@ -3740,13 +3755,14 @@ onUnmounted(() => {
           <summary>📈 六步学习闭环（建议每天按这个顺序用）</summary>
           <div class="guide-body">
             <ol>
-              <li>🚀 看板 → 看「今日任务」：刷 5 道最弱板块题、复盘/二刷 N 道错题、积累 2 条常识；</li>
-              <li>💬 对话 → 刷题（可开「考场限时」或「📝 模拟组卷」），答完点「📌 存错题」；</li>
-              <li>📋 错题 → 晚上「✍️ 二刷/三刷」直接点选项作答，连续答对 2 次自动「已消化」；</li>
-              <li>🗂️ 积累 → 常识/时政用「🔁 复习」按艾宾浩斯记忆，答错自动入库；</li>
-              <li>📊 统计 → 看趋势折线/雷达图/热力图，了解坚持与短板；</li>
-              <li>📤 导出 → 每周 AI 整理导出 Word/PDF 或 Obsidian .md，考前打印复习。</li>
+              <li>🚀 看板 → 看「今日任务」：刷最弱板块题、复盘/二刷 N 道错题、积累 2 条常识；顺手看一眼「💗 复盘健康分」；</li>
+              <li>💬 对话 → 刷题：可开「⏱ 考场限时」、「🎯 训练中心 → 单题快练 / AI 整卷出题 / 📋 真题快练」；答完点「📌 存错题」，用「🔁 变式题」自检；</li>
+              <li>📋 错题 → 晚上「✍️ 二刷/三刷」直接点选项作答，连续答对 2 次自动「已消化」；卡住的用「🧭 分步引导复盘」一键归档错因；</li>
+              <li>🗂️ 积累 → 常识/时政用「🔁 复习」按艾宾浩斯记忆，答错自动入库；想强化进「🧪 记忆训练营」；</li>
+              <li>📊 统计 → 看趋势折线/雷达图/热力图与周报月报，确认坚持与短板；</li>
+              <li>📤 导出 → 每周整理导出 Word/PDF 或 Obsidian .md，考前打印复习。</li>
             </ol>
+            <p style="margin-top:6px">🔄 换设备：两端「💾 数据同步」用同一方案填同一账号 → 点「🔀 智能合并」，进度无缝接续。</p>
           </div>
         </details>
         <details class="guide">
@@ -3754,7 +3770,7 @@ onUnmounted(() => {
           <div class="guide-body">
             <ul>
               <li><b>Ctrl/Cmd + K</b>：聚焦全局搜索</li>
-              <li><b>Ctrl/Cmd + 1~6</b>：切换 看板/对话/知识库/积累/统计/错题</li>
+              <li><b>Ctrl/Cmd + 1~7</b>：切换 看板/对话/知识库/积累/统计/错题/数据同步</li>
               <li><b>Enter</b>：发送消息；<b>Shift+Enter</b>：换行</li>
               <li><b>Esc</b>：收起搜索</li>
             </ul>
@@ -3764,11 +3780,15 @@ onUnmounted(() => {
           <summary>❓ 常见问题</summary>
           <div class="guide-body">
             <ul>
-              <li><b>发消息没反应？</b> 先在「API 设置」填 Key 并「保存并测试」，状态灯出现 ✅。</li>
-              <li><b>发图/截图题看不到？</b> 必须配置「视觉模型」并选可识图模型（DeepSeek vision / 智谱 GLM-5V）。</li>
-              <li><b>想换设备接着用？</b> 在两端「数据与同步」选择 Gitee/GitHub/WebDAV 任一方案填同一账号并开启「自动互通」，学习数据会自动安全合并；也可「导出备份 JSON」→ 新设备导入。</li>
-              <li><b>想导入自己的笔记？</b> 「数据管理→📥 导入笔记(.md)」，支持 Obsidian 格式（frontmatter 标签 + 标题分节）。</li>
+              <li><b>发消息没反应？</b> 先在「设置 → 模型」填 Key 并「🧪 测试连通性」，状态灯出现 ✅。</li>
+              <li><b>发图/截图题看不到？</b> 必须配置「视觉模型」并选可识图模型——DeepSeek 用同一个 Key、模型填 <b>deepseek-flash</b>（V4.1-Flash 原生多模态），或智谱 GLM-5V。</li>
+              <li><b>朗读没声音 / 每句开头有「嘟」声？</b> 先到「设置 → 语音」点 🔊 试听排错：若 Edge 免费神经语音试听失败，是它在你的网络被拦截，请改用「系统语音」或「🆓 一键接入本机免费开源 TTS」。开头提示音已默认智能裁掉；个别音色仍能听到可在同一页设「强制裁掉开头 N 毫秒」。</li>
+              <li><b>朗读到一半想停一下？</b> 萌宠悬浮条与萌宠面板里都有 ⏸ 暂停 / ▶ 继续：暂停是真的冻结时间轴，继续从原位置接着读，不重头、不重新计费。</li>
+              <li><b>想换设备接着用？</b> 两端「数据与同步」选同一个方案（Gitee / GitHub / WebDAV），填同一账号后点「🔀 智能合并」即可；也可「⬆️ 上传本机备份」→ 新设备「⬇️ 下载云端最新」。API Key 与密码会自动打码，不会同步到云端。</li>
+              <li><b>怕把云端数据覆盖了？</b> 同步已拆成三个独立按钮，只有你点的那一步会生效；上传/下载前若发现对方更新，会先明确提示再执行。</li>
+              <li><b>想导入自己的笔记？</b> 「设置 → 数据 → 📥 导入笔记(.md)」，支持 Obsidian 格式（frontmatter 标签 + 标题分节）。</li>
               <li><b>想在 iPad/Anki 里复习？</b> 错题页导出 PDF（A4）给 GoodNotes，或「🃏 推到 Anki」（需 AnkiConnect）。</li>
+              <li><b>界面像旧版？</b> Ctrl+F5 强刷一次（本地预览服务需重启才会加载新构建）。</li>
             </ul>
           </div>
         </details>
@@ -4059,11 +4079,14 @@ onUnmounted(() => {
           <div class="ob-body">
             <p>现在可以开始了：</p>
             <ul>
-              <li>💬 对话页提问一道题试试（可先「🎲 模拟出题」）；</li>
-              <li>📥 可导入你的真题/笔记：设置 → 数据管理 → 导入笔记(.md)；</li>
-              <li>☁️ 想多端同步：设置 → 数据与同步（Gitee / GitHub / WebDAV 三选一）。</li>
+              <li>💬 对话页提问一道题试试，或进「🎯 训练中心」用「单题快练 / AI 整卷出题 / 📋 真题快练」；</li>
+              <li>🔊 让 AI 把讲解读给你听：回复下方点「🔊 朗读」，中途可 ⏸ 暂停、▶ 继续、⏱ 倍速；</li>
+              <li>📌 答完点「存错题」，晚上到「📋 错题」二刷，卡住的用「🧭 分步引导复盘」；</li>
+              <li>🚀 到「看板」看今日任务与「💗 复盘健康分」，养成每天打卡的节奏；</li>
+              <li>📥 可导入你的真题/笔记：设置 → 数据 → 导入笔记(.md)；</li>
+              <li>☁️ 想多端同步：顶部「💾 数据同步」选 Gitee / GitHub / WebDAV，填同一账号后点「🔀 智能合并」（API Key 会自动打码，不会上传）。</li>
             </ul>
-            <div class="ob-note">以后想再看本引导：设置 → 数据管理 → 🎓 重新引导。</div>
+            <div class="ob-note">以后想再看本引导：设置 → 帮助 → 🎓 重新引导。</div>
             <div class="pnl-btns">
               <button class="btn btn-pri" @click="finishOnboard()">✅ 开始学习</button>
             </div>
@@ -4151,6 +4174,13 @@ onUnmounted(() => {
         <button class="pa-btn" :title="petReadPaused() ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="petPauseToggle()">{{ petReadPaused() ? '▶️' : '⏸' }}</button>
         <button class="pa-btn" :title="'朗读倍速：' + Math.round((store.cfg.ttsRate || 1) * 100) + '%（点击切换）'" @click="petNextSpeed()">⏱</button>
         <button class="pa-btn" title="停止朗读" @click="petStop()">⏹</button>
+        <!-- 考场计时：开关 + 实时倒计时（v3.8.31x 起从对话工具栏迁入萌宠常用悬浮） -->
+        <button
+          class="pa-btn pa-timer"
+          :class="{ on: examMode, warn: examMode && left === 0 }"
+          :title="examMode ? '考场计时进行中 · 点此关闭' : '考场计时：开启后按问数限时（1问=1分钟），AI 回复后统计用时'"
+          @click="toggleExamTimer()"
+        >⏲ {{ examMode ? (left === 0 ? '超时' : fmtSec(left)) : '计时' }}</button>
       </div>
     </div>
         <!-- 萌宠智能助理面板（可拖拽小窗 · 不遮题） -->

@@ -14,9 +14,6 @@ const {
   wzSel,
   wizardModeLabel,
   wzCancel,
-  left,
-  fmtSec,
-  limitShow,
   inputPh,
   send,
   wzOpen,
@@ -66,11 +63,6 @@ function toggleTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = !toolsO
         <button class="wz-cancel" @click="wzCancel()">✕ 取消锁定</button>
       </div>
       <div class="input-bar">
-        <div v-if="store.busy" class="stopwatch" :class="{ warn: left === 0 }">
-          <span class="sw-ic">⏱</span>
-          <span class="sw-num hud-num">{{ fmtSec(left) }}</span>
-          <span class="sw-lbl">{{ left === 0 ? '超时' : '限 ' + fmtSec(limitShow) }}</span>
-        </div>
         <div class="e-dock">
           <textarea
             v-model="text"

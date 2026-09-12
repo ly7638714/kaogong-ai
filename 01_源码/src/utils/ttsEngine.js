@@ -1,5 +1,5 @@
 // ttsEngine.js —— 真人级 TTS 引擎（去掉「AI 味」的核心）
-// 四引擎统一分发：智谱 GLM-TTS（超拟人·真人级，默认） / OpenAI 兼容（CosyVoice2） / Edge 免费神经音色 / 系统语音（兜底）
+// 多引擎统一分发：系统语音（默认、本机离线） / 智谱 GLM-TTS / 阿里百炼 / OpenAI 兼容（CosyVoice2） / Edge 免费神经音色
 // 外部（tts.js / App.vue）只依赖 speakPro / stopSpeakPro / speakingPro 与语音列表接口，改造时不影响调用方。
 /* global Audio, crypto, FormData, File, atob */
 import { reactive } from 'vue'
@@ -300,15 +300,9 @@ function applyLeadTrim(ctx, decoded) {
 export const LEAD_MIN_MS = 20
 export const LEAD_MAX_MS = 3000
 const TONAL_CREST = 1.62 // 小于此值视为「稳态单音」；正弦 1.41，人声通常 1.7+（取两者之间留足余量）
-const ZCR_DRIFT = 0.45 // 过零率相对漂移超过此比例 → 判为人声
 const SILENT_KEEP_MS = 30 // 裁块尾静音时至少保留的收尾长度
 const TAIL_SILENCE_MAX_MS = 1000
 
-function medianOf(arr) {
-  if (!arr.length) return 0
-  const s = arr.slice().sort((a, b) => a - b)
-  return s[Math.floor(s.length / 2)]
-}
 // 一次性分析开头 LEAD_MAX_MS 的 5ms 窗口特征，供前后端裁剪共用
 function analyzeAudio(input) {
   const sr = input.sampleRate
@@ -336,42 +330,69 @@ function analyzeAudio(input) {
   const peakAll = stats.reduce((m, x) => Math.max(m, x.peak), 0)
   return { sr, total, win, scanFrames, c0, stats, peakAll, floor: Math.max(0.006, peakAll * 0.03) }
 }
-// 识别开头「静音 + 提示音 + 紧跟的短静音」总长度；返回 { lead, confident }
+// 识别开头「提示音 / 静音 / 弱底噪」交替出现的整段前导；返回 { lead, confident }
+//
+// v3.8.307 的旧实现只做「跳静音 → 跳第一段提示音 → 跳 ≤400ms 尾随静音」三步，
+// 对「提示音 → 短静音 → 提示音 → 长静音 → 正文」这种**多段交替**的真实引擎输出会提前收手：
+// 实测智谱 GLM-TTS 单块开头是 [0-120ms 提示音①][125-285ms 静音][300-600ms 提示音②][600-1250ms 静音][1300ms 起正文]，
+// 旧实现只裁掉前 290ms，第二声「嘟」与之后 600ms 静音全部留下 → 听感就是「一段里响好几声嘟嘟」。
+// 现改为「扫描到第一个被确认为正文的窗口为止」：静音 / 稳态单音（提示音）/ 弱底噪一律视为前导，
+// 段数不限，直到遇到真正的人声起点。判据仍是确定性的双条件：
+//   · 提示音 = 稳态单音 → crest ≈ 1.41，被「crest ≥ TONAL_CREST」排除；
+//   · 静音 / 微弱底噪 → 被「响度达语音水平」排除；
+//   · 人声 = 多谐波 + 换字 → crest 与响度同时达标。
 export function detectLeadArtifact(input) {
   try {
     if (!input || input.numberOfChannels < 1 || input.length < 32) return { lead: 0, confident: false }
     const an = analyzeAudio(input)
     const { sr, total, win, stats, peakAll, floor } = an
     if (peakAll < 0.02) return { lead: 0, confident: false }
-    const isSilent = (st) => st.rms < floor
-    // ① 跳过开头静音
-    let i = 0
-    while (i < stats.length && isSilent(stats[i])) i++
-    // ② 跳过提示音：crest 低（稳态单音）且过零率稳定
-    let j = i
-    let tonal = 0
-    const zcrs = []
-    while (j < stats.length) {
-      const st = stats[j]
-      if (isSilent(st)) break
-      if (st.crest >= TONAL_CREST) break
-      if (tonal >= 2) {
-        const med = medianOf(zcrs)
-        const dev = med > 1e-6 ? Math.abs(st.zcr - med) / med : 0
-        if (dev > ZCR_DRIFT) break
-      }
-      zcrs.push(st.zcr)
-      tonal++
-      j++
+    // 语音响度参考：取有声窗口 RMS 的 75 分位（对个别尖峰不敏感，避免被一声爆音带偏）
+    const act = []
+    for (const st of stats) if (st.rms >= floor) act.push(st.rms)
+    if (!act.length) return { lead: 0, confident: false }
+    act.sort((a, b) => a - b)
+    const ref = act[Math.min(act.length - 1, Math.floor(act.length * 0.75))] || act[act.length - 1]
+    // 正文的唯一判据：波峰因子达语音水平 且 响度达语音水平
+    const loud = Math.max(floor * 1.15, ref * 0.3)
+    const isContent = (st) => st.crest >= TONAL_CREST && st.rms >= loud
+    // 扫描：找到第一个「确认为正文」的窗口；确认条件 = 其后 6 个窗口里至少 3 个也是正文，
+    // 避免单个噪声尖峰把扫描提前终止（提前终止会把提示音留在音频里）。
+    let k = -1
+    for (let i = 0; i < stats.length; i++) {
+      if (!isContent(stats[i])) continue
+      let hit = 1
+      for (let j = i + 1; j < Math.min(stats.length, i + 6); j++) if (isContent(stats[j])) hit++
+      if (hit >= 3) { k = i; break }
     }
-    // ③ 提示音后面紧跟的短静音一起裁掉（最多 400ms），让声音从正文第一个音开始
-    let end = j
-    let trail = 0
-    const maxTrail = Math.floor(0.4 / 0.005)
-    while (end < stats.length && trail < maxTrail && isSilent(stats[end])) { end++; trail++ }
-    let lead = end * win
+    let lead = 0
+    let confident = false
+    if (k >= 0) {
+      lead = k * win
+      confident = k >= 3
+    } else {
+      // 兜底：整块都没扫到「正文」（极端合成信号，或整块就是提示音）→ 退回结构化裁剪：
+      // 跳开头静音 → 跳提示音 → 跳尾随静音（最多 400ms）
+      const isSilent = (st) => st.rms < floor
+      let i2 = 0
+      while (i2 < stats.length && isSilent(stats[i2])) i2++
+      let j2 = i2
+      let tonal = 0
+      while (j2 < stats.length) {
+        const st = stats[j2]
+        if (isSilent(st)) break
+        if (st.crest >= TONAL_CREST) break
+        tonal++
+        j2++
+      }
+      let end = j2
+      let trail = 0
+      const maxTrail = Math.floor(0.4 / 0.005)
+      while (end < stats.length && trail < maxTrail && isSilent(stats[end])) { end++; trail++ }
+      lead = end * win
+      confident = tonal >= 3 && end - i2 >= 3
+    }
     if (lead > Math.floor(sr * (LEAD_MAX_MS / 1000))) lead = Math.floor(sr * (LEAD_MAX_MS / 1000))
-    const confident = tonal >= 3 && end - i >= 3
     if (lead < Math.floor(sr * (LEAD_MIN_MS / 1000))) return { lead: 0, confident: false }
     // 安全阀：正文至少留 80ms、且至少留 45%（宁可漏删也不要裁掉正文）
     if (total - lead < Math.floor(sr * 0.08)) return { lead: 0, confident: false }
@@ -388,13 +409,17 @@ function detectTailEnd(input, floor) {
   const win = Math.max(8, Math.floor(sr * 0.005))
   const keep = Math.max(win, Math.floor(sr * (SILENT_KEEP_MS / 1000)))
   const c0 = input.getChannelData(0)
-  const maxWin = Math.min(Math.floor(total / win) - 1, Math.floor(sr * (TAIL_SILENCE_MAX_MS / 1000) / win))
+  // 窗口网格锚定在样本 0（而不是从样本末尾往前推），这样同一段音频重复裁剪时
+  // 每一格的边界完全一致 → 结果幂等，不会出现「再裁一次又短了几毫秒」的漂移。
+  const nWin = Math.max(1, Math.ceil(total / win))
+  const maxWin = Math.min(nWin, Math.max(1, Math.floor(sr * (TAIL_SILENCE_MAX_MS / 1000) / win)))
   for (let w = 0; w < maxWin; w++) {
-    const s1 = total - w * win
-    const s0 = Math.max(0, s1 - win)
+    const s0 = (nWin - 1 - w) * win
+    const s1 = Math.min(total, s0 + win)
+    if (s1 <= s0) continue
     let sum = 0
     for (let i = s0; i < s1; i++) { const v = c0[i]; sum += v * v }
-    const rms = Math.sqrt(sum / Math.max(1, s1 - s0))
+    const rms = Math.sqrt(sum / (s1 - s0))
     if (rms >= floor) return Math.min(total, s1 + keep)
   }
   return total
@@ -664,7 +689,7 @@ async function synthChunkCached(engine, cfg, voice, speed, text, fetchFn, mime, 
 // 全命中时本次朗读本来就不花钱，不应占用付费额度、也不该降级到 Edge（保住智谱原声音质）。
 export async function ttsCacheCoverage(text, opts = {}) {
   const t = cleanSpeechText(text)
-  const mode = String(opts.mode || (store.cfg && store.cfg.ttsMode) || 'glm')
+  const mode = String(opts.mode || (store.cfg && store.cfg.ttsMode) || 'sys')
   if (!t) return { total: 0, cached: 0, full: false }
   const chunks = chunkForTts(t, Number(opts.chunkSize) || 240, Number(opts.firstChunkSize) || 42)
   if (!chunks.length) return { total: 0, cached: 0, full: false }
@@ -1292,7 +1317,7 @@ export function sysSpeaking() {
 
 // ============ 真人朗读·省钱护栏（v3.8.90 语音系统重构）============
 // 目标：真人感不丢、普通用户也不怕超支 ——
-//   · 真人引擎(glm/openai)按「每日免费字符额度 ttsDayCap」记账（本地），用完后自动退回免费 Edge 朗读；
+//   · 真人引擎(glm/openai)按「每日免费字符额度 ttsDayCap」记账（本地），用完后自动退回免费系统语音（本机离线）；
 //   · 若用户另外设置了「今日 AI 预算(getBudget)」，真人朗读还会按单价估算提前截止，绝不超支；
 //   · Edge/系统语音永不拦截（本来就免费）。开关 store.cfg.ttsGuard（默认开）可关。
 const TTS_LEDGER_KEY = 'xc_tts_chars'
@@ -1317,7 +1342,7 @@ function ttsAddChars(n) {
   } catch (e) {}
 }
 let _guardToastAt = 0
-// 真人引擎是否应被本次朗读挡住（需退回 Edge）
+// 真人引擎是否应被本次朗读挡住（需退回系统语音）
 function paidTtsBlocked(textChars) {
   const cfg = store.cfg || {}
   if (cfg.ttsGuard === false) return false
@@ -1335,7 +1360,7 @@ function guardToastOnce() {
   if (now - _guardToastAt < 60000) return
   _guardToastAt = now
   const cap = Number((store.cfg || {}).ttsDayCap) || 20000
-  showToast('💰 今日真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费 Edge 朗读；可在 设置→语音 调整', 'info')
+  showToast('💰 今日真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费系统语音（本机离线）；可在 设置→语音 调整', 'info')
 }
 function ttsAddForEngine(chars) { ttsAddChars(chars) }
 
@@ -1346,11 +1371,11 @@ export async function speakPro(text, opts = {}) {
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
   gapInitOnGesture()
   // 允许单次朗读临时指定引擎（角色专属声线用），不改动全局 ttsMode
-  const mode0 = opts.engine ? String(opts.engine) : (store.cfg.ttsMode || 'glm')
+  const mode0 = opts.engine ? String(opts.engine) : (store.cfg.ttsMode || 'sys')
   let mode = mode0
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
-  // 省钱护栏：真人引擎超额度 → 自动退回免费 Edge（Edge/系统永不被拦）
+  // 省钱护栏：真人引擎超额度 → 自动退回免费系统语音（Edge/系统永不被拦）
   // 例外：整段都命中本地缓存时本次并不产生费用，保持原声引擎、不降级、也不占额度。
   if (mode === 'glm' || mode === 'openai' || mode === 'dash') {
     let fullyCached = false
@@ -1360,7 +1385,7 @@ export async function speakPro(text, opts = {}) {
     } catch (e) {}
     if (!fullyCached && paidTtsBlocked(t.length)) {
       guardToastOnce()
-      mode = 'edge'
+      mode = 'sys'
     }
   }
   setStatus('speaking', '正在朗读…')

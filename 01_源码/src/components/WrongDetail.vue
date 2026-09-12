@@ -634,24 +634,6 @@ function capWrongExplain() {
           </div>
         </div>
 </template>
-<style scoped>
-.absorb-card { margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); }
-.absorb-card.ok { border-color: rgba(52, 211, 153, 0.45); }
-.absorb-card.warn { border-color: rgba(251, 113, 133, 0.4); }
-.absorb-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.absorb-lv { font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--accent); }
-.absorb-card.ok .absorb-lv { color: #34d399; }
-.absorb-card.warn .absorb-lv { color: #fb7185; }
-.absorb-bar { height: 6px; border-radius: 4px; background: rgba(127, 127, 127, 0.18); overflow: hidden; margin: 7px 0; }
-.absorb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #fb7185, #fbbf24, #34d399); }
-.absorb-steps { display: flex; gap: 5px; flex-wrap: wrap; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); }
-.absorb-steps span { border: 1px solid var(--glass-border); border-radius: 14px; padding: 2px 7px; }
-.absorb-steps span.done { color: #34d399; border-color: rgba(52, 211, 153, 0.42); }
-.absorb-next { margin-top: 7px; font-size: calc(12px * var(--ui-fs-scale, 1)); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.absorb-next .btn { padding: 3px 10px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
-.absorb-next.done { color: #34d399; }
-.absorb-core { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--glass-border); font-size: calc(12.5px * var(--ui-fs-scale, 1)); line-height: 1.7; }
-</style>
         <div class="pnl-btns">
           <button class="btn btn-gh" @click="show = false">关闭</button>
           <button class="btn btn-gh" @click="del()">🗑 删除</button>
@@ -841,3 +823,22 @@ function capWrongExplain() {
       </div>
     </div>
 </template>
+
+<style scoped>
+.absorb-card { margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); }
+.absorb-card.ok { border-color: rgba(52, 211, 153, 0.45); }
+.absorb-card.warn { border-color: rgba(251, 113, 133, 0.4); }
+.absorb-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.absorb-lv { font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; color: var(--accent); }
+.absorb-card.ok .absorb-lv { color: #34d399; }
+.absorb-card.warn .absorb-lv { color: #fb7185; }
+.absorb-bar { height: 6px; border-radius: 4px; background: rgba(127, 127, 127, 0.18); overflow: hidden; margin: 7px 0; }
+.absorb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #fb7185, #fbbf24, #34d399); }
+.absorb-steps { display: flex; gap: 5px; flex-wrap: wrap; font-size: calc(11.5px * var(--ui-fs-scale, 1)); color: var(--text3); }
+.absorb-steps span { border: 1px solid var(--glass-border); border-radius: 14px; padding: 2px 7px; }
+.absorb-steps span.done { color: #34d399; border-color: rgba(52, 211, 153, 0.42); }
+.absorb-next { margin-top: 7px; font-size: calc(12px * var(--ui-fs-scale, 1)); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.absorb-next .btn { padding: 3px 10px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+.absorb-next.done { color: #34d399; }
+.absorb-core { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--glass-border); font-size: calc(12.5px * var(--ui-fs-scale, 1)); line-height: 1.7; }
+</style>

@@ -22,11 +22,12 @@ const D = () => ({
   ttsVoice: '',
   ttsRate: 0.98,
   ttsPitch: null,
-  ttsMode: 'edge', // 真人朗读引擎默认 edge=Edge免费神经语音（免key）；glm=智谱超拟人(收费) / openai=OpenAI兼容CosyVoice / sys=系统语音(完全免费本地)
-  ttsGuard: true, // 真人朗读「省钱护栏」（v3.8.90）：真人引擎每日免费字符额度用完自动退回免费 Edge；Edge/系统语音永不被拦
+  ttsMode: 'sys', // 朗读引擎默认 sys=系统语音（本机离线免费、必然可用）；glm=智谱超拟人(收费) / dash=阿里百炼 / openai=OpenAI兼容CosyVoice / edge=Edge免费神经
+  ttsEngineChosen: false, // 用户是否在设置里手动选过朗读引擎（true=永不被「省钱默认迁移」静默改写）
+  ttsGuard: true, // 真人朗读「省钱护栏」（v3.8.90）：真人引擎每日免费字符额度用完自动退回免费系统语音；Edge/系统语音永不被拦
   ttsTrimLead: true, // 朗读开头提示音：自动识别并裁掉（TTS 每个分块响应开头自带的“嘟”声）
   ttsTrimLeadMs: 0, // 强制裁掉开头毫秒数：0=只做智能识别；识别不干净时可手动设 120~300 强制裁
-  ttsDayCap: 20000, // 真人引擎每日免费字符额度（约 3-4 千字中文量级；超出自动退回 Edge）
+  ttsDayCap: 20000, // 真人引擎每日免费字符额度（约 3-4 千字中文量级；超出自动退回系统语音）
   ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
   ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },
   // 阿里百炼 TTS（v3.8.91，真实实测 qwen3-tts-instruct-flash 可用；¥0.8/万字符级）
@@ -113,12 +114,20 @@ export function load() {
       })
     }
   } catch (e) {}
-  // v3.8.68 省钱默认迁移（仅一次，之后尊重用户手动设置）：
-  // 朗读引擎 glm(智谱收费) → edge(微软免费神经语音)；自动朗读默认关（关=不耗 TTS 费用）
+  // v3.8.68 省钱默认迁移（仅对「从未表达过朗读偏好」的旧配置生效）：
+  // 朗读引擎 glm(智谱收费) → sys(系统语音，本机离线免费、必然可用)；自动朗读默认关（关=不耗 TTS 费用）
+  // ⚠️ 判据必须基于 cfg 内容，不能只看本机标记：xc_tts_migrated 是「纯本机键」（不随备份/同步走），
+  //    换设备、清缓存、恢复备份后必然缺失 → 迁移会重跑，把已经付费并显式选了智谱的用户
+  //    静默改写朗读引擎选择、还会顺手关掉自动朗读。
+  //    因此：只要用户填过任一收费引擎的 Key、或在设置里手动选过引擎，就完全跳过迁移。
   try {
     if (localStorage.getItem('xc_tts_migrated') !== '1') {
-      if (!store.cfg.ttsMode || store.cfg.ttsMode === 'glm') store.cfg.ttsMode = 'edge'
-      store.cfg.ttsOn = false
+      const hasEngineKey = !!(store.cfg.ttsGm.key || store.cfg.ttsOpenAI.key || store.cfg.ttsDash.key)
+      const keepUserChoice = store.cfg.ttsEngineChosen === true || hasEngineKey
+      if (!keepUserChoice) {
+        if (!store.cfg.ttsMode || store.cfg.ttsMode === 'glm') store.cfg.ttsMode = 'sys'
+        store.cfg.ttsOn = false
+      }
       localStorage.setItem('xc_tts_migrated', '1')
     }
   } catch (e) {}

@@ -236,4 +236,36 @@ describe('trimLeadingAudioArtifacts 解码后 PCM 清杂', () => {
     expect(out.getChannelData(0)[0]).toBe(data[0])
     expect(out.length).toBeGreaterThan(sr * 0.9)
   })
+
+  // 回归：块尾静音裁剪的窗口网格锚定在样本 0（而不是从末尾往前推），
+  // 重复裁剪必须收敛，不得出现「再裁一次又短一截」。
+  it('重复裁剪幂等：二次裁剪不会再吃掉正文', () => {
+    const sr = 16000
+    const { out } = runTrim(sr, { beepHz: 800, beepSec: 0.15 })
+    const again = trimLeadingAudioArtifacts(makeCtx(sr), out)
+    // 噪声底由开头自适应估计，二次裁剪允许一个分析窗量级的差异（≤25ms），听感不可闻
+    expect(Math.abs(again.length - out.length)).toBeLessThan(sr * 0.025)
+  })
+
+  it('块尾长静音被裁到 30ms 左右，分块之间停顿均匀', () => {
+    const sr = 16000
+    const { total, data } = beepThenSpeech(sr, 800, 0.12, 1.0, {})
+    const tailLen = sr * 0.5 // 手工在正文后追加 500ms 静音
+    const padded = new Float32Array(total + tailLen)
+    padded.set(data)
+    const out = trimLeadingAudioArtifacts(makeCtx(sr), makeInput(sr, padded.length, padded))
+    // 尾部静音应被削到大半（至少削掉 300ms）
+    expect(padded.length - out.length).toBeGreaterThan(sr * 0.3)
+    // 且残留的最后一段静音不超过 30ms + 1 个窗（≈40ms）
+    const win = Math.floor(sr * 0.005)
+    const c = out.getChannelData(0)
+    let silent = 0
+    for (let s1 = out.length; s1 - win >= 0; s1 -= win) {
+      let sum = 0
+      for (let i = s1 - win; i < s1; i++) sum += c[i] * c[i]
+      if (Math.sqrt(sum / win) >= 0.01) break
+      silent += win
+    }
+    expect(silent / sr * 1000).toBeLessThanOrEqual(40)
+  })
 })

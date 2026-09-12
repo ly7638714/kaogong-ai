@@ -39,7 +39,6 @@ const {
   openExam,
   examOffline,
   openAnchor,
-  saveCfg,
   openSolid,
   openDataTrain,
   openYanTrain,
@@ -92,12 +91,6 @@ const {
             <button class="btn btn-gh tb-btn" title="片段阅读结构四步拆解：主题词→句子功能→行文结构→主旨意图（郭熙×花生十三×张弓）" @click="openYanTrain()">📖 片段结构</button>
             <button class="btn btn-gh tb-btn" @click="train('diag')">📊 学习诊断</button>
             <button class="btn btn-pri tb-btn pulse" title="针对错题最多的薄弱板块一键出题" @click="trainWeak()">🎯 攻克薄弱</button>
-            <button
-              class="btn tb-btn"
-              :class="store.cfg.examMode ? 'btn-pri' : 'btn-gh'"
-              title="考场计时：开启后每次提问按问数限时（1 问=1 分钟），AI 回复后统计用时；关闭则不打扰"
-              @click="store.cfg.examMode = !store.cfg.examMode; saveCfg()"
-            >{{ store.cfg.examMode ? '⏱ 计时开' : '⏱ 计时关' }}</button>
             <button class="btn btn-gh tb-btn" title="对话功能使用说明书：如何按板块/场景高效提问" @click="guideShow = true">📖 使用说明书</button>
           </div>
         </div>

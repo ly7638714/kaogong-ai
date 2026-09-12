@@ -172,22 +172,35 @@ export function chunkText(text, maxLen = 420) {
   })
 }
 
-// 分块朗读：首块更小（让第一段音频更快返回、开口更快），其余块保持 maxLen
-export function chunkForTts(text, maxLen, firstLen) {
-  let chunks = chunkText(text, maxLen)
-  if (chunks.length > 1 && firstLen > 0 && chunks[0].length > firstLen) {
-    const first = chunks[0]
-    let cut = -1
-    // 尽量在句号/逗号等自然停顿附近切，避免把话从中间掐断
-    for (let i = Math.min(first.length, firstLen); i > Math.max(6, firstLen - 24); i--) {
-      if ('。！？!?；;，,、'.includes(first[i])) { cut = i + 1; break }
-    }
-    if (cut < 0) cut = Math.min(first.length, firstLen)
-    const head = first.slice(0, cut)
-    const rest = first.slice(cut)
-    chunks = [head, ...(chunkText(rest, maxLen) || []).filter(Boolean), ...chunks.slice(1)]
+// 在 want 附近找自然停顿（句号/逗号等）切一刀，避免把话从中间掐断
+function naturalCut(str, want) {
+  for (let i = Math.min(str.length, want); i > Math.max(6, want - 24); i--) {
+    if ('。！？!?；;，,、'.includes(str[i])) return i + 1
   }
-  return chunks
+  return Math.min(str.length, want)
+}
+
+// 分块朗读 · 渐进式分块（progressive chunking）：
+//   第 1 块 firstLen（最小 → 最快开口）；
+//   第 2 块约 maxLen/3（关键：让「第 1 块的播放时长」能覆盖「第 2 块的合成耗时」）；
+//   第 3 块起用全长 maxLen（此时已积累足够播放缓冲）。
+// 为什么必须这样分：真实引擎合成速度约 15 字/秒，而播放速度约 5 字/秒（详见实测）。
+// 若第 2 块直接用全长（240 字≈16s 合成），而第 1 块只有 ~9s 播放，就会在开头两块之间
+// 出现约 5 秒空白（真实用户实测：第 1 块 4.4s→12.0s，第 2 块却要到 17.0s 才排上）。
+// 渐进式分块后，第 2 块合成只要 ~5s，早于第 1 块播完，空档即被消除。
+export function chunkForTts(text, maxLen, firstLen) {
+  const chunks = chunkText(text, maxLen)
+  if (chunks.length <= 1 || !(firstLen > 0)) return chunks
+  const targets = [firstLen, Math.max(firstLen + 1, Math.round(maxLen / 3))]
+  const out = []
+  let pending = chunks[0]
+  for (let k = 0; k < targets.length && pending && pending.length > targets[k]; k++) {
+    const cut = naturalCut(pending, targets[k])
+    out.push(pending.slice(0, cut))
+    pending = pending.slice(cut)
+  }
+  if (pending) out.push(pending)
+  return out.concat(chunks.slice(1))
 }
 // 滑动窗口顺序合成：最多 W 个请求在途（避免一次性打满全部请求被限流、个别慢导致停顿），
 // 结果严格按分块顺序 onChunk 投递（gapless 播放器依赖顺序），第一块立即发出 → 开口更快、衔接更顺

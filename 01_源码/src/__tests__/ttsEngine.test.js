@@ -99,6 +99,25 @@ describe('chunkForTts / slideSynthesize 朗读提速（首块更小 + 滑动窗�
     expect(parts[0].length).toBeGreaterThan(30)
   })
 
+  // 回归（真实用户朗读实测发现）：首块 42 字只有约 9s 播放，而第 2 块 240 字要约 16s 合成
+  // → 开头两块之间出现约 5 秒空白。渐进式分块必须保证「第 1 块播放时长 ≥ 第 2 块合成耗时」。
+  it('chunkForTts 渐进式分块：次块明显小于全长，且不丢内容', () => {
+    const long = '第一句，这是比较长的一句话。第二句也在这里。第三句继续。第四句再补一点。第五句收尾。'.repeat(8)
+    const parts = chunkForTts(long, 240, 42)
+    expect(parts[0].length).toBeLessThanOrEqual(42)
+    expect(parts[1].length).toBeLessThanOrEqual(80) // ≈ maxLen/3
+    expect(parts.every((p) => p.length <= 240)).toBe(true)
+    expect(parts.join('').replace(/\s+/g, '')).toBe(long.replace(/\s+/g, ''))
+  })
+
+  it('渐进式分块满足「首块播放时长 ≥ 次块合成耗时」（按实测速率 4.6字/秒 播放、14.8字/秒 合成）', () => {
+    const PLAY_CPS = 4.6 // 实测：42 字播放约 9.0s
+    const SYNTH_CPS = 14.8 // 实测：240 字合成约 16.2s
+    const long = '第一句，这是比较长的一句话。第二句也在这里。第三句继续。第四句再补一点。第五句收尾。'.repeat(8)
+    const parts = chunkForTts(long, 240, 42)
+    expect(parts[0].length / PLAY_CPS).toBeGreaterThanOrEqual(parts[1].length / SYNTH_CPS)
+  })
+
   it('slideSynthesize 乱序完成仍按序投递（gapless 依赖顺序）', async () => {
     const chunks = ['块一', '块二', '块三', '块四']
     const out = []
