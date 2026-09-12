@@ -107,7 +107,7 @@ export function useExamGen(ctx) {
   function resolveDir(d) { if (d === 'is' || d === 'not') return d; return Math.random() < 0.5 ? 'is' : 'not' }
   function dirFor(subject, d) { return subject === '类比推理' ? '' : resolveDir(d) }
   function dirHint(subject, dir, dirText) {
-    if (subject === '类比推理') return '' // 类比推理只问“关系最相似”，不存在选是/选非或自定义问法
+    if (subject === '类比推理') return '\n【问法】本题统一问法：下列选项中，与题干逻辑关系最为相似的是（　）。（必须逐字使用此问法，不得改成最不相似、最接近、关系一致等变体）。'
     if (dirText) return '\n【问法】本题问法：' + dirText + '（严格按此问法出题）。'
     if (subject === '定义判断' || subject === '图形推理' || subject === '空间重构') return ''
     return dir === 'is'
@@ -354,7 +354,7 @@ export function useExamGen(ctx) {
       } catch (e) {}
       // Request E·多样性：开放换话题（防撞记忆：避免重复最近题）+ 自然化 + 问法变体
       const qv = askVariant(item.subject, variant, diverSeq)
-      const qvHint = (qv && !item.dirText) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
+      const qvHint = (qv && !item.dirText && !directionlessPlate(item.subject)) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
       const diverTxt = diversitySnippet(item.subject, variant, diverSeq)
       diverSeq++
       const wqHint = wrongReasonsHint(item.subject)
@@ -581,7 +581,7 @@ export function useExamGen(ctx) {
     try {
       const sys = buildQuizSys({ plate, difficulty: diff, variant, calib: calibrationHint(plate, variant, diff) })
       const qv = askVariant(plate, variant, diverSeq)
-      const qvHint = (qv && !dirText) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
+      const qvHint = (qv && !dirText && !directionlessPlate(plate)) ? '\n【本题问法】' + qv + '（真题提问方式，可据此组织题干末尾的问法行）' : ''
       diverSeq++
       const diverTxt = diversitySnippet(plate, variant, diverSeq)
       const ask = (variant ? '请为【' + plate + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + plate + '】出一道仿真模拟题。') + dirHint(plate, dir, dirText) + diverTxt + qvHint

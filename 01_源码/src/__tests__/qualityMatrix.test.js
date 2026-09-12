@@ -59,6 +59,8 @@ describe('命题质量矩阵·全题型专属覆盖', () => {
     expect(t).toContain('两个词')
     expect(t).toContain('不写故事')
     expect(t).toContain('一处二级辨析')
+    expect(t).toContain('下列选项中，与题干逻辑关系最为相似的是（　）。')
+    expect(t).not.toContain('最不相似')
   })
 
   test('未知板块返回空，不注入噪音', () => {

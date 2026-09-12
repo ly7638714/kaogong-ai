@@ -220,7 +220,7 @@ function legacySpec(plate, variant) {
 function fromSubProfile(plate, variant, sub) {
   const analogy = plate === '类比推理'
   return [
-    `${plate}·${variant}。${sub.style} 题干规格：${sub.stem}${analogy ? ' 只允许两词、三词或填空式短题干，不写故事、背景和长句。' : ''}`,
+    `${plate}·${variant}。${sub.style} 题干规格：${sub.stem}${analogy ? ' 只允许两词、三词或填空式短题干，不写故事、背景和长句；问法固定为“下列选项中，与题干逻辑关系最为相似的是（　）。”，不得轮换为其他变体。' : ''}`,
     sub.out || `正确项必须由题干按「${variant}」的标准解法唯一推出，且问法方向不得反置。`,
     sub.traps || '三个干扰项必须分别对应三种真实错解，不得用同类错误、空话或一眼荒谬项凑数。',
     analogy ? `难度只来自一级关系与一处二级辨析，保持真题式短题干，不靠堆叠关系层级或复杂背景。` : `难度来自「${variant}」本身的专业判断复杂度，不靠生僻背景、绕口表达或加长材料。`,

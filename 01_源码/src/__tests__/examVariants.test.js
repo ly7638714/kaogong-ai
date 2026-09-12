@@ -27,8 +27,10 @@ describe('EXTRA_VARIANTS 自动轮换扩展题型池', () => {
 
   it('类比推理不提供是/非问法或自定义问法池', () => {
     expect(DIR_LIB['类比推理']).toBeUndefined()
+    const fixed = '下列选项中，与题干逻辑关系最为相似的是（　）。'
     for (const variant of ['二词型', '三词型', '填空型', '集合关系', '逻辑关系', '对应关系', '语法关系', '语义关系']) {
       const ask = askVariant('类比推理', variant, 0)
+      expect(ask).toBe(fixed)
       expect(ask).not.toContain('最不相似')
       expect(ask).not.toContain('不属于')
       expect(ask).not.toContain('不能推出')
