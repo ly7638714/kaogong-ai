@@ -1,6 +1,7 @@
 // 实测反馈③：扩展题型池（自动轮换专属）与自选表一致性与去重回归
 import { describe, it, expect } from 'vitest'
-import { SUB_VARIANTS, EXTRA_VARIANTS } from '../components/examData'
+import { SUB_VARIANTS, EXTRA_VARIANTS, DIR_LIB } from '../components/examData'
+import { askVariant } from '../utils/genDiversity'
 
 describe('EXTRA_VARIANTS 自动轮换扩展题型池', () => {
   it('扩展池只存在于有自选表的板块，且与自选条目完全去重（不重复/不覆盖自选）', () => {
@@ -22,5 +23,15 @@ describe('EXTRA_VARIANTS 自动轮换扩展题型池', () => {
     for (const w of want) expect(Array.isArray(EXTRA_VARIANTS[w]) && EXTRA_VARIANTS[w].length >= 4, w + ' 扩展不足').toBe(true)
     const n = Object.values(EXTRA_VARIANTS).reduce((a, l) => a + l.length, 0)
     expect(n).toBeGreaterThanOrEqual(20)
+  })
+
+  it('类比推理不提供是/非问法或自定义问法池', () => {
+    expect(DIR_LIB['类比推理']).toBeUndefined()
+    for (const variant of ['二词型', '三词型', '填空型', '集合关系', '逻辑关系', '对应关系', '语法关系', '语义关系']) {
+      const ask = askVariant('类比推理', variant, 0)
+      expect(ask).not.toContain('最不相似')
+      expect(ask).not.toContain('不属于')
+      expect(ask).not.toContain('不能推出')
+    }
   })
 })

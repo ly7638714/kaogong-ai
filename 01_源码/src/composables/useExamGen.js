@@ -48,6 +48,7 @@ const poolOf = (plate) => {
   const extra = EXTRA_VARIANTS[plate] || []
   return base.concat(extra.filter((x) => !base.includes(x)))
 }
+const directionlessPlate = (subject) => subject === '类比推理'
 // 实测反馈·命题质感「挖坑设计」：按板块给真人命题人风格的具体坑种（只加冗余/措辞/审题层，
 // 数据仍须自洽、答案唯一可程序复算/复核；严禁制造歧义或两选项同真）
 function trapDesign(subject) {
@@ -104,7 +105,9 @@ export function useExamGen(ctx) {
   onUnmounted(() => { if (genTimer) clearInterval(genTimer) })
 
   function resolveDir(d) { if (d === 'is' || d === 'not') return d; return Math.random() < 0.5 ? 'is' : 'not' }
+  function dirFor(subject, d) { return subject === '类比推理' ? '' : resolveDir(d) }
   function dirHint(subject, dir, dirText) {
+    if (subject === '类比推理') return '' // 类比推理只问“关系最相似”，不存在选是/选非或自定义问法
     if (dirText) return '\n【问法】本题问法：' + dirText + '（严格按此问法出题）。'
     if (subject === '定义判断' || subject === '图形推理' || subject === '空间重构') return ''
     return dir === 'is'
@@ -564,8 +567,8 @@ export function useExamGen(ctx) {
     // Request E·多样性：不限时用题型轮换器让相邻"再来一题"的题型也不同
     const vars = singleVars.value
     const variant = isFree ? (vars.length ? freshVariant(plate, poolOf(plate), 3) : '') : singleVariant.value // ③同类不重出
-    const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
-    const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
+    const dir = directionlessPlate(plate) ? '' : (singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value)
+    const dirText = directionlessPlate(plate) ? '' : (singleDir.value === 'custom' ? singleDirText.value.trim() : '')
     const item = { subject: plate, difficulty: diff, variant, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false }
     const localCapable = { '图形推理': genTutuQuestion, '数量关系': genSlQuestion, '政治理论': genZzQuestion }
     if (localCapable[plate] && (singleLocal.value || !pickGenC() || !pickGenC().key)) {
@@ -726,7 +729,7 @@ export function useExamGen(ctx) {
       for (let i = 0; i < n; i++) {
         const v = seq[i] || ''
         const d = difficulty.value === 'curve' ? diffCurve(gi, total) : difficulty.value
-        plan.push({ subject: m.subject, difficulty: d, variant: v, dir: resolvePaperDir(), dirText: paperDir.value === 'custom' ? paperDirText.value.trim() : '', stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
+        plan.push({ subject: m.subject, difficulty: d, variant: v, dir: dirFor(m.subject, resolvePaperDir()), dirText: directionlessPlate(m.subject) ? '' : (paperDir.value === 'custom' ? paperDirText.value.trim() : ''), stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
         gi++
       }
     })
@@ -794,9 +797,10 @@ export function useExamGen(ctx) {
     for (let i = 0; i < batch; i++) {
       // Request E·多样性：不限时用题型轮换器让相邻题型错开
       const v = fixedVar || (vars.length ? rot() : '')
-      const dir = singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value
-      const dirText = singleDir.value === 'custom' ? singleDirText.value.trim() : ''
-      items.push({ subject: (singlePlate.value === '片段阅读' || singlePlate.value === '篇章阅读') ? '言语理解' : singlePlate.value, difficulty: diff, variant: v, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
+      const subject = (singlePlate.value === '片段阅读' || singlePlate.value === '篇章阅读') ? '言语理解' : singlePlate.value
+      const dir = directionlessPlate(subject) ? '' : (singleDir.value === 'auto' ? resolveDir('auto') : singleDir.value)
+      const dirText = directionlessPlate(subject) ? '' : (singleDir.value === 'custom' ? singleDirText.value.trim() : '')
+      items.push({ subject, difficulty: diff, variant: v, dir, dirText, stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false })
     }
     return items
   }
@@ -838,7 +842,7 @@ export function useExamGen(ctx) {
     }
     const pushAi = (subject, variant) => plan.push({
       subject, difficulty: 'real', variant,
-      dir: resolveDir('auto'), dirText: '',
+      dir: dirFor(subject, 'auto'), dirText: '',
       stem: null, options: [], answer: '', explain: '', picked: null, correct: null, timeout: false, err: false
     })
     // 二、言语理解与表达 20 题：逻辑填空 10 + 片段阅读 10。

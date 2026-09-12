@@ -17,7 +17,7 @@ const {
   mixMode, paperDir, paperDirText, paperYtN, paperYtNGroup, difficulty, singleGroup, singlePlate,
   singleVariant, singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType,
   autoNext, imgs, textFiles, qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit,
-  onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, zhentiErr, zhentiLoading, loadZhentiIndex,
+  onlyPend, byWrongCount, papers, openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, zhentiErr, zhentiLoading, loadZhentiIndex, hasAnalogyModule,
   selTmpl, tmplJudgeNote, judgeSplitHint, totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates, retryInfo
 } = toRefs(props.ctx)
 
@@ -323,7 +323,7 @@ function toggleStrengthen(v) {
           <option value="mix">混合打乱</option>
         </select>
       </div>
-      <div v-if="srcMode === 'ai'" class="ep-param">
+      <div v-if="srcMode === 'ai' && !hasAnalogyModule" class="ep-param">
         <label>问法（整卷统一）</label>
         <select v-model="paperDir" class="tb-sel">
           <option value="auto">AI 随机（是/非 自由）</option>
@@ -384,7 +384,7 @@ function toggleStrengthen(v) {
 
     <div v-if="srcMode === 'single'" class="ep-block">
       <div class="ep-block-hd">⚡ 单题快练</div>
-      <div class="ep-note">💡 专项速刷 · 五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量，碎片时间快速突破。</div>
+      <div class="ep-note">💡 专项速刷 · {{ singlePlate === '类比推理' ? '四层配置：六大板块 → 细分板块 → 题型 → 组量（类比推理按真题固定问法，不设是/非与自定义问法）' : '五层配置：六大板块 → 细分板块 → 题型 → 问法 → 组量' }}，碎片时间快速突破。</div>
       <div class="ep-param">
         <label>① 六大板块</label>
         <select v-model="singleGroup" class="tb-sel" @change="onSingleGroup()">
@@ -408,7 +408,7 @@ function toggleStrengthen(v) {
         </select>
         <span class="ep-hint">该细分板块下的子题型，由对应「子命题人」精准出题</span>
       </div>
-      <div class="ep-param">
+      <div v-if="singlePlate !== '类比推理'" class="ep-param">
         <label>④ 问法</label>
         <select v-model="singleDir" class="tb-sel">
           <option value="auto">AI 自由随机（是/非）</option>
@@ -423,7 +423,7 @@ function toggleStrengthen(v) {
         <span class="ep-hint">不同板块题干可自由问法（如判断推理：最能削弱 / 最不能 / 前提假设…），点上面快捷问法或自定义</span>
       </div>
       <div class="ep-param">
-        <label>⑤ 组量</label>
+        <label>{{ singlePlate === '类比推理' ? '④' : '⑤' }} 组量</label>
         <select v-model="singleBatch" class="tb-sel">
           <option :value="1">1 题（单题）</option>
           <template v-if="singlePlate === '资料分析'">

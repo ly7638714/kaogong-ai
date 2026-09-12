@@ -137,6 +137,7 @@ const singleDirText = ref('')
 // 按细分板块预置的问法库（题干自由问法）
 
 const dirLib = computed(() => DIR_LIB[canonicalOf(singlePlate.value)] || DIR_LIB['言语理解'] || [])
+const hasAnalogyModule = computed(() => (modules.value || []).some((m) => m && m.subject === '类比推理'))
 function setDirText(t) { singleDirText.value = t; singleDir.value = 'custom' }
 function onSingleGroup() {
   const subs = singlePlates.value
@@ -145,7 +146,11 @@ function onSingleGroup() {
 }
 const singleVars = computed(() => {
 // 记忆题型跨板块越界守卫：换板块后若记住的题型不在新板块列表 → 回「不限」
-watch([singlePlate], () => { const vs = singleVars.value || []; if (singleVariant.value !== '不限' && !vs.includes(singleVariant.value)) singleVariant.value = '不限' })
+watch([singlePlate], () => {
+  const vs = singleVars.value || []
+  if (singleVariant.value !== '不限' && !vs.includes(singleVariant.value)) singleVariant.value = '不限'
+  if (singlePlate.value === '类比推理') { singleDir.value = 'auto'; singleDirText.value = '' }
+})
   const p = singlePlate.value
   if (p === '片段阅读') return SUB_VARIANTS['言语理解'] || []
   if (p === '判断推理') return (SUB_VARIANTS['逻辑判断'] || []).filter((v) => v !== '一拖五') // 单题排除一拖五（组卷才支持）
@@ -991,6 +996,7 @@ onMounted(() => {
 function onSinglePlate() {
   const vs = singleVars.value
   if (singleVariant.value !== '不限' && !vs.includes(singleVariant.value)) singleVariant.value = '不限'
+  if (singlePlate.value === '类比推理') { singleDir.value = 'auto'; singleDirText.value = '' }
   prefetchQ.value = null
 }
 // 板块统计（成绩单）
@@ -1022,7 +1028,7 @@ const examCtx = reactive({
   singleBatch, singleDir, singleDirText, singleLocal, tutuFormat, singleMatType, autoNext, imgs, textFiles,
   qLimit, zhentiSel, zhentiPlates, zhentiLimit, wrongSel, wrongLimit, onlyPend, byWrongCount, papers,
   openPapers, openQuizCol, quizCol, results, openResults, zhentiIdx, zhentiErr, zhentiLoading, loadZhentiIndex, selTmpl, tmplJudgeNote, judgeSplitHint,
-  totalQ, refTotal, singlePlates, singleVars, dirLib, avgRate, wrongPlates,
+  totalQ, refTotal, singlePlates, singleVars, dirLib, hasAnalogyModule, avgRate, wrongPlates,
   q, cur, questions, qLeft, qElapsed, marks, modLeft, modTotal, modDone, totalLeft, totalElapsed,
   paperMode, sheetShow, answeredCount, genStatus, qHtml, optHtmls, hasSvgOpts, qExplainHtml, score, rate,
   moduleStats, reviewOpen, prefetchQ, savedWrongFlash, aiLayout, separateAns, curPaper, singleMode, retryInfo,
