@@ -38,4 +38,12 @@ describe('needAiRecheck 本轮是否走 AI 复核', () => {
   it('非填空 + AI 门开 + 未过真值表 + attempt=0 → 需复核', () => {
     expect(needAiRecheck({ aiGateOn: true, ttVerified: false, isBlank: false, attempt: 0 })).toBe(true)
   })
+  it('默认只复核 1 个候选：复核后重出的候选由程序硬门收口，不再无限质检', () => {
+    expect(needAiRecheck({ aiGateOn: true, ttVerified: false, isBlank: false, attempt: 1, aiReviews: 0, aiReviewLimit: 1 })).toBe(true)
+    expect(needAiRecheck({ aiGateOn: true, ttVerified: false, isBlank: false, attempt: 1, aiReviews: 1, aiReviewLimit: 1 })).toBe(false)
+  })
+  it('双模型互检可复核 2 次，但硬上限仍会停止', () => {
+    expect(needAiRecheck({ aiGateOn: true, ttVerified: false, isBlank: false, attempt: 1, aiReviews: 1, aiReviewLimit: 2 })).toBe(true)
+    expect(needAiRecheck({ aiGateOn: true, ttVerified: false, isBlank: false, attempt: 2, aiReviews: 2, aiReviewLimit: 2 })).toBe(false)
+  })
 })

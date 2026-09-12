@@ -17,7 +17,13 @@ export function canRelaxDecision({ hasLastParsed, lastOk, calcBad, isTruthTable,
   return true
 }
 
-// 本轮是否需要走 AI 复核（对应 39号 §4-4：填空类本地质检过 + attempt>=1 → 跳过复核防误杀）
-export function needAiRecheck({ aiGateOn, ttVerified, isBlank, attempt }) {
-  return !!(aiGateOn && !ttVerified && !(isBlank && attempt >= 1))
+// 本轮是否需要走 AI 复核。
+// 稳定出题策略：AI 复核只对最多 1 个候选做一次（双模型互检可配到 2 次），
+// 之后的候选由本地结构/程序验算把关。AI 结果不可解析或调用失败时不再判死，
+// 防止质检模型格式漂移/网络波动把可用题反复拖到失败。
+export function needAiRecheck({ aiGateOn, ttVerified, isBlank, attempt, aiReviews = 0, aiReviewLimit = 1 }) {
+  if (!aiGateOn || ttVerified) return false
+  if (aiReviews >= Math.max(1, Number(aiReviewLimit) || 1)) return false
+  if (isBlank && attempt >= 1 && aiReviewLimit <= 1) return false
+  return true
 }

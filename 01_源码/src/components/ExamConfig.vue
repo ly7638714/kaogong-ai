@@ -7,6 +7,7 @@ import { EXTRA_VARIANTS } from './examData' // 实测反馈③：自选下拉“
 import { readAttempts } from '../utils/attemptLog'
 import { loadPending, clearPending } from '../utils/pendingPaper' // 深化·断点续出：中断组卷草稿横幅 // 35号批次3-B：补短解锁进度
 import { groupLabelOf } from '../data/groupNames' // 大板块全称显示
+import ZhentiPdfLib from './ZhentiPdfLib.vue'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 
@@ -43,6 +44,11 @@ const {
 
 // 真题题型分布（B4：规则打标 sidecar，零成本）
 const zhentiTy = ref(null)
+const pdfLibShow = ref(false)
+const zhentiPdfName = computed(() => {
+  const p = (zhentiIdx.value && zhentiIdx.value.papers || []).find((x) => x.id === zhentiSel.value)
+  return p && p.title ? p.title + '.pdf' : ''
+})
 // 深化·断点续出：中断组卷草稿（刷新/关闭后仍可恢复）
 const pendingDraft = ref(null)
 function refreshDraft() { try { pendingDraft.value = loadPending() } catch (e) { pendingDraft.value = null } }
@@ -199,7 +205,21 @@ function toggleStrengthen(v) {
     </div>
 
     <div class="ep-block">
-      <div class="ep-block-hd">⚙️ 出卷参数</div>
+      <div class="ep-block-hd">⚙️ 出题设置</div>
+      <div class="ep-param">
+        <label>训练档位</label>
+        <select v-model="difficulty" class="tb-sel">
+          <option value="curve">智能曲线（前易后难）</option>
+          <option value="easy">基础巩固（单一考点）</option>
+          <option value="mid">标准训练（一处拐弯）</option>
+          <option value="hard">强化提升（复合考点）</option>
+          <option value="real">真题级（推荐：反套路·强干扰）</option>
+        </select>
+        <span class="ep-hint">默认推荐“真题级”。系统会优先保证题干自洽、唯一正确项和选项互斥，再追求真题陷阱与质量。</span>
+      </div>
+      <div class="ep-note">🛡️ 稳定出题已默认开启：程序硬校验（结构/唯一单选/验算/图形）优先，AI 复核有次数上限；失败会自动定向修复，不再无限重出。</div>
+      <details class="ep-advanced">
+        <summary>高级设置（默认已调优，小白无需修改）</summary>
       <div class="ep-param">
         <label>每题限时</label>
         <select v-model="perQ" class="tb-sel">
@@ -275,30 +295,23 @@ function toggleStrengthen(v) {
         <span class="ep-hint">一拖N = 1 个共用题干 + N 个分析推理小题（属分析推理综合推演，独立于削弱/加强等题型）；小题可在不违背总题干逻辑的前提下新增附加条件</span>
       </div>
       <div class="ep-param">
-        <label>出题难度</label>
-        <select v-model="difficulty" class="tb-sel">
-          <option value="curve">智能曲线（前易后难，30%易/50%中/20%难）</option>
-          <option value="easy">易（单一考点，直接对应）</option>
-          <option value="mid">中（一处拐弯/一个陷阱）</option>
-          <option value="hard">难（复合考点+强干扰）</option>
-          <option value="real">真题级（反套路·强干扰·陷阱叠加）</option>
-        </select>
-        <span class="ep-hint">已接入「命题专家」规范：考点先行·干扰项错因·唯一解自检</span>
-      </div>
-      <div class="ep-param">
         <label>
           <input v-model="store.cfg.strictGen" type="checkbox" @change="saveCfg()" />
-          出题严格质检（生成后二次验证 唯一解/恰一正确/无逻辑谬误，更稳但略慢）
+          AI 复核兜底（默认开：对候选题做最多一次唯一性复核，避免误杀后反复重出）
         </label>
       </div>
       <div class="ep-param" style="margin: 2px 0 2px">
         <label>
           <input type="checkbox" :checked="!!(store.cfg && store.cfg.fastAutoQC)" @change="store.cfg.fastAutoQC = $event.target.checked; saveCfg()" />
-          🛡️ 快模型自动质检（默认开：用「出题快模型 / 图形快模型」时，即使上面严格质检被关，也保留一次 AI 复核兜底，防快出降质；追极限速度可关）
+          🛡️ 快模型自动复核（默认开：走快模型时保留程序硬门 + 一次 AI 复核兜底）
+        </label>
+      </div>
       <div class="ep-param" style="margin: 2px 0 2px">
         <label>
           <input type="checkbox" :checked="!!(store.cfg && store.cfg.deepPlan)" @change="store.cfg.deepPlan = $event.target.checked; saveCfg()" />
           🧠 深度命题两段式（默认关：先让子命题人设计本题坑点/数据结构/干扰项错解，再按设计成题——言语·逻辑·判断类质感更强；每题 +1 次短请求、略慢）
+        </label>
+      </div>
       <div class="ep-param" style="margin: 2px 0 2px">
         <label style="display:flex; align-items:center; gap:6px">
           命题质感：
@@ -310,10 +323,7 @@ function toggleStrengthen(v) {
         </label>
         <span class="ep-hint">影响题干/材料/选项的“挖坑密度与难度观感”；对数量/资料仍强制 答案唯一可复算</span>
       </div>
-        </label>
-      </div>
-        </label>
-      </div>
+      </details>
     </div>
 
     <div v-if="srcMode === 'single'" class="ep-block">
@@ -452,6 +462,7 @@ function toggleStrengthen(v) {
           <option value="">— 选择年份卷 —</option>
           <option v-for="p in (zhentiIdx?.papers || [])" :key="p.id" :value="p.id">{{ p.title }}（{{ p.totalQ }}题）</option>
         </select>
+        <button v-if="zhentiPdfName" class="btn btn-gh" style="margin-top:8px" @click="pdfLibShow = true">📄 查看原卷 PDF（来源：{{ zhentiPdfName }}）</button>
       </div>
       <div class="ep-param">
         <label>板块选择（不选 = 全部板块）</label>
@@ -573,5 +584,6 @@ function toggleStrengthen(v) {
         🚀 {{ srcMode === 'single' ? '开始单题快练' : srcMode === 'ai' ? '开始考试（AI 出题）' : srcMode === 'import' ? '识别并组卷' : '错题组卷开始' }}
       </button>
     </div>
+    <ZhentiPdfLib v-if="pdfLibShow" :initial-file="zhentiPdfName" @close="pdfLibShow = false" />
   </div>
 </template>

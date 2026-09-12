@@ -140,7 +140,7 @@ export function useExamGen(ctx) {
     if (!c || !c.key) return { pass: true }
     try {
       const learn = genLogHint(plate, variant) // 历史质检学习：过去这类题常错在哪
-      let sys = '你是公考行测出题质检员（严格单选）。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②【唯一正确项】必须且只能有一个选项符合题目问法：禁止多选、禁止无正确选项、禁止两个选项同真、禁止选项全对、禁止两个选项同义重复；③选非题（错误的是/不属于/不能推出/不符合）必须保证其余三项均【符合】问法、只有答案项【不符合】；选是题反之；④选项与题干相关、无逻辑谬误；⑤若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。' + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"指出具体是哪几个选项都成立/都不成立/重复，便于重出修正"}'
+      let sys = '你是公考行测出题质检员（严格单选、证据优先）。检查下面这道题：①题干条件是否自洽、能否推出唯一解；②【唯一正确项】必须且只能有一个选项符合题目问法：禁止多选、禁止无正确选项、禁止两个选项同真、禁止选项全对、禁止两个选项同义重复；③选非题（错误的是/不属于/不能推出/不符合）必须保证其余三项均【符合】问法、只有答案项【不符合】；选是题反之；④选项与题干相关、无逻辑谬误；⑤若题干/选项含 SVG 图形（图推/几何），检查：每个 svg 是否带 viewBox 且元素坐标不越出画布（越界会被前端裁切显示不全）、题干图数是否齐全（一组图5图+问号/两组图3+3/九宫格9格/分组分类6图）、选项是否每项都画了候选图。只有在你能明确指出具体冲突证据时才判 false；“感觉不够好”“可以更好”“可能有争议”不得判 false。' + plateAiHint(plate, variant) + (learn ? '\n' + learn : '') + '只回复 JSON：{"ok":true} 或 {"ok":false,"reason":"指出具体是哪几个选项都成立/都不成立/重复，便于重出修正"}'
       // 深化(选项2)：数量/资料 AI 计算题强制“答案代回题干重算”复核（在既有唯一性复核内追加，不新增调用次数）
       // 言语·选词填空专属复核口径（v3.8.146）：防“意思相近但搭配/语境不符”被误判为两可或多解而反复否决
       if (plate === '言语理解') {
@@ -156,9 +156,11 @@ export function useExamGen(ctx) {
       const user = '题干：' + String(q.stem || '') + '\n选项：' + (q.options || []).map((o) => o.k + '. ' + o.t).join('\n') + '\n答案：' + String(q.answer || '')
       const r = await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: user }], 400)
       const m = String(r || '').match(/"ok"\s*:\s*(true|false)/)
-      // fail-closed：质检结果无法解析（缺 ok 字段/JSON 异常）一律视同不合格，触发重出，避免"白付钱却放行劣质题"
-      if (!m) return { pass: false }
-      return { pass: m[1] === 'true' }
+      // 质检格式漂移不能把题目判死：结构、唯一单选、计算/真值表等硬门已在前置程序完成。
+      // AI 只在明确返回 false 且给出具体证据时作为“重修建议”，否则放行。
+      if (!m) return { pass: true, advisory: true, reason: 'AI质检返回格式不可解析，已由确定性硬校验放行' }
+      const rm = String(r || '').match(/"reason"\s*:\s*"([\s\S]*?)"/)
+      return { pass: m[1] === 'true', reason: rm ? rm[1].replace(/\\n/g, ' ').trim().slice(0, 180) : '' }
     } catch (e) { return { error: true } } // 调用/网络异常≠内容否决
   }
 
@@ -348,7 +350,8 @@ export function useExamGen(ctx) {
       const askBase = (variant ? '请为【' + item.subject + '】出一道' + variant + '仿真模拟题（本题型：' + variant + '）。' : '请为【' + item.subject + '】出一道仿真模拟题。') + (zlLearn ? '\n' + zlLearn : '') + (flagLearn ? '\n' + flagLearn : '') + (wqHint ? '\n' + wqHint : '') + dh + diverTxt + qvHint +
         '【本次输出要求（提速，必须遵守）】只输出：题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X' +
         (item.subject === '逻辑判断' && variant === '真假话' ? ' + 末尾【验证数据】JSON' : '') +
-        '。不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。' + fmtHint
+        '。不要输出解析/考点/秒杀/难度自评/命题人设计说明（这些稍后由系统单独生成，你这次只出题）。' +
+        '【稳定性优先级】题干自洽、唯一正确项、四个选项互斥永远高于“挖坑更复杂”；若二者冲突，立刻降低陷阱密度，先保证题目成立。' + fmtHint
       // 35号批次5：真题蓝本 RAG（默认关 store.cfg.blueprintRag，开启后 +token；仅学结构、防照抄在出题后程序校验）
       let bpText = ''
       let bpEntries = []
@@ -407,6 +410,8 @@ export function useExamGen(ctx) {
       let lastParsed = null // 解析成功的题先记下，作为放宽兜底（避免 AI 质检过严反复“多次重出”）
       let calcBad = false // 数量/资料【验算】复核不过 → 禁止放宽兜底复活数值错误题
       const aiGate = !!((store.cfg.strictGen || store.cfg.dualCheck) || (store.cfg.fastAutoQC !== false && isFastGenMode())) // 是否有 AI 复核门（strict/双检/快模型质量门）
+      const aiReviewLimit = store.cfg.dualCheck ? 2 : 1 // 默认只复核一个候选；复核否决不无限重出，后续靠程序硬门收口
+      let aiReviews = 0
       let qcHardFail = false // 质检“内容否决”硬标记：仅真否决才禁止放宽兜底（调用失败不算）
       const stage = (attempt, label) => { genStatus.value = (attempt > 0 ? '第 ' + (attempt + 1) + ' 次重出 · ' : '') + label }
       // 深化·速度护栏：整题硬性总预算（默认90s=45s×2），超预算即停止重试走止损，绝不无限拖
@@ -463,11 +468,19 @@ export function useExamGen(ctx) {
           if (!vt || !vt.ok) { fixHint = '。上一版真值表校验未通过（' + (vt ? vt.reason : '缺少【验证数据】JSON') + '）：请重设条件/选项，使 2^n 枚举恰一组满足题设真假数、且恰一个选项对应唯一解，并在输出末尾附【验证数据】JSON'; continue }
           ttVerified = true
         }
-        if (needAiRecheck({ aiGateOn: aiGate, ttVerified, isBlank: isBlankQC, attempt })) { // 选词填空：本地质检通过后 AI 复核至多 2 次（防误杀型反复否决） // 37号 加固C：双模型互检 / 快模型质量门（strictGen 关掉但用快模型出题时仍保底一次 AI 复核）
+        if (needAiRecheck({ aiGateOn: aiGate, ttVerified, isBlank: isBlankQC, attempt, aiReviews, aiReviewLimit })) { // 稳定出题：AI 复核有次数上限；失败只给一次定向修正，不再无限重出
+          aiReviews++
           stage(attempt, 'AI 质检中…')
           const vq = await verifyQuestion(cur, item.subject, variant)
-          if (vq && vq.error) { failReasons.push('AI质检调用失败（网络/模型/限流）——暂不据此判死'); continue }
-          if (!(vq && vq.pass)) { qcHardFail = true; failReasons.push('AI质检未过（唯一解/恰一正确/无逻辑谬误）'); fixHint = '。上一版未过 AI 质检（题干自洽/唯一解/恰一正确/无逻辑谬误）：请按反馈修正后重出'; continue }
+          if (vq && vq.error) { failReasons.push('AI质检调用失败（网络/模型/限流）——已由程序硬校验放行'); qz = cur; break }
+          if (vq && vq.advisory && vq.reason) failReasons.push(vq.reason)
+          if (!(vq && vq.pass)) {
+            qcHardFail = true
+            const detail = vq && vq.reason ? '具体反馈：' + vq.reason : '题干自洽/唯一解/恰一正确/无逻辑谬误'
+            failReasons.push('AI质检未过：' + detail)
+            fixHint = '。上一版 AI 复核建议修正（' + detail + '）：请优先保证题干条件自洽、恰有一个正确答案，再做难度与陷阱设计；若强陷阱与唯一性冲突，直接降低陷阱密度。'
+            continue
+          }
         }
         qz = cur
       }
@@ -483,6 +496,7 @@ export function useExamGen(ctx) {
         item.explain = String(qz.explain || '').replace(/【验算】[^\n]*/g, '').trim() // 【验算】复核行不外显
         item.designer = qz.designer || ''
         item.variant = variant
+        item.qcReview = aiReviews ? 'ai-checked' : 'deterministic'
         // 35号批次1-A：考点出题即写（AI自标缺失时本地兜底），随题入库/作答事件
         item.kpoint = String(qz.kpoint || '').trim() || kpointOf(item.subject, qz.stem)
         // Request E·多样性：成功出题后记录本题题干头（供后续题避开同话题/同素材）

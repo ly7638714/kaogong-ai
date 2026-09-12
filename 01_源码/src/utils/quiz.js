@@ -94,10 +94,10 @@ export function parseQuiz(text) {
 
   // 正确答案：优先【正确答案】X 标记，其次"答案：X/正确答案：X"
   let answer = null
-  const marker = String(text).replace(/<[^>]+>/g, '').match(/【正确答案】\s*([A-D])/i)
+  const marker = String(text).replace(/<[^>]+>/g, '').match(/(?:【\s*(?:正确答案|参考答案|答案)\s*】|正确答案|参考答案|正确选项)\s*[:：为是]?\s*(?:选\s*)?([A-D])\b/i)
   if (marker) answer = marker[1].toUpperCase()
   if (!answer) {
-    const ans = String(text).replace(/<[^>]+>/g, '').match(/(?:正确答案|答案|正确选项)\s*[:：]?\s*([A-D])/i)
+    const ans = String(text).replace(/<[^>]+>/g, '').match(/(?:答案|正确选项)\s*[:：为是]?\s*(?:选\s*)?([A-D])\b/i)
     if (ans) answer = ans[1].toUpperCase()
   }
   if (!answer) return null

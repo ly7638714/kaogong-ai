@@ -15,6 +15,12 @@ describe('parseQuiz 选项提取', () => {
     expect(q).toBeTruthy()
     expect(q.options.map((o) => o.t)).toEqual(['2', '3', '4', '5'])
   })
+  it('兼容模型常见的【答案】A / 答案：选 A 标记，不再因格式漂移判失败', () => {
+    const q1 = parseQuiz('下列说法正确的是？\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n【答案】B')
+    const q2 = parseQuiz('下列说法正确的是？\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n答案：选 C')
+    expect(q1 && q1.answer).toBe('B')
+    expect(q2 && q2.answer).toBe('C')
+  })
 })
 
 describe('extractChoices', () => {

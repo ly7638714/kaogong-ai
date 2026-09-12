@@ -29,7 +29,7 @@ export function usePaperParse({ imgs, textFiles, modules, mixMode, pickGenC }) {
   async function readPdf(f) {
     try {
       const buf = await f.arrayBuffer()
-      const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
+      const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf.mjs')
       GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
       const pdf = await getDocument({ data: buf }).promise
       const parts = []

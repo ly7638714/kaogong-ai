@@ -54,7 +54,7 @@ foreach ($d in $deployDirs) {
     Where-Object { $srcAssetNames -notcontains $_.Name } |
     Remove-Item -Force
   Copy-Item (Join-Path $dist 'assets\*') $dstAssets -Recurse -Force
-  foreach ($dirName in @('pet-avatars','pet-voices')) {
+  foreach ($dirName in @('pet-avatars','pet-voices','zhenti-pdf')) {
     $srcDir = Join-Path $dist $dirName
     if (-not (Test-Path $srcDir)) { continue }
     $dstDir = Join-Path $d $dirName
@@ -84,7 +84,7 @@ try {
     Get-ChildItem $pub -File -Filter $pat | ForEach-Object { Copy-Item $_.FullName (Join-Path $stage $_.Name) -Force }
   }
   Copy-Item (Join-Path $pub 'assets') (Join-Path $stage 'assets') -Recurse -Force
-  foreach ($dirName in @('pet-avatars','pet-voices')) {
+  foreach ($dirName in @('pet-avatars','pet-voices','zhenti-pdf')) {
     $srcDir = Join-Path $pub $dirName
     if (Test-Path $srcDir) { Copy-Item $srcDir (Join-Path $stage $dirName) -Recurse -Force }
   }

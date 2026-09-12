@@ -1,11 +1,12 @@
 <script setup>
 // ZhentiPdfLib.vue —— 本地真题PDF卷库 + 内置阅读器（自建原生宿主·SAF 选文件夹；pdfjs 渲染）
 /* global atob, btoa */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { isNativeHost, nativePickFolder } from '../utils/platform'
 import { showToast } from '../utils/toast'
 
 defineEmits(['close'])
+const props = defineProps({ initialFile: { type: String, default: '' } })
 const tree = ref('')
 const treeName = ref('')
 try { tree.value = localStorage.getItem('xc_pdf_tree') || ''; treeName.value = localStorage.getItem('xc_pdf_tree_name') || '' } catch (e) {}
@@ -13,25 +14,57 @@ const path = ref([]) // 目录栈：{name, uri}
 const items = ref([])
 const msg = ref('')
 // 内置真题包模式（随包 zhenti-pdf/index.json；用户无需自己有 PDF）
-const srcMode = ref('bundle')
+const srcMode = ref(isNativeHost() ? 'bundle' : 'online')
 const groups = ref([])
 const gSel = ref(null)
+async function readBundledAsset(rel) {
+  const clean = String(rel || '').replace(/^\/+/, '')
+  if (location.protocol === 'file:' && window.xcnative && window.xcnative.readAssetB64) {
+    const b64 = window.xcnative.readAssetB64('zhenti-pdf/' + clean)
+    if (!b64 || String(b64).indexOf('ERR:') === 0) throw new Error(String(b64 || '读取失败').slice(4))
+    return b64ToU8(b64).buffer
+  }
+  const res = await fetch('./zhenti-pdf/' + clean, { cache: 'no-cache' })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return await res.arrayBuffer()
+}
 async function loadBundle() {
   msg.value = ''
+  const urls = [
+    './zhenti-pdf/index.json',
+    'https://kaogong-ai.pages.dev/zhenti-pdf/index.json',
+    'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json'
+  ]
   try {
-    const res = await fetch('./zhenti-pdf/index.json', { cache: 'no-cache' })
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const j = await res.json()
+    let j = null
+    const errs = []
+    if (location.protocol === 'file:' && window.xcnative && window.xcnative.readAssetB64) {
+      try {
+        const buf = await readBundledAsset('index.json')
+        j = JSON.parse(new TextDecoder().decode(new Uint8Array(buf)))
+      } catch (e) { errs.push((e && e.message) || e) }
+    }
+    if (!j) {
+      for (const u of urls) {
+        try {
+          const res = await fetch(u, { cache: 'no-cache' })
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          j = await res.json(); break
+        } catch (e) { errs.push((e && e.message) || e) }
+      }
+    }
+    if (!j) throw new Error(errs.join('；'))
     groups.value = (j && j.groups) || []
     gSel.value = null
     if (!groups.value.length) msg.value = '当前版本未内置真题包（用 _真题PDF入库.ps1 生成后再打包）'
-  } catch (e) { groups.value = []; gSel.value = null; msg.value = '未找到内置真题包：' + (e && e.message || e) }
+  } catch (e) { groups.value = []; gSel.value = null; msg.value = '未找到真题卷清单：' + (e && e.message || e) }
 }
-// ===== 在线真题库（多镜像自动切换：国内优先 jsDelivr，失败回落 GitHub raw）=====
-const ONLINE_BASE = 'https://raw.githubusercontent.com/ly7638714/MobileApp-DeepDev/main/zhenti-online/'
+// ===== 在线真题库（多镜像自动切换：本站/Gitee 国内优先，jsDelivr/GitHub 仅兜底）=====
 const MIRRORS = [
+  { name: '本站(国内)', base: './zhenti-pdf/' },
+  { name: 'Gitee(国内)', base: 'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/' },
   { name: 'jsDelivr(国内加速)', base: 'https://cdn.jsdelivr.net/gh/ly7638714/MobileApp-DeepDev@main/zhenti-online/' },
-  { name: 'GitHub raw(备)', base: ONLINE_BASE }
+  { name: 'GitHub raw(备)', base: 'https://raw.githubusercontent.com/ly7638714/MobileApp-DeepDev/main/zhenti-online/' }
 ]
 function onlineMirrorOrder() {
   const list = []
@@ -54,7 +87,13 @@ const ONLINE_GROUPS = [
   { name: '国考2022-2026', files: ["2022年国家公务员考试《行测》真题（副省级).pdf","2022年国家公务员考试《行测》真题（地市级).pdf","2022年国家公务员考试《行测》真题（行政执法).pdf","2023年国家公务员录用考试《行测》副省级-题.pdf","2023年国家公务员录用考试《行测》地市级-题.pdf","2023年国家公务员录用考试《行测》行政执法-题.pdf","2024年国家公务员录用考试《行测》题（副省级）.pdf","2024年国家公务员录用考试《行测》题（地市级）.pdf","2024年国家公务员录用考试《行测》题（行政执法卷）.pdf","2025年国家公务员录用考试《行测》题（副省级）.pdf","2025年国家公务员录用考试《行测》题（地市级）.pdf","2025年国家公务员录用考试《行测》题（行政执法卷）.pdf","2026年国考《行测》（副省级）试卷.pdf","2026年国考《行测》（地市类）试卷.pdf","2026年国考《行测》（行政执法类）试卷.pdf"] },
   { name: '贵州省考2024-2026', files: ["2024年贵州省公务员录用考试《行测》题（网友回忆版）.pdf","2025年贵州省公务员录用考试《行测》题（网友回忆版）.pdf","2026年贵州省公务员录用考试《行测》题（网友回忆版）.pdf"] }
 ]
+const onlineGroups = computed(() => (groups.value.length ? groups.value : ONLINE_GROUPS))
 const oG = ref(null)
+function fileRel(gname, fname) {
+  const f = String(fname || '')
+  if (String(gname || '') === '未分类' || !String(gname || '').trim()) return f
+  return String(gname) + '/' + f
+}
 function bufToB64(buf) {
   const u8 = new Uint8Array(buf); let bin = ''; const CH = 0x8000
   for (let i = 0; i < u8.length; i += CH) bin += String.fromCharCode.apply(null, u8.subarray(i, i + CH))
@@ -82,15 +121,15 @@ async function fetchFirstOk(rel) {
   throw new Error(errs.join('；'))
 }
 async function cacheAllOnline() {
-  const total = ONLINE_GROUPS.reduce((a, g) => a + (g.files || []).length, 0)
+  const total = onlineGroups.value.reduce((a, g) => a + (g.files || []).length, 0)
   let done = 0, ok = 0
   msg.value = '开始缓存全部卷（0/' + total + '）…'
-  for (const g of ONLINE_GROUPS) {
+  for (const g of onlineGroups.value) {
     for (const f of g.files || []) {
       const cname = cacheName(g.name, f)
       if (window.xcnative.cacheHas(cname)) { done++; ok++; continue }
       try {
-        const rel = encodeURIComponent(g.name) + '/' + encodeURIComponent(f)
+        const rel = fileRel(g.name, f).split('/').map(encodeURIComponent).join('/')
         const buf = await fetchFirstOk(rel)
         msg.value = '缓存中 ' + (done + 1) + '/' + total + '：' + f
         window.xcnative.cacheSave(cname, bufToB64(buf))
@@ -108,15 +147,15 @@ async function openOnline(gname, fname) {
       msg.value = '读取本地缓存…'
       if (await readFromCache(cname, fname)) return
     }
-    const rel = encodeURIComponent(gname) + '/' + encodeURIComponent(fname)
+    const rel = fileRel(gname, fname).split('/').map(encodeURIComponent).join('/')
     const buf = await fetchFirstOk(rel)
     await loadPdfData(fname, buf)
     try { window.xcnative.cacheSave(cname, bufToB64(buf)) } catch (e) {} // 打开即缓存，下次离线可用
   } catch (e) { msg.value = '在线加载失败：' + (e && e.message || e) + '\n可先用「缓存全部」或离线包，再重试。' }
 }
 
-// ===== 在线真题卷包：App 内一键下载(zip)→解压→离线阅读（不占 APK）=====
-const PACK_URL = 'https://github.com/ly7638714/MobileApp-DeepDev/releases/download/zhenti-pack-v1/xingce-zhenti-pack-v1.zip'
+// ===== 在线真题卷包：蓝奏云国内下载 + 本地 zip 导入；APK 默认已随包内置 =====
+const PACK_URL = 'https://lyuan.lanzoue.com/iWMVu470k49a'
 const packItems = ref([])
 const packMsg = ref('')
 const packBusy = ref(false)
@@ -149,17 +188,11 @@ function importZipLocal() {
   }
   zipInput.click()
 }
-function installPack() {
-  if (packBusy.value) return
-  packBusy.value = true
-  packMsg.value = '正在下载并解压真题卷包（约 50MB，1-5 分钟，请保持网络）…'
-  window.__xcOnPack = (id, res) => {
-    packBusy.value = false
-    if (String(res).indexOf('ok:') === 0) { packMsg.value = '✅ 已安装 ' + String(res).slice(3) + ' 份' }
-    else packMsg.value = '下载失败：' + String(res).slice(4) + '（请检查网络后重试）'
-    listPack()
-  }
-  try { window.xcnative.installZhentiPack(PACK_URL, Math.floor(Math.random() * 90000) + 1000) } catch (e) { packBusy.value = false; packMsg.value = '调用失败：' + e.message }
+function openLanzou() {
+  try {
+    if (window.xcnative && window.xcnative.openUri) window.xcnative.openUri(PACK_URL, 'text/html')
+    else window.open(PACK_URL, '_blank', 'noopener')
+  } catch (e) { showToast('无法打开蓝奏云：' + (e && e.message || e), 'error') }
 }
 async function openInternal(path) {
   try {
@@ -172,7 +205,7 @@ async function openInternal(path) {
 }
 async function loadPdfData(name, dataBuf) {
   try {
-    const pdfjsLib = await import('pdfjs-dist')
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
     pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
     const pdf = await pdfjsLib.getDocument({ data: dataBuf }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
@@ -183,10 +216,8 @@ async function loadPdfData(name, dataBuf) {
 async function openBundled(rel) {
   try {
     busy.value = true; msg.value = '加载 PDF…'
-    const res = await fetch('./zhenti-pdf/' + rel, { cache: 'no-cache' })
-    if (!res.ok) throw new Error('读取失败')
-    const data = new Uint8Array(await res.arrayBuffer())
-    const pdfjsLib = await import('pdfjs-dist')
+    const data = new Uint8Array(await readBundledAsset(rel))
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
     pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
     const pdf = await pdfjsLib.getDocument({ data: data.buffer }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
@@ -229,7 +260,7 @@ async function openPdf(uri, name) {
     busy.value = true; msg.value = '加载 PDF…'
     const b64 = window.xcnative.readFileB64(uri) || ''
     if (String(b64).indexOf('ERR:') === 0) { msg.value = String(b64).slice(4); return }
-    const pdfjsLib = await import('pdfjs-dist')
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
     pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
     const pdf = await pdfjsLib.getDocument({ data: b64ToU8(b64).buffer }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
@@ -259,7 +290,14 @@ function fitW() { scale.value = 1; render() }
 function exitViewer() { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}; pdfDoc = null; viewer.value = false }
 function sysOpen() { if (!pdfUri.value) { showToast('内置真题包请在阅读器内查看（可整卷截图/逐页）', 'info'); return } try { window.xcnative.openUri(pdfUri.value, 'application/pdf') } catch (e) {} }
 function sysShare() { try { if (pdfUri.value) window.xcnative.shareUri(pdfUri.value, 'application/pdf', pdfName.value) } catch (e) {} }
-onMounted(() => { loadBundle() })
+onMounted(async () => {
+  await loadBundle()
+  const target = String(props.initialFile || '').trim()
+  if (!target || !groups.value.length) return
+  for (const g of groups.value) {
+    if ((g.files || []).includes(target)) { await openBundled(fileRel(g.name, target)); return }
+  }
+})
 onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
 </script>
 
@@ -289,7 +327,7 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
         <div class="zpv-list">
           <div style="padding:2px 0 8px"><button class="zpv-btn pri" @click="cacheAllOnline()">⏬ 缓存全部（一次搞定，之后离线可读）</button></div>
           <template v-if="!oG">
-            <button v-for="(g, gi) in ONLINE_GROUPS" :key="gi" class="zpv-it" @click="oG = g">
+            <button v-for="(g, gi) in onlineGroups" :key="gi" class="zpv-it" @click="oG = g">
               <span class="zpv-ic">📁</span><span class="zpv-name">{{ g.name }}</span><span class="zpv-tip">{{ (g.files || []).length }} 卷</span>
             </button>
           </template>
@@ -303,13 +341,13 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
 
       <!-- 在线真题卷包：下载→列表→阅读 -->
       <template v-if="srcMode === 'pack' && !viewer">
-        <div class="zpv-bread"><span class="zpv-tip">下载一次后离线可用（不占安装包）</span></div>
+        <div class="zpv-bread"><span class="zpv-tip">APK 已随包内置 28 卷；网页/旧版可选蓝奏云下载后导入</span></div>
         <div class="zpv-list">
           <div v-if="packMsg" class="zpv-msg">{{ packMsg }}</div>
           <div v-if="!packItems.length && !packBusy" class="zpv-empty">
-            <p>真题卷包含：国考 2022-2026（15 卷）+ 贵州省考 2024-2026（3 卷），约 50MB。<br/>推荐：蓝奏/夸克下载 zip 后点下方“选择zip导入”（免直链、国内最稳）。</p>
-            <button class="zpv-btn pri" @click="importZipLocal()">📂 选择 zip 导入（推荐）</button>
-            <button class="zpv-btn" @click="installPack()">📥 在线一键下载</button>
+            <p>真题卷包含：国考 2017-2026 + 贵州 2024-2026，共 28 卷，约 39MB。<br/>APK 已内置，无需下载；网页或旧版可从蓝奏云取 zip 后导入。</p>
+            <button class="zpv-btn pri" @click="openLanzou()">☁️ 蓝奏云下载卷包</button>
+            <button class="zpv-btn" @click="importZipLocal()">📂 选择 zip 导入</button>
           </div>
           <button v-for="(f, i) in packItems" :key="i" class="zpv-it" @click="openInternal(f.path)">
             <span class="zpv-ic">📄</span><span class="zpv-name">{{ f.path }}</span>
@@ -332,7 +370,7 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
             </button>
           </template>
           <template v-else>
-            <button v-for="(f, fi) in gSel.files" :key="fi" class="zpv-it" @click="openBundled((gSel.name + '/' + f).replace(/^\/|\/$/g, ''))">
+              <button v-for="(f, fi) in gSel.files" :key="fi" class="zpv-it" @click="openBundled(fileRel(gSel.name, f))">
               <span class="zpv-ic">📄</span><span class="zpv-name">{{ f.split('/').pop() }}</span>
             </button>
           </template>
