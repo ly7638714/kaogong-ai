@@ -234,6 +234,7 @@ archive_旧版本/敏感占位文件/
 01_源码/node_modules/
 01_源码/dist/
 01_源码/dist-trial/
+01_源码/pet-desktop.png
 
 # ===== 行测项目：本地会话记录与个人数据（不提交）=====
 .reasonix/

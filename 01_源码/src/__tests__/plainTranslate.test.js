@@ -31,4 +31,13 @@ describe('plainTranslate 逻辑题干白话翻译', () => {
     expect(out).not.toContain('论证结构')
     expect(out).not.toContain('能削弱结论')
   })
+  it('言语理解使用言语结构，且支持只翻译指定片段', () => {
+    const whole = buildPlainTranslationPrompt('文段讨论城市更新与居民生活。作者意在说明什么？', '', '', { subject: '言语理解', sub: '片段阅读' })
+    expect(whole.user).toContain('核心信息与句间关系')
+    expect(whole.user).toContain('关键词、指代与态度色彩')
+    expect(whole.user).not.toContain('论证结构')
+    const focus = buildPlainTranslationPrompt('文段讨论城市更新与居民生活。作者意在说明什么？', '', '城市更新', { subject: '言语理解', sub: '片段阅读' })
+    expect(focus.user).toContain('本次只翻译以下指定片段')
+    expect(focus.user).toContain('城市更新')
+  })
 })

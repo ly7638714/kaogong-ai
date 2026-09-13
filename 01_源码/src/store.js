@@ -26,7 +26,7 @@ const D = () => ({
   ttsEngineChosen: false, // 用户是否在设置里手动选过朗读引擎（true=永不被「省钱默认迁移」静默改写）
   ttsGuard: true, // 真人朗读「省钱护栏」（v3.8.90）：真人引擎每日免费字符额度用完自动退回免费系统语音；Edge/系统语音永不被拦
   ttsTrimLead: true, // 朗读开头提示音：自动识别并裁掉（TTS 每个分块响应开头自带的“嘟”声）
-  ttsTrimLeadMs: 0, // 强制裁掉开头毫秒数：0=只做智能识别；识别不干净时可手动设 120~300 强制裁
+  ttsTrimLeadMs: 200, // 强制裁掉开头毫秒数（双保险）：默认 200，与智能识别**取最大值**；设 0=只用智能识别
   ttsDayCap: 20000, // 真人引擎每日免费字符额度（约 3-4 千字中文量级；超出自动退回系统语音）
   ttsGm: { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' },
   ttsOpenAI: { key: '', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' },
@@ -88,6 +88,8 @@ const D = () => ({
   szTo: '',
   // ===== 界面自定义（v3.8.80 新增）：主界面板块/细分功能入口显隐开关（仅隐藏，不删除功能）=====
   uiHidden: {},
+  // 主界面顶部板块显示顺序（用户可在 设置→界面自定义 中调整）
+  uiTabOrder: ['ck', 'chat', 'kb', 'ths', 'stat', 'wq', 'sync'],
   // ===== 模型注册表用户自增（v3.8.84 新增）：{ text:{ ds:[{id,label,pub?}], ... }, vision:{...}, fig:{...} } 与新上市模型的兜底 =====
   customModels: {},
   // ===== 语音阅读·讲稿改写 LLM（v3.8.88 新增·可选）：朗读前先把原文改写成口语化讲稿再交给 TTS；未配置时退回直接朗读原文 =====
@@ -129,6 +131,14 @@ export function load() {
         store.cfg.ttsOn = false
       }
       localStorage.setItem('xc_tts_migrated', '1')
+    }
+  } catch (e) {}
+  // v3.8.332 提示音兜底迁移：老配置里 ttsTrimLeadMs 是 0（只做智能识别），
+  // 新默认 200ms（与智能识别取最大值，双保险）；仅升级一次，之后用户手动改过就不覆盖。
+  try {
+    if (localStorage.getItem('xc_tts_trimlead_migrated') !== '1') {
+      if (!(Number(store.cfg.ttsTrimLeadMs) > 0)) store.cfg.ttsTrimLeadMs = 200
+      localStorage.setItem('xc_tts_trimlead_migrated', '1')
     }
   } catch (e) {}
   // 自动朗读开关统一成严格布尔：老配置里可能没有这个键（undefined），

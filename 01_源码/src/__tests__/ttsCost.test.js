@@ -11,8 +11,9 @@ vi.mock('../utils/ttsCache', () => ({
 }))
 
 import { store } from '../store'
-import { glmSynthesize, speakPro, ttsCacheCoverage } from '../utils/ttsEngine'
+import { glmSynthesize, speakPro, ttsCacheCoverage, ttsChunkPlan } from '../utils/ttsEngine'
 import { ttsCacheGet, ttsCacheSet, ttsCachePin } from '../utils/ttsCache'
+import { chunkForTts } from '../utils/tts/clean'
 import { DEF_PRICES, getTtsPrice } from '../utils/costTrack'
 
 const mem = new Map()
@@ -134,5 +135,26 @@ describe('朗读缓存命中不重复计费', () => {
     const keys = ttsCacheGet.mock.calls.map((c) => String(c[0]))
     expect(keys.length).toBeGreaterThan(0)
     expect(keys.every((k) => k.includes('glm-role-tts'))).toBe(true)
+  })
+
+  it('默认朗读与缓存校验共用同一分块计划（240/42）', async () => {
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/wav' })
+    const text = '缓存分块必须完全一致，否则重读会重复请求。'.repeat(40)
+    const plan = ttsChunkPlan()
+    const expected = chunkForTts(text, plan.chunkSize, plan.firstChunkSize).length
+    await ttsCacheCoverage(text, Object.assign({ mode: 'glm' }, plan))
+    expect(ttsCacheGet).toHaveBeenCalledTimes(expected)
+  })
+
+  it('singleRequest 明确首块为 0 时，缓存校验不会又变回 42 字首块', async () => {
+    ttsCacheGet.mockResolvedValue({ bytes: new ArrayBuffer(16), mime: 'audio/wav' })
+    const text = '单次整段合成用于验证缓存分块。'.repeat(400)
+    const plan = ttsChunkPlan({ singleRequest: true })
+    const expected = chunkForTts(text, plan.chunkSize, plan.firstChunkSize).length
+    const progressive = chunkForTts(text, plan.chunkSize, 42).length
+    expect(plan).toEqual({ chunkSize: 4000, firstChunkSize: 0 })
+    expect(expected).toBeLessThan(progressive)
+    await ttsCacheCoverage(text, Object.assign({ mode: 'glm' }, plan))
+    expect(ttsCacheGet).toHaveBeenCalledTimes(expected)
   })
 })

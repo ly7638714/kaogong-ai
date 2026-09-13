@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { store, saveCfg, saveWqs, saveMsgs, saveNotes } from './store'
 import { useExamTimer } from './composables/useExamTimer'
 import { speak, stopSpeak, setGaplessRate, SCENES, getAllVoices, onVoicesReady, TTS_ENGINES, GLM_PRESET_VOICES, EDGE_PRESET_VOICES, OPENAI_PRESET_VOICES, DASH_MODELS, dashVoicesForModel, listGmVoices, listEdgeVoices, previewVoice, copyFigKeyToTts, ttsStatus, ttsCharsToday, cloneCosyVoice, cloneZhipuVoice, prepareCloneAudio, startRecog, recogActive } from './utils/tts'
@@ -38,6 +38,8 @@ import { musicOn, musicVol, musicLoop, musicIndex, musicList, musicStatus, playT
 import { renderMd } from './utils/renderMd'
 import { pet, petShow, petMuted, bubble, petStats, petStage, petLevel, petHunger, petMood, petPoints, petSpeak, feedPet, patPet, renamePet, setPetMuted, petStop, petReadCurrent, petPauseToggle, petReadPaused, petNextSpeed, petAnalyzeCurrent, petChat, petChatBusy, petSpeakReply, petAsk, petAllSkins, petSkin, applyPetSkin, petImg, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petPersistName, petAskImage, petRenameCloneVoice, petSkinSampleOf } from './utils/pet'
 import { petBatchCollectTodayWrong } from './utils/petBatch'
+import { buildPetDashboard } from './utils/petProfile'
+import { loadCheckinState, dateKey } from './utils/checkin'
 // 全局 toast 别名：导出/截图等工具里的 window.showToast 都要能弹提示（否则成功失败都无反应）
 try { window.showToast = (m, t) => showToast(m, t) } catch (e) {}
 const petMd = (t) => renderMd(String(t || ''))
@@ -51,7 +53,16 @@ const tabs = [
   { k: 'sync', t: '💾 数据同步' }
 ]
 // 界面自定义：被隐藏的板块/功能入口不渲染（功能仍在，可从深链/更多菜单进入）
-const visibleTabs = computed(() => tabs.filter((t) => !(store.cfg.uiHidden && store.cfg.uiHidden['tab_' + t.k])))
+const DEFAULT_TAB_ORDER = tabs.map((t) => t.k)
+function normalizeTabOrder(order) {
+  const src = Array.isArray(order) ? order.filter((k) => DEFAULT_TAB_ORDER.includes(k)) : []
+  return [...new Set([...src, ...DEFAULT_TAB_ORDER])]
+}
+const tabOrder = computed(() => normalizeTabOrder(store.cfg.uiTabOrder))
+const visibleTabs = computed(() => {
+  const rank = new Map(tabOrder.value.map((k, i) => [k, i]))
+  return tabs.filter((t) => !(store.cfg.uiHidden && store.cfg.uiHidden['tab_' + t.k])).sort((a, b) => (rank.get(a.k) ?? 999) - (rank.get(b.k) ?? 999))
+})
 // ===== URL 深链（hash 路由）：#/ck #/chat #/kb #/ths #/stat #/wq #/sync，可收藏/分享、浏览器返回键切页 =====
 const TAB_KEYS = { ck: 1, chat: 1, kb: 1, ths: 1, stat: 1, wq: 1, sync: 1 }
 function tabFromHash() {
@@ -790,6 +801,8 @@ async function doNetease() {
   }
 }
 function openPet() {
+  petPanelFull.value = false
+  petCollapsed.value = false
   clampFloatPos()
   petShow.value = true
   petSpeak()
@@ -883,17 +896,44 @@ function clampFloatPos() {
   else petPos.value = { x: vw - 54 - 14, y: ts + 12 } // 无保存位置时给一个避开顶部导航的默认落点
   if (musicPos.value) musicPos.value = floatSafeClamp(musicPos.value.x, musicPos.value.y, 54, 54, vw, vh, ts)
   else musicPos.value = { x: 14, y: ts + 12 }
-  if (petPanelPos.value) petPanelPos.value = floatSafeClamp(petPanelPos.value.x, petPanelPos.value.y, 358, 520, vw, vh, ts)
+  if (petPanelPos.value) {
+    const panel = document.querySelector('.pet-panel')
+    const panelW = (panel && panel.offsetWidth) || Math.min(560, Math.max(280, vw - 24))
+    const panelH = (panel && panel.offsetHeight) || 520
+    petPanelPos.value = floatSafeClamp(petPanelPos.value.x, petPanelPos.value.y, panelW, panelH, vw, vh, ts)
+  }
 }
 window.addEventListener('resize', () => clampFloatPos())
 const petPanelPos = ref(null) // 助理小窗位置
 const petCollapsed = ref(false)
+const petPanelFull = ref(false)
 const petRenameToggle = ref(false)
 const petPanelStyle = computed(() => {
+  if (petPanelFull.value && !petCollapsed.value) return { left: '0px', top: '0px', right: 'auto', width: '100vw', height: '100dvh' }
   const p = petPanelPos.value
   if (!p) return {}
   return { left: p.x + 'px', top: p.y + 'px', right: 'auto' }
 })
+function togglePetPanelFull() {
+  petPanelFull.value = !petPanelFull.value
+  petCollapsed.value = false
+  if (!petPanelFull.value) nextTick(() => clampFloatPos())
+}
+function minimizePetPanel() {
+  petPanelFull.value = false
+  petCollapsed.value = true
+  nextTick(() => clampFloatPos())
+}
+function restorePetPanel() {
+  petPanelFull.value = false
+  petCollapsed.value = false
+  nextTick(() => clampFloatPos())
+}
+function closePetPanel() {
+  petPanelFull.value = false
+  petCollapsed.value = false
+  petShow.value = false
+}
 // 萌宠「正在看」的上下文（当前题/板块/页面）
 const petSeeLabel = computed(() => {
   const q = store.curQ
@@ -919,6 +959,7 @@ function floatStyle(key) {
 }
 function startFloatDrag(e, key) {
   if (e.button != null && e.button !== 0) return
+  if (key === 'pp' && petPanelFull.value) return
   const el = e.currentTarget
   if (!el) return
   e.preventDefault()
@@ -1249,6 +1290,23 @@ function resetUi() {
   store.cfg.uiHidden = {}
   saveCfg()
   showToast('✅ 已恢复全部界面入口', 'success')
+}
+function moveTab(k, dir) {
+  const list = normalizeTabOrder(store.cfg.uiTabOrder)
+  const from = list.indexOf(k)
+  const to = from + (dir > 0 ? 1 : -1)
+  if (from < 0 || to < 0 || to >= list.length) return
+  const next = list.slice()
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  store.cfg.uiTabOrder = next
+  saveCfg()
+  showToast('✅ 已调整板块顺序', 'success')
+}
+function resetTabOrder() {
+  store.cfg.uiTabOrder = DEFAULT_TAB_ORDER.slice()
+  saveCfg()
+  showToast('✅ 已恢复默认板块顺序', 'success')
 }
 const sysVoices = ref([])
 function loadSysVoices() {
@@ -1595,8 +1653,48 @@ function copyFigKey() {
   saveCfg()
 }
 const petAskText = ref('')
+const petTab = ref(localStorage.getItem('xc_pet_tab') || 'overview')
 const skinShow = ref(false)
 const petBatchBusy = ref(false)
+function setPetTab(t) {
+  petTab.value = String(t || 'overview')
+  try { localStorage.setItem('xc_pet_tab', petTab.value) } catch (e) {}
+}
+const petDashboard = computed(() => {
+  let checkin = null
+  try { checkin = loadCheckinState(localStorage) } catch (e) {}
+  const todayLabel = new Date().toLocaleDateString()
+  const todayNotes = (store.notes || []).filter((n) => n && (String(n.at || '') && dateKey(Number(n.at)) === dateKey() || String(n.t || '').includes(todayLabel))).length
+  return buildPetDashboard({
+    msgs: store.msgs || [],
+    wqs: store.wqs || [],
+    streak: (petStats && petStats.value && petStats.value.streak) || 0,
+    todayChecked: !!(checkin && checkin.last === dateKey()),
+    todayNotes
+  })
+})
+const petActivityMax = computed(() => Math.max(1, ...petDashboard.value.activity7.map((d) => d.asks + d.wrongs * 2 + d.reviews * 2)))
+function petActivityValue(d) { return (d && (d.asks + d.wrongs * 2 + d.reviews * 2)) || 0 }
+function petDayLabel(key) {
+  try { return new Date(String(key) + 'T12:00:00').toLocaleDateString('zh-CN', { weekday: 'short' }).replace('周', '') } catch (e) { return '' }
+}
+function runPetAction(action) {
+  if (!action) return
+  if (action.prompt) {
+    setPetTab('chat')
+    doPetAsk(action.prompt)
+    return
+  }
+  if (action.target) {
+    store.tab = action.target
+    closePetPanel()
+  }
+}
+function analyzePetPlate(p) {
+  if (!p) return
+  setPetTab('chat')
+  doPetAsk('请根据我的「' + p.label + '」使用数据（提问 ' + p.asks + ' 次、错题 ' + p.wrongs + ' 道、复错 ' + p.repeated + ' 次、到期 ' + p.due + ' 道、掌握度 ' + p.mastery + '%），拆解我最容易错的具体细分和题型，并给我今天可执行的训练建议。')
+}
 async function doPetTodayBatch() {
   if (petBatchBusy.value) return
   petBatchBusy.value = true
@@ -2869,11 +2967,11 @@ onUnmounted(() => {
             <label style="display: flex; gap: 5px; align-items: center; font-size: calc(12px * var(--ui-fs-scale, 1))">
               强制裁掉开头
               <input v-model.number="store.cfg.ttsTrimLeadMs" type="number" min="0" max="2000" step="20" style="width: 84px" @change="saveCfg()" />
-              毫秒（0 = 只做智能识别）
+              毫秒（默认 200；0 = 只做智能识别）
             </label>
           </div>
           <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 5px">
-            提示音是 TTS 每个分块响应自带的，长文分块合成时会出现在每一段开头。默认智能识别即可裁掉；若仍能听到，把「强制裁掉开头」设为 120~300 毫秒即可彻底删掉。
+            提示音是 TTS 每个分块响应自带的，长文分块合成时会出现在每一段开头。默认「智能识别」与「强制裁剪」<b>取两者较大值</b>双保险：智能识别会精确裁掉整段提示音（含多声「嘟嘟」），强制裁剪兜底保证一定删干净。若朗读开头被吃掉，把强制值调小或设 0。
           </div>
         </div>
 
@@ -3645,6 +3743,18 @@ onUnmounted(() => {
 <div v-show="setGroup === 'ui'" class="set-group-bd">
   <div id="set-ui" class="sec-t">🧩 界面自定义（DIY 你的主页）</div>
   <div class="sec-desc">按需求自主隐藏或显示主界面的板块与细分功能入口（如萌宠、背景音乐），让界面更清爽。仅隐藏入口、<b>不删除任何功能</b>——隐藏后仍可从「更多菜单 / 链接」进入。</div>
+  <div class="sec-t" style="margin-top:14px">↕️ 主页板块显示顺序</div>
+  <div class="sec-desc">用上移、下移调整顶部板块顺序；例如把「对话」移到「错题」前面。调整后立即生效，并随设置保存和同步。</div>
+  <div class="tab-order-list">
+    <div v-for="(k, i) in tabOrder" :key="'ord_' + k" class="tab-order-row">
+      <span class="tor-grip">⋮⋮</span>
+      <span class="tor-main"><b>{{ (tabs.find((t) => t.k === k) || {}).t || k }}</b><em>{{ (uiEntries.find((e) => e.id === 'tab_' + k) || {}).desc || '' }}</em></span>
+      <span class="tor-idx">{{ i + 1 }}</span>
+      <button class="btn btn-gh tor-btn" :disabled="i === 0" title="上移" @click="moveTab(k, -1)">↑</button>
+      <button class="btn btn-gh tor-btn" :disabled="i === tabOrder.length - 1" title="下移" @click="moveTab(k, 1)">↓</button>
+    </div>
+  </div>
+  <div class="tab-order-actions"><button class="btn btn-gh" @click="resetTabOrder()">恢复默认顺序</button></div>
   <div class="ui-list">
     <div v-for="e in uiEntries" :key="e.id" class="ui-row">
       <div class="ui-meta">
@@ -4178,77 +4288,159 @@ onUnmounted(() => {
       </div>
     </div>
         <!-- 萌宠智能助理面板（可拖拽小窗 · 不遮题） -->
-    <div v-if="petShow && !uiHiddenOf('pet')" class="pet-panel" :style="petPanelStyle">
-      <div class="pp-head" title="按住可拖动到题目旁边" @pointerdown="startFloatDrag($event, 'pp')">
+    <div v-if="petShow && !uiHiddenOf('pet')" class="pet-panel" :class="{ 'pet-panel-full': petPanelFull && !petCollapsed, 'pet-panel-min': petCollapsed }" :style="petPanelStyle">
+      <div class="pp-head" :title="petPanelFull ? '双击退出全屏' : '按住可拖动；双击切换全屏'" @pointerdown="startFloatDrag($event, 'pp')" @dblclick="togglePetPanelFull()">
         <PetAvatar :size="46" />
         <div class="pet-id">
           <div class="pet-name">{{ pet.name }} <span class="pet-lv">Lv.{{ petLevel }} · {{ petStage.name }}</span></div>
           <div class="pet-moodline">{{ petMood.emoji }} {{ petMood.label }} · 饱食 {{ petHunger }}/10 · {{ petPoints }}分</div>
         </div>
-        <button class="pc-close" :title="petCollapsed ? '展开' : '折叠'" @pointerdown.stop @click="petCollapsed = !petCollapsed">{{ petCollapsed ? '▢' : '▁' }}</button>
-        <button class="pc-close" title="关闭" @pointerdown.stop @click="petShow = false">✕</button>
+        <button class="pc-close" :title="petPanelFull ? '退出全屏（恢复半屏）' : '全屏显示'" @pointerdown.stop @click="togglePetPanelFull()">{{ petPanelFull ? '🗗' : '⛶' }}</button>
+        <button class="pc-close" :title="petCollapsed ? '恢复半屏' : '最小化到标题栏'" @pointerdown.stop @click="petCollapsed ? restorePetPanel() : minimizePetPanel()">{{ petCollapsed ? '▢' : '—' }}</button>
+        <button class="pc-close" title="关闭并回到悬浮球" @pointerdown.stop @click="closePetPanel()">✕</button>
       </div>
       <div v-if="!petCollapsed" class="pp-body">
-        <div class="pp-ctx">
-          <span class="pp-ctx-chip pp-see">👀 {{ petSeeLabel }}</span>
-          <span class="pp-ctx-chip">💬 {{ petStats.asks }}问</span>
-          <span class="pp-ctx-chip">📋 {{ petStats.wrongs }}错</span>
-          <span class="pp-ctx-chip">🔥 {{ petStats.streak }}天</span>
+        <div class="pet-tabs" role="tablist" aria-label="萌宠工作区">
+          <button role="tab" :aria-selected="petTab === 'overview'" :class="{ on: petTab === 'overview' }" @click="setPetTab('overview')">总览</button>
+          <button role="tab" :aria-selected="petTab === 'plates'" :class="{ on: petTab === 'plates' }" @click="setPetTab('plates')">板块</button>
+          <button role="tab" :aria-selected="petTab === 'advice'" :class="{ on: petTab === 'advice' }" @click="setPetTab('advice')">建议</button>
+          <button role="tab" :aria-selected="petTab === 'chat'" :class="{ on: petTab === 'chat' }" @click="setPetTab('chat')">对话</button>
+          <button role="tab" :aria-selected="petTab === 'interact'" :class="{ on: petTab === 'interact' }" @click="setPetTab('interact')">互动</button>
         </div>
-        <div class="pp-acts">
-          <button class="btn btn-gh pp-act" @click="petReadCurrent()">🔊 读题</button>
-          <button class="btn btn-gh pp-act" @click="petPauseToggle()">{{ petReadPaused() ? '▶️ 继续' : '⏸ 暂停' }}</button>
-          <button class="btn btn-gh pp-act" @click="petAnalyzeCurrent()">🧠 错因</button>
-          <button class="btn btn-gh pp-act" @click="petNextSpeed()">⏱ {{ Math.round((store.cfg.ttsRate || 1) * 100) }}%</button>
-          <button class="btn btn-gh pp-act" @click="doPetAsk('给我安排今天的高效学习计划')">📋 计划</button>
-          <button class="btn btn-gh pp-act" @click="doPetAsk('根据我的学习数据，告诉我目前强弱项和下一步建议')">📊 概况</button>
-          <button class="btn btn-gh pp-act" :disabled="petBatchBusy" @click="doPetTodayBatch()">{{ petBatchBusy ? '⏳ 收题中' : '📥 今日截图收错题' }}</button>
-          <button class="btn btn-gh pp-act" @click="skinShow = !skinShow">🎭 {{ skinShow ? '收起' : '换装' }}</button>
-        </div>
-        <div v-if="skinShow" class="pp-skins">
-          <div class="pv-title">🎭 角色皮肤（🔒 内置锁定 · 🧬 克隆原声 · ➕ 新增自定义）</div>
-          <div class="skin-grid">
-            <button v-for="s in petAllSkins" :key="s.id" class="skin-card" :class="{ on: petSkin.id === s.id }" @click="applySkin(s.id)">
-              <PetAvatar :size="40" :skin-id="s.id" class="skin-av" />
-              <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petSkinVoiceOf(s.id).preset" style="margin-left: 2px" title="内置声线">🔊</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="内置锁定">🔒</span><span v-if="petSkinSampleOf(s.id)" style="margin-left: 3px;cursor:pointer" title="试听内置参考原声" @click.stop="previewPetSample(s.id)">▶</span></span>
-              <span class="skin-desc">{{ s.desc }}</span>
-              <span v-if="s.custom && s.id !== 'custom'" style="display:flex; gap:4px; justify-content:center; margin-top:2px">
-                <span style="cursor:pointer" title="删除" @click.stop="doRemoveCustom(s.id)">🗑</span>
-              </span>
-            </button>
-            <button class="skin-card skin-add" @click="doAddCustom()">
-              <span class="skin-name" style="font-size: calc(20px * var(--ui-fs-scale, 1))">➕</span>
-              <span class="skin-name">新增自定义</span>
-            </button>
+
+        <div v-if="petTab === 'overview'" class="pp-tabpane">
+          <div class="pet-hero-card">
+            <div class="pet-hero-txt"><b>{{ petDashboard.greeting }}</b><span>{{ petDashboard.summary }}</span></div>
+            <div class="pet-hero-streak"><b>{{ petDashboard.overall.streak }}</b><span>连续天</span></div>
           </div>
-          <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin-top: 4px">薛神、章若楠、李星云、姬如雪、花生十三、小P、小黑、文姐、巾神均为内置锁定角色（形象、人设、专属声线内置，点 ▶ 可试听参考原声）；自定义角色可自由设置名字/人设/形象/声线，想加几个加几个（去 设置→萌宠 编辑）。</div>
-        </div>
-        <div v-if="bubble && !petMuted" class="pet-talk pp-talk">{{ bubble }}</div>
-        <div class="pc-list pp-list">
-          <div v-for="(m, i) in petChat" :key="i" class="pc-msg" :class="m.role">
-            <span class="pc-who"><PetAvatar v-if="m.role === 'pet'" :size="22" /><span v-else>🙂</span></span>
-            <div v-if="m.role === 'pet'" class="pc-txt pet-md" v-html="petMd(m.text)"></div>
-            <span v-else class="pc-txt">{{ m.text }}</span>
+          <div class="pet-stat-grid">
+            <div class="pet-stat-card"><b>{{ petDashboard.overall.todayAsks }}</b><span>今日提问</span></div>
+            <div class="pet-stat-card warn"><b>{{ petDashboard.overall.unreviewed }}</b><span>待复盘</span></div>
+            <div class="pet-stat-card danger"><b>{{ petDashboard.overall.due }}</b><span>到期错题</span></div>
+            <div class="pet-stat-card"><b>{{ petDashboard.overall.digestRate }}%</b><span>消化率</span></div>
           </div>
-          <div v-if="petChatBusy" class="pc-msg pet"><span class="pc-who"><PetAvatar :size="22" /></span><span class="pc-txt">正在思考…</span></div>
+          <div v-if="petDashboard.focusType" class="pet-focus-card">
+            <div class="pet-focus-hd"><span>🧩 下一步最值得练</span><b>{{ petDashboard.weak.label }}</b></div>
+            <div class="pet-focus-main">{{ petDashboard.focusSub.sub }} · {{ petDashboard.focusType.type }}</div>
+            <div class="pet-focus-why">错 {{ petDashboard.focusType.wrongs }} 道 · 复错 {{ petDashboard.focusType.repeated }} 次 · 建议 15 分钟精准训练</div>
+            <button class="pet-mini-action" :disabled="petChatBusy" @click="doPetAsk('围绕「' + petDashboard.weak.label + '/' + petDashboard.focusSub.sub + '/' + petDashboard.focusType.type + '」先给我做15分钟精准训练：出1道题，等我作答后指出判断流程断在哪，再给1道同类变式。')">开始精准训练</button>
+          </div>
+          <div class="pet-rhythm-card">
+            <div class="pet-card-hd"><b>📈 近 7 日学习节奏</b><span>提问 {{ petDashboard.activity7.reduce((n, d) => n + d.asks, 0) }} · 复盘 {{ petDashboard.activity7.reduce((n, d) => n + d.reviews, 0) }}</span></div>
+            <div class="pet-rhythm-bars">
+              <div v-for="d in petDashboard.activity7" :key="d.date" class="pet-rhythm-day" :class="{ today: d.date === new Date().toLocaleDateString('sv-SE') }" :title="d.date + '：提问' + d.asks + ' 错题' + d.wrongs + ' 复盘' + d.reviews">
+                <i :style="{ height: Math.max(8, Math.round(petActivityValue(d) / petActivityMax * 100)) + '%' }"></i>
+                <span>{{ petDayLabel(d.date) }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="pet-mission-card">
+            <div class="pet-card-hd"><b>🌅 今日成长任务</b><span>{{ petDashboard.missionDone }}/{{ petDashboard.missions.length }}</span></div>
+            <div class="pet-progress"><i :style="{ width: Math.round(petDashboard.missionDone / petDashboard.missions.length * 100) + '%' }"></i></div>
+            <button v-for="m in petDashboard.missions" :key="m.id" class="pet-mission-row" :class="{ done: m.done }" @click="!m.done && runPetAction(m.action)"><span>{{ m.done ? '✅' : '○' }}</span>{{ m.label }}<i v-if="!m.done">去完成 ›</i></button>
+          </div>
+          <div class="pet-quick-grid">
+            <button @click="doPetAsk('根据我的整体学习数据，先给我今天最优先的3件事，并说明理由')"><b>🎯</b><span>今日优先级</span></button>
+            <button @click="setPetTab('plates')"><b>📊</b><span>板块诊断</span></button>
+            <button @click="doPetAsk('分析我最近7天的提问、错题、复盘变化，找出学习习惯问题')"><b>🔍</b><span>趋势洞察</span></button>
+            <button :disabled="petBatchBusy" @click="doPetTodayBatch()"><b>📥</b><span>{{ petBatchBusy ? '整理中' : '截图收题' }}</span></button>
+          </div>
+          <div class="pet-insight-list">
+            <div v-for="(t, i) in petDashboard.recentInsights" :key="i"><span>💡</span>{{ t }}</div>
+          </div>
+          <div class="pet-achievement-row"><span v-for="a in petDashboard.achievements" :key="a.id" :class="{ done: a.done }">{{ a.icon }} {{ a.label }}</span></div>
         </div>
-        <div class="pc-input-row pp-input">
-          <input v-model="petAskText" placeholder="问萌宠：这道题怎么解？掉什么坑？今天学什么？" style="flex: 1" @keydown.enter="doPetAsk()" />
-          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" title="发送图片（视觉模型识别）" @click="$refs.petImgChatInput.click()">📷</button>
-          <input ref="petImgChatInput" type="file" accept="image/*" style="display: none" @change="onPetImgChat($event)" />
-          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" title="语音输入（说问题转文字）" @click="petMic()">🎤</button>
-          <button class="btn btn-pri" style="font-size: calc(12px * var(--ui-fs-scale, 1)); white-space: nowrap" :disabled="petChatBusy" @click="doPetAsk()">发送</button>
-          <button class="btn btn-gh" style="font-size: calc(12px * var(--ui-fs-scale, 1))" :title="petSpeakReply ? '回复将用真人音色朗读' : '回复已静音'" @click="petSpeakReply = !petSpeakReply">{{ petSpeakReply ? '🔊' : '🔇' }}</button>
+
+        <div v-else-if="petTab === 'plates'" class="pp-tabpane">
+          <div class="pet-section-tip">按“大板块”查看提问、错题、复盘、复错和掌握度；展开可看细分题型。</div>
+          <div v-for="p in petDashboard.plates" :key="p.group" class="pet-plate-card" :class="{ active: p.wrongs || p.asks }">
+            <div class="pet-plate-hd"><b>{{ p.label }}</b><span :class="{ danger: p.score < 45, ok: p.score >= 75 }">{{ p.score }}分</span></div>
+            <div class="pet-progress"><i :style="{ width: p.score + '%' }"></i></div>
+            <div class="pet-plate-metrics"><span>💬 {{ p.asks }}</span><span>📋 {{ p.wrongs }}</span><span>✅ {{ p.reviewed }}</span><span>🔁 {{ p.repeated }}</span><span>🔔 {{ p.due }}</span></div>
+            <details v-if="p.subs.length">
+              <summary>查看细分板块与题型</summary>
+              <div v-for="s in p.subs" :key="s.sub" class="pet-sub-row">
+                <div><b>{{ s.sub }}</b><span>问 {{ s.asks }} · 错 {{ s.wrongs }} · 复错 {{ s.repeated }} · 到期 {{ s.due }} · 掌握 {{ s.mastery }}%</span></div>
+                <div v-for="t in s.types" :key="t.type" class="pet-type-line">{{ t.type }} · 问 {{ t.asks }} · 错 {{ t.wrongs }} · 复错 {{ t.repeated }}</div>
+              </div>
+            </details>
+            <button class="pet-mini-action" :disabled="petChatBusy" @click="analyzePetPlate(p)">让萌宠分析这个板块</button>
+          </div>
         </div>
-        <div class="pp-foot">
-          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="patPet()">🐾 摸头</button>
-          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="doFeed()">🍖 喂食</button>
-          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="petRenameToggle = !petRenameToggle">✏️ 改名</button>
-          <button class="btn btn-gh" style="font-size: calc(11px * var(--ui-fs-scale, 1))" @click="petCollapsed = true">▁ 收起</button>
+
+        <div v-else-if="petTab === 'advice'" class="pp-tabpane">
+          <div class="pet-section-tip">建议按数据风险排序，不再只给泛泛的“多刷题”。</div>
+          <div v-for="r in petDashboard.recommendations" :key="r.id" class="pet-advice-card">
+            <div class="pet-advice-icon">{{ r.icon }}</div>
+            <div class="pet-advice-body"><b>{{ r.title }}</b><span>{{ r.desc }}</span></div>
+            <button class="btn btn-gh" @click="runPetAction(r.action)">去执行</button>
+          </div>
+          <div class="pet-insight-list">
+            <div v-for="(t, i) in petDashboard.recentInsights" :key="i"><span>📌</span>{{ t }}</div>
+          </div>
         </div>
-        <div v-if="petRenameToggle" class="pet-rename pp-rename">
-          <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
-          <button class="btn btn-gh" @click="doRename()">确定</button>
+
+        <div v-else-if="petTab === 'chat'" class="pp-tabpane pet-chat-pane">
+          <div class="pp-ctx">
+            <span class="pp-ctx-chip pp-see">👀 {{ petSeeLabel }}</span>
+            <span class="pp-ctx-chip">💬 {{ petDashboard.overall.asks }}问</span>
+            <span class="pp-ctx-chip">📋 {{ petDashboard.overall.wrongs }}错</span>
+            <span class="pp-ctx-chip">🔥 {{ petDashboard.overall.streak }}天</span>
+          </div>
+          <div class="pet-prompt-row">
+            <button @click="doPetAsk('结合我的数据，先给我今天最值得做的3道题')">今日3题</button>
+            <button @click="doPetAsk('找出我最容易重复犯错的板块和判断习惯')">找出习惯坑</button>
+            <button @click="doPetAsk('把今天的学习做一句总结，再给明天第一条行动')">今日总结</button>
+          </div>
+          <div v-if="bubble && !petMuted" class="pet-talk pp-talk">{{ bubble }}</div>
+          <div class="pc-list pp-list">
+            <div v-for="(m, i) in petChat" :key="i" class="pc-msg" :class="m.role">
+              <span class="pc-who"><PetAvatar v-if="m.role === 'pet'" :size="22" /><span v-else>🙂</span></span>
+              <div v-if="m.role === 'pet'" class="pc-txt pet-md" v-html="petMd(m.text)"></div>
+              <span v-else class="pc-txt">{{ m.text }}</span>
+            </div>
+            <div v-if="petChatBusy" class="pc-msg pet"><span class="pc-who"><PetAvatar :size="22" /></span><span class="pc-txt">正在思考…</span></div>
+          </div>
+          <div class="pc-input-row pp-input">
+            <input v-model="petAskText" placeholder="问萌宠：结合我的数据，下一步怎么学？" style="flex: 1" @keydown.enter="doPetAsk()" />
+            <button class="btn btn-gh" title="发送图片（视觉模型识别）" @click="$refs.petImgChatInput.click()">📷</button>
+            <input ref="petImgChatInput" type="file" accept="image/*" style="display: none" @change="onPetImgChat($event)" />
+            <button class="btn btn-gh" title="语音输入（说问题转文字）" @click="petMic()">🎤</button>
+            <button class="btn btn-pri" :disabled="petChatBusy" @click="doPetAsk()">发送</button>
+            <button class="btn btn-gh" :title="petSpeakReply ? '回复将用真人音色朗读' : '回复已静音'" @click="petSpeakReply = !petSpeakReply">{{ petSpeakReply ? '🔊' : '🔇' }}</button>
+          </div>
+        </div>
+
+        <div v-else class="pp-tabpane">
+          <div class="pet-interact-grid">
+            <button @click="petReadCurrent()">🔊<span>读当前页</span></button>
+            <button @click="petPauseToggle()">{{ petReadPaused() ? '▶️' : '⏸' }}<span>{{ petReadPaused() ? '继续' : '暂停' }}</span></button>
+            <button @click="petNextSpeed()">⏱<span>{{ Math.round((store.cfg.ttsRate || 1) * 100) }}%</span></button>
+            <button @click="petAnalyzeCurrent()">🧠<span>分析当前题</span></button>
+            <button @click="patPet()">🐾<span>摸头</span></button>
+            <button @click="doFeed()">🍖<span>喂食</span></button>
+          </div>
+          <div class="pet-care-card">
+            <div><b>{{ petMood.emoji }} {{ petMood.label }}</b><span>饱食 {{ petHunger }}/10 · 成长 {{ petPoints }} 分 · Lv.{{ petLevel }} {{ petStage.name }}</span></div>
+            <button class="btn btn-gh" @click="petRenameToggle = !petRenameToggle">✏️ 改名</button>
+            <button class="btn btn-gh" @click="skinShow = !skinShow">🎭 换装</button>
+          </div>
+          <div v-if="petRenameToggle" class="pet-rename pp-rename">
+            <input v-model="petNameInput" :placeholder="'给 ' + pet.name + ' 改名…'" style="flex:1" @keydown.enter="doRename()" />
+            <button class="btn btn-gh" @click="doRename()">确定</button>
+          </div>
+          <div v-if="skinShow" class="pp-skins">
+            <div class="pv-title">🎭 角色皮肤（🔒 内置锁定 · 🧬 克隆原声 · ➕ 新增自定义）</div>
+            <div class="skin-grid">
+              <button v-for="s in petAllSkins" :key="s.id" class="skin-card" :class="{ on: petSkin.id === s.id }" @click="applySkin(s.id)">
+                <PetAvatar :size="40" :skin-id="s.id" class="skin-av" />
+                <span class="skin-name">{{ s.char }}<span v-if="petSkinVoiceOf(s.id).cloned" style="margin-left: 2px" title="克隆原声">🧬</span><span v-if="petSkinVoiceOf(s.id).preset" style="margin-left: 2px" title="内置声线">🔊</span><span v-if="petIsLocked(s.id)" style="margin-left: 2px" title="内置锁定">🔒</span><span v-if="petSkinSampleOf(s.id)" style="margin-left:3px;cursor:pointer" title="试听参考原声" @click.stop="previewPetSample(s.id)">▶</span></span>
+                <span class="skin-desc">{{ s.desc }}</span>
+                <span v-if="s.custom && s.id !== 'custom'" style="display:flex;gap:4px;justify-content:center;margin-top:2px"><span style="cursor:pointer" title="删除" @click.stop="doRemoveCustom(s.id)">🗑</span></span>
+              </button>
+              <button class="skin-card skin-add" @click="doAddCustom()"><span class="skin-name" style="font-size:calc(20px * var(--ui-fs-scale,1))">➕</span><span class="skin-name">新增自定义</span></button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

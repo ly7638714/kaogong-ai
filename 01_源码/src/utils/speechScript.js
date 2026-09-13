@@ -115,7 +115,7 @@ export async function speakReadyText(raw, opts = {}) {
         }
       ],
       maxTokens, // 输出上限：随原文长度动态收紧，避免模型“加戏”扩写
-      25000 // 超时 25s：超过就退回原文，不阻塞朗读
+      8000 // 超时 8s：超过就退回原文，不阻塞朗读（原先 25s 会让首字延迟被讲稿改写整体拖长）
     )
     const out = String(r || '').trim()
     if (!out || out.length <= 4) return src

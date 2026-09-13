@@ -58,10 +58,16 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
     expect(out).toContain('第二段也没有标点。')
   })
 
-  it('分块停顿时长随句末标点区分', () => {
-    expect(speechPauseMs('这是一整句。')).toBe(45)
-    expect(speechPauseMs('这里只是小停顿，')).toBe(15)
-    expect(speechPauseMs('这段真的没有标点')).toBe(10)
+  it('分块停顿时长随句末标点区分（v3.8.332 按标点语义重设）', () => {
+    expect(speechPauseMs('这是一整句。')).toBe(260)
+    expect(speechPauseMs('问一句？')).toBe(260)
+    expect(speechPauseMs('这是分号；')).toBe(200)
+    expect(speechPauseMs('这里只是小停顿，')).toBe(140)
+    expect(speechPauseMs('这段真的没有标点')).toBe(90)
+    // 停顿必须形成明显的“呼吸梯度”：句末 > 分号 > 逗号 > 无标点
+    expect(speechPauseMs('。')).toBeGreaterThan(speechPauseMs('；'))
+    expect(speechPauseMs('；')).toBeGreaterThan(speechPauseMs('，'))
+    expect(speechPauseMs('，')).toBeGreaterThan(speechPauseMs('无'))
   })
 })
 
@@ -287,6 +293,30 @@ describe('listGmVoices 音色列表去重', () => {
     expect(names.filter((n) => n === '姬如雪').length).toBe(1)
     expect(names.filter((n) => n === '彤彤 · 温柔女声（默认）').length).toBe(1)
     expect(list.length).toBe(2)
+  })
+
+  it('名师历史克隆返回多条不同 voice_name 时，按人设名收敛为一条', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        voice_list: [
+          { voice: '花生十三内置原声_mtwou8cq', voice_name: '花生十三内置原声_mtwou8cq' },
+          { voice: '花生十三内置原声_mtwolt0c', voice_name: '花生十三内置原声_mtwolt0c' },
+          { voice: '文姐内置原声_mtworxx6', voice_name: '文姐内置原声_mtworxx6' },
+          { voice: '文姐内置原声_mtwoni7f', voice_name: '文姐内置原声_mtwoni7f' },
+          { voice: '巾神内置原声_mtwoo1wd', voice_name: '巾神内置原声_mtwoo1wd' },
+          { voice: '巾神内置原声_mtwoahym', voice_name: '巾神内置原声_mtwoahym' },
+          { voice: 'xueshen_v', voice_name: 'xueshen_v' }
+        ]
+      })
+    })))
+    const list = await listGmVoices()
+    const names = list.map((v) => v.name)
+    expect(names.filter((n) => n === '花生十三').length).toBe(1)
+    expect(names.filter((n) => n === '文姐').length).toBe(1)
+    expect(names.filter((n) => n === '巾神').length).toBe(1)
+    expect(names.filter((n) => n === '薛神').length).toBe(1)
+    expect(list.length).toBe(4)
   })
 
   it('空列表返回 null（调用方回退内置音色）', async () => {

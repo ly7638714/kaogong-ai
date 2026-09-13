@@ -1,6 +1,6 @@
 // wrongTaxonomy（六大板块→细分→题型归一）回归
 import { describe, it, expect } from 'vitest'
-import { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, typeOrderOfSub, groupLabelOf, fullGroupOfToken, canonicalSubjectOf, sameWrongTaxon, wrongTaxonKey } from '../utils/wrongTaxonomy'
+import { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, typeOrderOfSub, groupLabelOf, fullGroupOfToken, canonicalSubjectOf, sameWrongTaxon, wrongTaxonKey, cardMatchesWrongTaxon } from '../utils/wrongTaxonomy'
 describe('wrongTaxonomy 基础映射', () => {
   it('判断推理组细分只有 图推/定义/类比/逻辑；组名不作为细分', () => {
     const g = WRONG_GROUPS.find((x) => x.label === '判断推理')
@@ -61,6 +61,14 @@ describe('wrongTaxonomy 基础映射', () => {
     expect(sameWrongTaxon(a, c)).toBe(false)
     expect(sameWrongTaxon(a, d)).toBe(false)
     expect(wrongTaxonKey(a)).toBe('判断推理|逻辑判断|削弱型')
+  })
+  it('知识卡必须严格匹配大板块、细分板块、题型，不能跨板块推荐', () => {
+    const logic = { subject: '逻辑判断', sub: '削弱型', question: '以下哪项最能削弱上述论证？' }
+    const data = { subject: '资料分析', variant: '增长率', question: '2025年同比增长率约为多少？' }
+    expect(cardMatchesWrongTaxon({ plate: '判断推理', type: '削弱·另有他因' }, logic)).toBe(true)
+    expect(cardMatchesWrongTaxon({ plate: '判断推理', type: '加强·排除他因' }, logic)).toBe(false)
+    expect(cardMatchesWrongTaxon({ plate: '判断推理', type: '削弱' }, data)).toBe(false)
+    expect(cardMatchesWrongTaxon({ plate: '资料分析', type: '增长率' }, data)).toBe(true)
   })
 })
 describe('大板块全称（消除与细分歧义）', () => {

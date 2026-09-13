@@ -155,6 +155,26 @@ export function sameWrongTaxon(a, b) {
   return !!x.group && !!x.sub && !!x.type && x.type !== '未分类' &&
     x.group === y.group && x.sub === y.sub && x.type === y.type
 }
+// 知识卡严格联动：禁止仅凭大板块或正文相似就跨细分、跨题型关联。
+export function cardMatchesWrongTaxon(card, q) {
+  if (!card || !q) return false
+  const target = taxonOf(q)
+  const probe = {
+    subject: card.plate || card.subject || '',
+    subx: card.subx || card.sub || '',
+    sub: card.sub || '',
+    variant: card.type || card.variant || '',
+    vx: card.type || '',
+    question: [card.type, card.tip, ...(card.signs || [])].filter(Boolean).join(' ')
+  }
+  const group = groupOfName(probe.subject) || canonicalGroupOf(probe)
+  const sub = canonicalSubOf(probe)
+  const type = canonicalTypeOf(probe)
+  if (!group || !sub || !type || !target.group || !target.sub || !target.type || target.type === '未分类') return false
+  if (group !== target.group || type !== target.type) return false
+  if (sub === target.sub) return true
+  return sub === '言语理解' && (target.sub === '片段阅读' || target.sub === '篇章阅读')
+}
 // 任意“组 token”（旧组名/新全称/细分小板块名/题型名）→ 该题的 大板块全称（唯一展示词）
 function fullGroupOfToken(v) {
   const s = String(v == null ? '' : v)
@@ -206,4 +226,4 @@ export const CANON_TYPE_ORDER = (function () {
   return seen
 })()
 export { groupLabelOf, GROUP_FULL, GROUP_KEYS_FULL, oldGroupOf, fullGroupOfToken, canonicalSubjectOf }
-export default { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, wrongTaxonKey, sameWrongTaxon, typeOrderOfSub, CANON_TYPE_ORDER, groupLabelOf, oldGroupOf, fullGroupOfToken, canonicalSubjectOf }
+export default { WRONG_GROUPS, groupOfName, isRealSub, canonicalTypeOf, typeLabelOf, canonicalSubOf, canonicalGroupOf, taxonOf, wrongTaxonKey, sameWrongTaxon, cardMatchesWrongTaxon, typeOrderOfSub, CANON_TYPE_ORDER, groupLabelOf, oldGroupOf, fullGroupOfToken, canonicalSubjectOf }

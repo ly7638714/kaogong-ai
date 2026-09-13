@@ -12,10 +12,16 @@ const d = computed(() => props.ctx.typeStats || { plates: [], topWeak: [], maxCo
 
 // 强弱力度配色：n=该题型错题数。越多越红（越薄弱）
 function strengthColor(n) {
-  if (n >= 5) return '#e23b3b' // 红：很薄弱
-  if (n >= 3) return '#f0883e' // 橙：较弱
-  if (n >= 2) return '#e6b800' // 黄：一般
-  return '#3aa657'              // 绿：相对稳
+  if (n >= 5) return 'var(--state-danger)' // 红：很薄弱
+  if (n >= 3) return 'var(--state-warning)' // 橙：较弱
+  if (n >= 2) return 'var(--amber)' // 黄：一般
+  return 'var(--state-success)' // 绿：相对稳
+}
+function strengthBg(n) {
+  if (n >= 5) return 'var(--state-danger-bg)'
+  if (n >= 3) return 'var(--state-warning-bg)'
+  if (n >= 2) return 'var(--state-warning-bg)'
+  return 'var(--state-success-bg)'
 }
 function barWidth(count) {
   const max = d.value.maxCount || 1
@@ -59,7 +65,7 @@ function pick(plate, s) {
         class="wts-top-chip"
         :class="{ on: isActive(x) }"
         :title="`${groupLabelOf(x.group) || x.group} · ${x.sub || ''} · ${x.name}`"
-        :style="{ background: strengthColor(x.count) + '1f', borderColor: strengthColor(x.count) }"
+        :style="{ background: strengthBg(x.count), borderColor: strengthColor(x.count) }"
         @click="pick(x.group, x)"
       >{{ i + 1 }}. {{ chipLabel(x) }} <b>{{ x.count }}</b></span>
     </div>
@@ -119,9 +125,9 @@ function pick(plate, s) {
   margin-bottom: 10px;
   padding: 8px;
   border-radius: 8px;
-  background: rgba(226, 59, 59, 0.06);
+  background: var(--state-danger-bg);
 }
-.wts-top-l { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: #e23b3b; margin-right: 2px; }
+.wts-top-l { font-size: calc(12px * var(--ui-fs-scale, 1)); font-weight: 700; color: var(--state-danger-text); margin-right: 2px; }
 .wts-top-chip {
   cursor: pointer;
   font-size: calc(11.5px * var(--ui-fs-scale, 1));

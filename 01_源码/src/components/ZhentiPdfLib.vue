@@ -1,7 +1,7 @@
 <script setup>
 // ZhentiPdfLib.vue —— 本地真题PDF卷库 + 内置阅读器（自建原生宿主·SAF 选文件夹；pdfjs 渲染）
 /* global atob, btoa */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { isNativeHost, nativePickFolder } from '../utils/platform'
 import { showToast } from '../utils/toast'
 
@@ -208,23 +208,29 @@ async function openInternal(path) {
 async function loadPdfData(name, dataBuf) {
   try {
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
-    const pdf = await pdfjsLib.getDocument({ data: dataBuf }).promise
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', location.href).href
+    const pdf = await pdfjsLib.getDocument({ data: dataBuf, disableWorker: !!(isNativeHost() || location.protocol === 'file:'), useWorkerFetch: false, isEvalSupported: false }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
     pdfDoc = pdf; pages.value = pdf.numPages; page.value = 1; pdfName.value = name; pdfUri.value = ''; scale.value = 1; viewer.value = true; msg.value = ''
-    await render()
+    await nextTick(); await render()
   } catch (e) { msg.value = '打开失败：' + (e && e.message || e) }
 }
 async function openBundled(rel) {
   try {
     busy.value = true; msg.value = '加载 PDF…'
-    const data = new Uint8Array(await readBundledAsset(rel))
+    let data
+    try {
+      data = new Uint8Array(await readBundledAsset(rel))
+    } catch (e) {
+      const relEnc = String(rel).split('/').map(encodeURIComponent).join('/')
+      data = new Uint8Array(await fetchFirstOk(relEnc))
+    }
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
-    const pdf = await pdfjsLib.getDocument({ data: data.buffer }).promise
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', location.href).href
+    const pdf = await pdfjsLib.getDocument({ data: data.buffer, disableWorker: !!(isNativeHost() || location.protocol === 'file:'), useWorkerFetch: false, isEvalSupported: false }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
     pdfDoc = pdf; pages.value = pdf.numPages; page.value = 1; pdfName.value = String(rel).split('/').pop(); pdfUri.value = ''; scale.value = 1; viewer.value = true; msg.value = ''
-    await render()
+    await nextTick(); await render()
   } catch (e) { msg.value = '打开失败：' + (e && e.message || e) } finally { busy.value = false }
 }
 const viewer = ref(false)
@@ -263,11 +269,11 @@ async function openPdf(uri, name) {
     const b64 = window.xcnative.readFileB64(uri) || ''
     if (String(b64).indexOf('ERR:') === 0) { msg.value = String(b64).slice(4); return }
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
-    const pdf = await pdfjsLib.getDocument({ data: b64ToU8(b64).buffer }).promise
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', location.href).href
+    const pdf = await pdfjsLib.getDocument({ data: b64ToU8(b64).buffer, disableWorker: !!(isNativeHost() || location.protocol === 'file:'), useWorkerFetch: false, isEvalSupported: false }).promise
     try { if (pdfDoc) pdfDoc.destroy() } catch (e) {}
     pdfDoc = pdf; pages.value = pdf.numPages; page.value = 1; pdfName.value = name; pdfUri.value = uri; scale.value = 1; viewer.value = true; msg.value = ''
-    await render()
+    await nextTick(); await render()
   } catch (e) { msg.value = '打开失败：' + (e && e.message || e) } finally { busy.value = false }
 }
 async function render() {
@@ -386,11 +392,6 @@ onUnmounted(() => { try { if (pdfDoc) pdfDoc.destroy() } catch (e) {} })
         <button class="zpv-btn pri" @click="pickRoot()">📂 选择真题文件夹</button>
       </div>
       </template>
-      <div v-if="!tree" class="zpv-empty">
-        <p>选择存放“历年真题 PDF”的文件夹（夸克下载到手机也可），App 将按目录列出国考 / 各省真题卷。</p>
-        <button class="zpv-btn pri" @click="pickRoot()">📂 选择真题文件夹</button>
-      </div>
-
       <!-- 文件列表（外部文件夹） -->
       <template v-if="srcMode === 'folder' && tree && !viewer">
         <div class="zpv-bread">

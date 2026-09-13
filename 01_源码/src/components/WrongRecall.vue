@@ -44,7 +44,7 @@ function extractChoicesLocal(text) {
       <template v-else>
         <div style="border: 1px dashed rgba(52,211,153,.5); border-radius: 10px; padding: 8px 10px; margin-top: 8px">
           <div style="font-size: calc(13px * var(--ui-fs-scale, 1))"><b>✅ 答案：{{ rcQ.answer || '未填' }}</b></div>
-          <div v-if="rcQ.method" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: #fbbf24; margin-top: 4px">⚡ 秒杀：{{ rcQ.method }}</div>
+          <div v-if="rcQ.method" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--state-warning-text); margin-top: 4px">⚡ 秒杀：{{ rcQ.method }}</div>
           <div v-if="rcQ.note" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 4px">📝 {{ rcQ.note }}</div>
           <div v-if="rcQ.explain || rcQ.analysis" style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 4px; white-space: pre-wrap">{{ String(rcQ.explain || rcQ.analysis || '').slice(0, 1200) }}</div>
         </div>

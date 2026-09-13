@@ -8,7 +8,7 @@ import { recordCost, getTtsPrice, getCloneFee, beginCost, getBudget, todaySpend 
 import { showToast } from './toast'
 import { ttsCacheKey, ttsCacheGet, ttsCacheSet, ttsCachePin } from './ttsCache'
 import { cleanSpeechText, chunkForTts, speechPauseMs } from './tts/clean'
-import { smoothWavBytes } from './tts/wav'
+import { parseWavOnly } from './tts/wav'
 // 批次6B拆分：纯函数移至 tts/ 子模块，此处回导出保持既有 import 路径兼容
 export { symbolsToChinese, cleanSpeechText, chunkText, chunkForTts, speechPauseMs } from './tts/clean'
 export { smoothWavBytes } from './tts/wav'
@@ -87,8 +87,8 @@ export function playBytes(bytes, mime) {
   return new Promise((resolve) => {
     try {
       stopPlayback()
-      // 单段播放（试音/回退）也走 WAV 平滑：去掉 GLM 开头的提示音“嘟嘟”，保证所有入口一致
-      const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes) : bytes
+      // 单段播放（试音/回退）也走统一裁剪：去掉 GLM 开头的提示音“嘟嘟”，保证所有入口判据一致
+      const data = /wav/i.test(mime || '') ? trimWavArtifacts(bytes) : bytes
       const blob = new Blob([data], { type: mime || 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = _player.audio || (_player.audio = new Audio())
@@ -157,7 +157,7 @@ export function spNext() {
     else spNext()
   }
 }
-export function spEnqueue(bytes, mime) { _sp.q.push({ bytes: /wav/i.test(mime) ? smoothWavBytes(bytes) : bytes, mime }); spNext() }
+export function spEnqueue(bytes, mime) { _sp.q.push({ bytes: /wav/i.test(mime) ? trimWavArtifacts(bytes) : bytes, mime }); spNext() }
 export function spStop() {
   _sp.q = []
   const a = _sp.audio
@@ -211,26 +211,28 @@ function gapBytes(buf) {
   return buf
 }
 // 入队：立即并行解码（不等上一块播完），调度仍严格串行 → 后续块提前就绪，块间断流更少、首句更快
-export function gaplessEnqueue(bytes, mime, meta) {
+export function gaplessEnqueue(bytes, _mime, meta) {
   const token = _gap.token
-  const dec = gapDecode(bytes, mime)
+  const dec = gapDecode(bytes)
   _gapChain = _gapChain.then(async () => {
     if (token !== _gap.token || _gap.stopping) return // 已停止/新一轮朗读 → 丢弃残留分块，防止叠音
     const audioBuf = await dec
     if (token !== _gap.token || _gap.stopping) return
+    if (!audioBuf) { spEnqueue(bytes, _mime); return }
     gapStart(audioBuf, meta)
-  }).catch(() => {})
+  }).catch(() => { try { spEnqueue(bytes, _mime) } catch (e) {} })
   return _gapChain
 }
-// 解码（并行）：WAV 先平滑去开头提示音/静音；Web Audio 不可用/自动播放被拦/解码失败 → null（跳过该块不中断）
-async function gapDecode(bytes, mime) {
+// 解码（并行）：Web Audio 直接解码原始字节，裁剪统一交给 applyLeadTrim 单一判据。
+// 【v3.8.332】不再前置 smoothWavBytes：它的 zcr/crest 判据会误裁正常人声开头（实测 200ms），
+// 且与 detectLeadArtifact 判据不同源，造成同一段音频两套结论。
+async function gapDecode(bytes) {
   try {
     const ctx = gapCtx()
     if (!ctx || _gap.fallback) { _gap.fallback = true; return null }
     if (ctx.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
     if (ctx.state !== 'running') { _gap.fallback = true; return null }
-    const data = /wav/i.test(mime || '') ? smoothWavBytes(bytes, { fade: false }) : bytes
-    const decoded = await ctx.decodeAudioData(gapBytes(data).slice(0))
+    const decoded = await ctx.decodeAudioData(gapBytes(bytes).slice(0))
     return applyLeadTrim(ctx, decoded)
   } catch (e) {
     return null
@@ -259,32 +261,44 @@ function sliceFrom(ctx, buf, cut) {
   return out
 }
 function keepEnough(buf, cut) {
-  return cut > 0 && buf.length - cut > Math.floor(buf.sampleRate * 0.15)
+  // 【v3.8.332】收紧安全阀：至少留 300ms 或原长 75%，且原长需 ≥400ms 才允许裁
+  if (!(cut > 0)) return false
+  const rest = buf.length - cut
+  if (buf.length < Math.floor(buf.sampleRate * 0.4)) return false
+  return rest > Math.floor(buf.sampleRate * 0.3) && rest > buf.length * 0.75
 }
-function applyLeadTrim(ctx, decoded) {
+export function applyLeadTrim(ctx, decoded) {
   try {
     if (!decoded) return decoded
     const cfg = store.cfg || {}
     if (cfg.ttsTrimLead === false) return decoded
-    // ① 手动兜底：强制裁掉开头 N 毫秒
-    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
-    if (hardMs > 0) {
-      const cut = Math.min(decoded.length - 1, Math.floor(decoded.sampleRate * hardMs / 1000))
-      if (keepEnough(decoded, cut)) return sliceFrom(ctx, decoded, cut)
-    }
-    // ② 智能识别；识别到后就记住该引擎的提示音长度
-    const info = detectLeadArtifact(decoded)
     const key = leadMemoKey()
+    // ① 智能识别（唯一裁判断据：crest=peak/rms）
+    const info = detectLeadArtifact(decoded)
     if (info.lead > 0 && info.confident) {
       _leadMemo.key = key
       _leadMemo.ms = info.lead / decoded.sampleRate * 1000
     }
-    // ③ 检测到前导但触发不了高置信度 → 用记忆值兜底（长度是引擎固定的），保证每块都删干净
-    if (info.lead > 0 && !info.confident && _leadMemo.key === key && _leadMemo.ms >= LEAD_MIN_MS) {
-      const cut = Math.floor(decoded.sampleRate * _leadMemo.ms / 1000)
-      if (keepEnough(decoded, cut) && cut > info.lead) return sliceFrom(ctx, decoded, cut)
+    let smart = info.lead
+    // ② 检测到前导但未达高置信度 → 用同引擎记忆长度兜底（提示音长度是引擎固定的）
+    if (smart > 0 && !info.confident && _leadMemo.key === key && _leadMemo.ms >= LEAD_MIN_MS) {
+      smart = Math.max(smart, Math.floor(decoded.sampleRate * _leadMemo.ms / 1000))
     }
-    return trimLeadingAudioArtifacts(ctx, decoded)
+    // ③ 手动兜底：强制裁掉开头 N 毫秒（双保险）
+    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
+    const hard = hardMs > 0 ? Math.floor(decoded.sampleRate * hardMs / 1000) : 0
+    // 【v3.8.332 关键修正】硬裁与智能识别**取最大值**，不再「硬裁命中即 return」。
+    // 否则智能识别本可裁 1300ms 时会被 200ms 的硬裁短路，导致嘟声复活。
+    // 只有智能识别确认存在前导提示音时，才允许手动硬裁值参与取最大值；
+    // 纯人声（smart=0）绝不能被默认 200ms 硬裁吞掉开头。
+    let cut = smart > 0 ? Math.max(smart, hard) : 0
+    if (cut <= 0) return trimLeadingAudioArtifacts(ctx, decoded)
+    // 安全阀：裁过头（或块太短）时回退到「只按智能识别裁」
+    if (!keepEnough(decoded, cut)) {
+      cut = smart
+      if (!keepEnough(decoded, cut)) return trimLeadingAudioArtifacts(ctx, decoded)
+    }
+    return sliceFrom(ctx, decoded, cut)
   } catch (e) {
     return decoded
   }
@@ -443,6 +457,69 @@ export function trimLeadingAudioArtifacts(ctx, input) {
     return input
   }
 }
+// 把 WAV 字节解码为单声道 Float32 PCM（供 HTMLAudio 路径复用同一套裁剪判据）
+function wavToPcm(p) {
+  const { u8, dataOff, ch, bytesPer, blockAlign, frames } = p
+  const data = new Float32Array(frames)
+  for (let f = 0; f < frames; f++) {
+    let s = 0
+    for (let c = 0; c < ch; c++) {
+      const o = dataOff + f * blockAlign + c * bytesPer
+      if (bytesPer === 2) { const v = u8[o] | (u8[o + 1] << 8); s += (v >= 0x8000 ? v - 0x10000 : v) / 32768 }
+      else { const v = u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16) | (u8[o + 3] << 24); s += (v >= 0x80000000 ? v - 0x100000000 : v) / 2147483648 }
+    }
+    data[f] = s / ch
+  }
+  return data
+}
+// 依据「原始分析 + 裁剪偏移」重建标准 16bit 单声道 WAV（丢弃 AIGC/LIST 元数据）
+function pcmToWav(data, sampleRate) {
+  const n = data.length
+  const ab = new ArrayBuffer(44 + n * 2)
+  const out = new Uint8Array(ab)
+  const dv = new DataView(ab)
+  const ws = (o, s) => { for (let k = 0; k < s.length; k++) out[o + k] = s.charCodeAt(k) }
+  ws(0, 'RIFF'); ws(8, 'WAVE'); ws(12, 'fmt '); ws(36, 'data')
+  dv.setUint32(4, 36 + n * 2, true)
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true)
+  dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true)
+  dv.setUint16(32, 2, true); dv.setUint16(34, 16, true)
+  dv.setUint32(40, n * 2, true)
+  for (let i = 0; i < n; i++) {
+    let v = Math.max(-1, Math.min(1, data[i]))
+    v = Math.round(v < 0 ? v * 32768 : v * 32767)
+    out[44 + i * 2] = v & 0xff
+    out[44 + i * 2 + 1] = (v >> 8) & 0xff
+  }
+  return ab
+}
+// 【v3.8.332】HTMLAudio 路径（playBytes / spEnqueue）的 WAV 开头提示音清理。
+// 与 Web Audio 主链路**共用同一判据**（detectLeadArtifact + trimLeadingAudioArtifacts），
+// 不再使用 smoothWavBytes 的 zcr/crest 判据（那套会误裁正常人声开头）。
+export function trimWavArtifacts(bytes) {
+  try {
+    if (!store.cfg || store.cfg.ttsTrimLead === false) return bytes
+    const p = parseWavOnly(bytes)
+    if (!p) return bytes
+    const pcm = wavToPcm(p)
+    const buf = { numberOfChannels: 1, length: pcm.length, sampleRate: p.rate, duration: pcm.length / p.rate, getChannelData: () => pcm }
+    const an = analyzeAudio(buf)
+    if (an.peakAll < 0.02) return bytes
+    const { lead } = detectLeadArtifact(buf)
+    const tail = detectTailEnd(buf, an.floor)
+    if (lead <= 0 && tail >= pcm.length) return bytes
+    if (tail - lead < Math.floor(p.rate * 0.05)) return bytes
+    // 手动兜底：与 applyLeadTrim 一致，硬裁与智能识别取最大值
+    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(store.cfg.ttsTrimLeadMs) || 0))
+    const hard = hardMs > 0 ? Math.floor(p.rate * hardMs / 1000) : 0
+    const cut = lead > 0 ? Math.max(lead, hard) : 0
+    const safeCut = cut > 0 && (tail - cut) > Math.floor(p.rate * 0.3) ? cut : lead
+    if (safeCut <= 0 && tail >= pcm.length) return bytes
+    return pcmToWav(pcm.subarray(safeCut, tail), p.rate)
+  } catch (e) {
+    return bytes
+  }
+}
 // 调度（串行）：按 AudioContext 时间轴首尾精确衔接，像真人说话一样无缝隙
 function gapStart(audioBuf, meta) {
   if (!audioBuf || _gap.stopping) return
@@ -471,14 +548,15 @@ function gapStart(audioBuf, meta) {
     if (!(start > earliest)) start = earliest
     const playDur = audioBuf.duration / (Number(_gap.playbackRate) || 1)
     const end = start + playDur
-    // 分块之间只做约 3ms 抗爆音淡化；过长淡入淡出会产生明显的“忽断忽续”感。
-    const fade = Math.min(0.003, Math.max(0.0015, playDur / 20))
+    // 【v3.8.332】分块接缝淡化 3ms → 8ms：更彻底地压掉块尾/块首的爆音（“咔嗒”）。
+    // 8ms 远小于一个音节的时长（约 100ms+），不会让语流听起来“忽断忽续”。
+    const fade = Math.min(0.008, Math.max(0.004, playDur / 12))
     gain.gain.setValueAtTime(0, start)
     gain.gain.linearRampToValueAtTime(1, start + fade)
     gain.gain.setValueAtTime(1, Math.max(start + fade, end - fade))
     gain.gain.linearRampToValueAtTime(0, end)
     src.start(start, 0, audioBuf.duration)
-    const tailPause = (meta && meta.text ? speechPauseMs(meta.text) : 18) / 1000
+    const tailPause = (meta && meta.text ? speechPauseMs(meta.text) : 90) / 1000
     _gap.nextAt = end + tailPause
     src.onended = () => {
       const si = _gap.sources.indexOf(src)
@@ -580,6 +658,27 @@ const CLONE_VOICE_DISPLAY = {
   'zhangruonan_mtdytfmo': '章若楠',
   '83eac18d-fd6a-531b-9a71-67b0e6d340ee': '章若楠'
 }
+// 智谱接口会把同一名师的多次历史克隆返回成不同 voice_name / ID。展示层统一收敛到人设名，
+// 再按显示名去重，避免「花生十三 / 文姐 / 巾神」等角色在音色市场重复出现。
+const BUILTIN_CLONE_ALIASES = [
+  ['薛神', ['薛神', 'xueshen']],
+  ['章若楠', ['章若楠', 'zhangruonan']],
+  ['李星云', ['李星云', 'lixingyun']],
+  ['姬如雪', ['姬如雪', 'jiruxue']],
+  ['花生十三', ['花生十三', 'huasheng13']],
+  ['小P', ['小p', 'xiaop']],
+  ['小黑', ['小黑', 'xiaohei']],
+  ['文姐', ['文姐', 'wenjie']],
+  ['巾神', ['巾神', 'jinshen']]
+]
+export function canonicalVoiceDisplayName(raw) {
+  const s = String(raw || '').trim().toLowerCase()
+  if (!s) return ''
+  for (const [label, aliases] of BUILTIN_CLONE_ALIASES) {
+    if (aliases.some((a) => s.startsWith(String(a).toLowerCase()))) return label
+  }
+  return String(raw || '').trim()
+}
 // 拉取智谱音色列表（需 Key；失败返回 null）
 export async function listGmVoices() {
   const cfg = gmCfg()
@@ -599,7 +698,8 @@ export async function listGmVoices() {
     for (const v of arr) {
       const id = v.voice || v.voice_name
       if (!id) continue
-      const name = nameOf[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice] || v.voice_name || v.voice
+      const rawName = nameOf[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice_name] || CLONE_VOICE_DISPLAY[v.voice] || v.voice_name || v.voice
+      const name = canonicalVoiceDisplayName(rawName)
       const nameKey = String(name || '').trim().toLowerCase()
       if (seenId.has(id) || (nameKey && seenName.has(nameKey))) continue
       seenId.add(id)
@@ -710,7 +810,13 @@ export async function ttsCacheCoverage(text, opts = {}) {
   const t = cleanSpeechText(text)
   const mode = String(opts.mode || (store.cfg && store.cfg.ttsMode) || 'sys')
   if (!t) return { total: 0, cached: 0, full: false }
-  const chunks = chunkForTts(t, Number(opts.chunkSize) || 240, Number(opts.firstChunkSize) || 42)
+  const chunkSizeRaw = opts.chunkSize == null ? NaN : Number(opts.chunkSize)
+  const firstChunkSizeRaw = opts.firstChunkSize == null ? NaN : Number(opts.firstChunkSize)
+  const fallbackPlan = ttsChunkPlan(opts)
+  const chunkSize = Number.isFinite(chunkSizeRaw) && chunkSizeRaw > 0 ? chunkSizeRaw : fallbackPlan.chunkSize
+  // 明确传入 0 表示关闭首块渐进切分；不能用 `|| 42`，否则缓存校验会与实际播放分块不一致。
+  const firstChunkSize = Number.isFinite(firstChunkSizeRaw) && firstChunkSizeRaw >= 0 ? firstChunkSizeRaw : fallbackPlan.firstChunkSize
+  const chunks = chunkForTts(t, chunkSize, firstChunkSize)
   if (!chunks.length) return { total: 0, cached: 0, full: false }
   let makeKey = null
   if (mode === 'glm') {
@@ -752,6 +858,12 @@ export function clampSpeed(r) {
   const n = Number(r)
   if (!n) return 1
   return Math.min(2, Math.max(0.5, n))
+}
+
+// 播放与缓存校验共用的分块计划。singleRequest=true 时整段合成；默认保留 42 字首块以尽快开口。
+export function ttsChunkPlan(opts = {}) {
+  const singleRequest = opts.singleRequest === true
+  return { chunkSize: singleRequest ? 4000 : 240, firstChunkSize: singleRequest ? 0 : 42 }
 }
 
 // ============ ② OpenAI 兼容 TTS（CosyVoice2 / 自定义）============
@@ -1397,6 +1509,22 @@ function guardToastOnce() {
   const cap = Number((store.cfg || {}).ttsDayCap) || 20000
   showToast('💰 今日真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费系统语音（本机离线）；可在 设置→语音 调整', 'info')
 }
+// 【v3.8.332】额度预警：用掉 80% 时提示一次，让用户提前知道即将降级（原先只有 100% 时才知道）
+let _guardWarnAt = 0
+function guardWarnIfNear() {
+  try {
+    const cfg = store.cfg || {}
+    if (cfg.ttsGuard === false) return
+    const cap = Number(cfg.ttsDayCap) || 0
+    if (!(cap > 0)) return
+    const used = ttsCharsToday()
+    if (used < cap * 0.8 || used >= cap) return
+    const now = Date.now()
+    if (now - _guardWarnAt < 300000) return
+    _guardWarnAt = now
+    showToast('⚠️ 今日真人朗读已用 ' + Math.round(used / cap * 100) + '%（' + used + '/' + cap + ' 字），即将自动切换为免费系统语音', 'info')
+  } catch (e) {}
+}
 function ttsAddForEngine(chars) { ttsAddChars(chars) }
 
 // 只合成并写入缓存，不播放：自动朗读当前语段时后台预取下一段，
@@ -1405,6 +1533,7 @@ export async function prefetchTts(text, opts = {}) {
   const t = cleanSpeechText(text)
   if (!t) return { ok: false, msg: 'empty' }
   const mode = String(opts.engine || (store.cfg && store.cfg.ttsMode) || 'sys')
+  const plan = ttsChunkPlan(opts)
   const base = {
     voice: opts.voice,
     model: opts.model,
@@ -1412,8 +1541,7 @@ export async function prefetchTts(text, opts = {}) {
     speed: opts.speed != null ? opts.speed : opts.rate,
     rate: opts.rate,
     pitch: opts.pitch,
-    chunkSize: opts.singleRequest === true ? 4000 : 240,
-    firstChunkSize: opts.singleRequest === true ? 0 : 42,
+    ...plan,
     pinCache: true
   }
   try {
@@ -1445,9 +1573,7 @@ export async function speakPro(text, opts = {}) {
   // 允许单次朗读临时指定引擎（角色专属声线用），不改动全局 ttsMode
   const mode0 = opts.engine ? String(opts.engine) : (store.cfg.ttsMode || 'sys')
   let mode = mode0
-  const singleRequest = opts.singleRequest === true
-  const chunkSize = singleRequest ? 4000 : 240
-  const firstChunkSize = singleRequest ? 0 : 42
+  const { chunkSize, firstChunkSize } = ttsChunkPlan(opts)
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
   // 省钱护栏：真人引擎超额度 → 自动退回免费系统语音（Edge/系统永不被拦）
@@ -1466,6 +1592,8 @@ export async function speakPro(text, opts = {}) {
     if (!fullyCached && paidTtsBlocked(t.length)) {
       guardToastOnce()
       mode = 'sys'
+    } else if (!fullyCached) {
+      guardWarnIfNear() // 用掉 80% 时预警一次（未触发降级才提示）
     }
   }
   setStatus('speaking', '正在朗读…')
@@ -1492,8 +1620,17 @@ export async function speakPro(text, opts = {}) {
         return { ok: played, cached: true }
       }
       const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
-      if (r.ok && r.bytes) await ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
-      return finishSpeak(r, opts)
+      if (r.ok && r.bytes) {
+        await ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
+        return finishSpeak(r, opts)
+      }
+      // 【v3.8.332】Edge 失败（实测常因 403/网络不通）→ 回退系统语音，保证「一定读得出来」。
+      // 原先 Edge 分支无回退，失败就直接静默，用户以为功能坏了。
+      setStatus('error', '❌ ' + (r.msg || 'Edge 语音不可用'))
+      if (opts.onError) opts.onError(r.msg || 'edge-fail')
+      const edgeFallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
+      setStatus(edgeFallback ? 'done' : 'error', edgeFallback ? '⚠️ Edge 语音失败，已回退系统语音' : '❌ 朗读失败')
+      return { ok: edgeFallback, msg: r.msg, fallback: true }
     }
     if (mode === 'sys') {
       const ok = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
@@ -1531,7 +1668,9 @@ function streamFinish(r, opts) {
       if (opts.onEnd) opts.onEnd()
       resolve({ ok })
     }
-    // 同时挂 Web Audio 与旧分块播放器的收尾回调：实际由“真正出声的那套”触发（done 防重入）
+    // 【v3.8.332】只给「真正出声的那一套」挂回调，避免两套播放器互相覆盖/重复触发：
+    //   · Web Audio 可用时，分块一律走 gapless（enqueueGapless），_sp 不会启用；
+    //   · 只有在 gapless 不可用（解码失败/自动播放被拦）时，分块才落到 _sp 队列。
     if (gapAvailable()) gaplessSetCallbacks(() => finish(true), () => finish(false))
     spSetCallbacks(() => finish(true), () => finish(false))
   })

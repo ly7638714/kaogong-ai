@@ -3,7 +3,7 @@ import { ref, reactive, nextTick, computed, onMounted, onUnmounted, watch, defin
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
 import { AI_DISTILL_MAP, USAGE_GUIDE } from '../utils/usageGuide'
-import { parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
+import { parseQuiz, parseQuizBatch, quizRequestCount, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
 import { downloadMdScreenshot, snapshotMd } from '../utils/capture' // v3.8.215 截图分享(整幅渲染)
 import { saveImage } from '../utils/downloadOut' // v3.8.214 统一保存出口
 import { setClipboard } from '../utils/platform' // ★剪贴板走宿主桥（5+下用系统剪贴板）
@@ -61,7 +61,7 @@ import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
 import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
 import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
 import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, setGaplessRate, ttsStatus, startRecog, recogActive } from '../utils/tts'
-import { ttsCacheCoverage, prefetchTts } from '../utils/ttsEngine'
+import { ttsCacheCoverage, prefetchTts, ttsChunkPlan } from '../utils/ttsEngine'
 import { speakReadyText, stripUnrelatedSpeech } from '../utils/speechScript'
 import { cleanSpeechText } from '../utils/tts/clean'
 import { MODE_NAMES } from '../kb'
@@ -107,6 +107,8 @@ const text = ref(''),
   imgs = ref([]),
   linkShow = ref(false),
   linkUrl = ref(''),
+  linkBusy = ref(false),
+  linkErr = ref(''),
   recogOn = ref(false)
 const quickMode = ref(localStorage.getItem('xc_quick_mode') === '1') // 🧠深度(思考模型,准) / ⚡快答(快模型,快)
 function toggleQuickMode() {
@@ -251,8 +253,13 @@ function buildQuizFromMsg(m, askReq) {
   if (!m || m.role !== 'assistant' || typeof m.content !== 'string' || m.err || m.stopped || m.quiz) return
   if (!askReq) return // 非“叫我出题”的回复（真实题解析/复盘）一律不包装成可点选项卡
   if (!looksLikeQuiz(m.content)) return
-  const quiz = parseQuiz(m.content)
-  if (quiz) { m.quiz = quiz; return }
+  const batch = parseQuizBatch(m.content)
+  if (batch.length) {
+    m.quizzes = batch
+    m.quizIdx = 0
+    m.quiz = batch[0]
+    return
+  }
   // 出题练习模式：AI 只给题干+选项（不给答案，让用户先选）→ 生成"选后 AI 判题"卡片
   const opts = extractChoices(m.content)
   if (opts.length >= 2) {
@@ -262,6 +269,22 @@ function buildQuizFromMsg(m, askReq) {
     let stem = first >= 0 ? lines.slice(0, first).join('\n').trim() : String(m.content).replace(/\s[A-D][.、．:：].*$/s, '').trim()
     if (stem) m.quiz = { stem, options: opts, answer: '', needAi: true }
   }
+}
+function quizBatchCount(m) { return m && Array.isArray(m.quizzes) ? m.quizzes.length : (m && m.quiz ? 1 : 0) }
+function quizBatchIdx(m) { return m && Number(m.quizIdx) >= 0 ? Number(m.quizIdx) : 0 }
+function quizBatchHasPrev(m) { return quizBatchIdx(m) > 0 }
+function quizBatchHasNext(m) { return quizBatchIdx(m) < quizBatchCount(m) - 1 }
+function quizBatchGo(m, dir) {
+  if (!m || !Array.isArray(m.quizzes) || !m.quizzes.length) return
+  const next = quizBatchIdx(m) + (dir > 0 ? 1 : -1)
+  if (next < 0 || next >= m.quizzes.length) {
+    showToast(next < 0 ? '已经是第一题' : '这组题已经做完了', 'info')
+    return
+  }
+  m.quizIdx = next
+  m.quiz = m.quizzes[next]
+  saveMsgs()
+  scroll()
 }
 // 历史消息水合：从本地恢复的旧消息（早期版本或当时未成功解析）也补建可点作答卡片
 function hydrateQuizCards() {
@@ -325,8 +348,13 @@ function addMsg(m) {
   if (m.role === 'assistant' && !m.err) petAddPoints(1)
   // 选择题结构化：仅当用户在"叫我出题/练题"时，才把 AI 输出包装成可点作答卡（真实题的解析/复盘绝不自动加卡）
   if (m.role === 'assistant' && typeof m.content === 'string' && !m.err && !m.stopped && !m.quiz && isQuizAsk(String(lastAskText || ''))) {
-    const quiz = parseQuiz(m.content)
-    if (quiz) m.quiz = quiz
+    const batch = parseQuizBatch(m.content)
+    if (batch.length) {
+      m.quizzes = batch
+      m.quizIdx = 0
+      m.quiz = batch[0]
+      m._compare = /对比|因推果.*果推因|果推因.*因推果/.test(String(lastAskText || ''))
+    }
     else {
       // 出题练习模式：AI 只给题干+选项（不给答案，让用户先选）→ 生成"选后 AI 判题"卡片
       const opts = extractChoices(m.content)
@@ -384,31 +412,54 @@ async function pickImage(ev) {
   }
   ev.target.value = ''
 }
-function addImageUrl() {
-  const u = linkUrl.value.trim()
-  if (!u) {
-    showToast('请粘贴图片链接', 'info')
+async function openLinkSmart() {
+  if (linkShow.value) {
+    linkShow.value = false
     return
   }
-  fetch(u)
-    .then((r) => {
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      return r.blob()
-    })
-    .then((b) => {
-      if (!b.type.startsWith('image/')) {
-        showToast('该链接不是图片', 'error')
-        return
-      }
+  linkShow.value = true
+  linkErr.value = ''
+  try {
+    const clip = await navigator.clipboard.readText()
+    const u = String(clip || '').trim()
+    if (/^https?:\/\//i.test(u)) linkUrl.value = u
+  } catch (e) {}
+  await nextTick()
+  const el = document.querySelector('.link-url-input')
+  if (el) el.focus()
+}
+async function addImageUrl() {
+  const u = String(linkUrl.value || '').trim()
+  if (!u) {
+    linkErr.value = '请先粘贴图片链接'
+    return
+  }
+  if (!/^https?:\/\//i.test(u)) {
+    linkErr.value = '仅支持 http/https 图片链接'
+    return
+  }
+  linkBusy.value = true
+  linkErr.value = ''
+  try {
+    const r = await fetch(u)
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    const b = await r.blob()
+    if (!b.type.startsWith('image/')) throw new Error('该链接不是图片')
+    const dataUrl = await new Promise((res, rej) => {
       const rd = new FileReader()
-      rd.onload = async (e) => {
-        imgs.value.push(await compressImage(e.target.result, 1000, 0.78))
-        linkShow.value = false
-        linkUrl.value = ''
-      }
+      rd.onload = () => res(rd.result)
+      rd.onerror = () => rej(new Error('图片读取失败'))
       rd.readAsDataURL(b)
     })
-    .catch((e) => showToast('加载图片失败：' + e.message, 'error'))
+    imgs.value.push(await compressImage(dataUrl, 1000, 0.78))
+    linkShow.value = false
+    linkUrl.value = ''
+    showToast('✅ 图片链接已添加到输入区', 'success')
+  } catch (e) {
+    linkErr.value = '加载失败：' + e.message
+  } finally {
+    linkBusy.value = false
+  }
 }
 function rmImg(i) {
   imgs.value.splice(i, 1)
@@ -591,7 +642,10 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
     }
   } catch (e) {}
   if (lastMsg && lastMsg._askQuiz) {
-    sys += '\n【用户要求出题练习】请按用户要求出一道完整的行测题：题干 + 完整 A/B/C/D 四个选项（每个选项单独一行）。**不要输出答案和解析**，让用户先选择；用户选完后系统会再让你判题讲解。'
+    const n = quizRequestCount(curTxt)
+    sys += n > 1
+      ? '\n【用户要求批量出题练习】请严格一次输出 ' + n + ' 道题。每道题都必须以「### 第1题」「### 第2题」……「### 第' + n + '题」作为独立标题；每道题包含完整题干、A/B/C/D 四个选项（每个选项单独一行）和【正确答案】X。题目之间保持同一主题/题型/难度与干扰项设计要求，由题干自行承接，不要额外输出总材料。所有题一次给完，不要中断。'
+      : '\n【用户要求出题练习】请按用户要求出一道完整的行测题：题干 + 完整 A/B/C/D 四个选项（每个选项单独一行）。**不要输出答案和解析**，让用户先选择；用户选完后系统会再让你判题讲解。'
   }
   if (curFigRead) {
     sys += '\n【重要·图片已读取，直接作答】用户刚发了一张图片，图片数据已由专业 OCR 完整提取为文字（见用户消息中【图片内容】标记），数据准确可信。请【直接据此作答】：不要讨论自己能否看图、是否纯文本模型、OCR 是否完整，不要复述提取过程，不要自我怀疑——直接给出答案与解析即可；若确有数据缺失，再请用户补充。'
@@ -986,6 +1040,10 @@ function resendMsg(i) {
   send()
 }
 function saveWrong(m) {
+  if (m && m._wrongSaved) {
+    showToast('这道题已经在错题集里了', 'info')
+    return
+  }
   const n = store.msgs.length
   if (!n) {
     showToast('请先完成一次问答', 'info')
@@ -1003,7 +1061,7 @@ function saveWrong(m) {
   }
   const bk = detectBanKuai(qFull || lastAskText || '') || '判断推理'
   bkPick.value = bk
-  bkOrigin.value = { q: qFull.slice(0, 3000), imgs, msgIdx: src.msgIdx >= 0 ? src.msgIdx : n - 1, source: src.source || '' }
+  bkOrigin.value = { q: qFull.slice(0, 3000), imgs, msgIdx: src.msgIdx >= 0 ? src.msgIdx : n - 1, source: src.source || '', msg: m || null }
   bkShow.value = true
 }
 // ===== 选择题作答：点选选项 → 判对错 + 可存错题本 =====
@@ -1386,6 +1444,10 @@ async function confirmSaveWrong() {
     digested: false
   })
   saveWqs()
+  if (bkOrigin.value.msg) {
+    bkOrigin.value.msg._wrongSaved = true
+    saveMsgs()
+  }
   bkShow.value = false
 }
 function getLastUserText() {
@@ -1642,7 +1704,7 @@ function snapshotSpeechOpts() {
     rate: Number(cfg.ttsRate) || 1,
     pitch: cfg.ttsPitch,
     engine: cfg.ttsMode || 'sys',
-    singleRequest: true,
+    // 不设 singleRequest：保留渐进式分块（首块 42 字先开口），把首字延迟从「整段合成」降到「首块合成」。
     ...petSpeakOpts()
   }
 }
@@ -1816,6 +1878,7 @@ async function verifySpeechCache(segments, opts) {
   const mode = String(o.engine || (store.cfg && store.cfg.ttsMode) || 'sys')
   if (mode === 'sys') return false
   for (const seg of list) {
+    const plan = ttsChunkPlan(o)
     const cov = await ttsCacheCoverage(seg, {
       mode,
       voice: o.voice,
@@ -1824,8 +1887,7 @@ async function verifySpeechCache(segments, opts) {
       speed: o.rate,
       rate: o.rate,
       pitch: o.pitch,
-      chunkSize: o.singleRequest === false ? 240 : 4000,
-      firstChunkSize: o.singleRequest === false ? 42 : 0
+      ...plan
     })
     if (!cov || !cov.full) return false
   }
@@ -1958,6 +2020,7 @@ async function toggleSpeak(ev) {
   // 旧版本可能已把音频写进 IndexedDB，但消息元数据没有落盘；先做一次纯缓存覆盖检查，命中就直接重播，不再请求 TTS。
   try {
     const o = snapshotSpeechOpts()
+    const plan = ttsChunkPlan(o)
     const cov = await ttsCacheCoverage(ready, {
       mode: o.engine,
       voice: o.voice,
@@ -1966,8 +2029,7 @@ async function toggleSpeak(ev) {
       speed: o.rate,
       rate: o.rate,
       pitch: o.pitch,
-      chunkSize: o.singleRequest === false ? 240 : 4000,
-      firstChunkSize: o.singleRequest === false ? 42 : 0
+      ...plan
     })
     if (m && cov && cov.full) {
       m._ttsCached = true
@@ -2097,7 +2159,8 @@ function toggleFb(m, v) {
 function followUp(m) {
   const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
   const brief = String(t).replace(/[#*`>|_]/g, '').slice(0, 200)
-  text.value = '请基于你刚才的讲解（' + brief + '…）继续深入：'
+  const addition = '请基于你刚才的讲解（' + brief + '…）继续深入：'
+  text.value = text.value.trim() ? text.value.trim() + '\n\n' + addition : addition
   scroll()
   const tb = document.querySelector('.input-bar textarea')
   if (tb) tb.focus()
@@ -2105,9 +2168,20 @@ function followUp(m) {
 function collectMsg(m) {
   const t = m && m.content ? (typeof m.content === 'string' ? m.content : (m.content && m.content.text) || '') : ''
   if (!t) { showToast('没有可收藏的内容', 'info'); return }
+  if (m._collected) {
+    const old = store.notes.length
+    store.notes = store.notes.filter((n) => n && n._mid !== m.id)
+    m._collected = false
+    saveNotes()
+    saveMsgs()
+    showToast(old !== store.notes.length ? '已取消收藏' : '已取消收藏状态', 'info')
+    return
+  }
   const title = String(t).replace(/[#*`>|_]/g, '').slice(0, 24) + '…'
-  store.notes.unshift({ title: '📌 ' + title, body: t, t: new Date().toLocaleString() })
+  store.notes.unshift({ title: '📌 ' + title, body: t, t: new Date().toLocaleString(), _mid: m.id })
+  m._collected = true
   saveNotes()
+  saveMsgs()
   showToast('✅ 已收藏到我的笔记', 'success')
 }
 // 长回复折叠
@@ -2376,7 +2450,11 @@ async function copyCode(btn) {
 async function copyMsg(ev) {
   const btn = ev.currentTarget
   const msg = btn && btn.closest('.msg')
-  const text = msg.innerText || ''
+  if (!msg) return
+  const clone = msg.cloneNode(true)
+  clone.querySelectorAll('.msg-actions, .ans-tag, .fold-btn, .quiz-acts, .think-box, .code-copy, .fig-busy, .fig-fail').forEach((el) => el.remove())
+  const text = (clone.innerText || '').trim()
+  if (!text) return
   await copyRaw(text)
   flashBtn(btn)
 }
@@ -2391,7 +2469,7 @@ onUnmounted(() => window.removeEventListener('resize', onToolsResize))
 defineEmits(['export-review'])
 
 // v3.8.195 6B·ChatPage 拆分：聚合顶层绑定为 fpctx 供子组件注入
-const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, speakPaused, ttsStatus, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, lastAskText, lastAskAt, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, speakingMsgIndex, speechPreparing, toggleMsgPause, cycleMsgSpeed, stopMsgSpeak, replayMessageSpeech, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
+const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, parseQuizBatch, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, speakPaused, ttsStatus, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, linkShow, linkUrl, linkBusy, linkErr, openLinkSmart, recogOn, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, quizBatchCount, quizBatchIdx, quizBatchHasPrev, quizBatchHasNext, quizBatchGo, lastAskText, lastAskAt, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, speakingMsgIndex, speechPreparing, toggleMsgPause, cycleMsgSpeed, stopMsgSpeak, replayMessageSpeech, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
 Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 Object.assign(fpctx, { backLayerOpen })
 
@@ -2407,21 +2485,19 @@ Object.assign(fpctx, { backLayerOpen })
           <button class="x" @click="rmImg(i)">×</button>
         </div>
       </div>
-      <div v-if="linkShow" style="padding: 0 14px 6px">
-        <input
-          v-model="linkUrl"
-          placeholder="粘贴图片链接，如 https://.../题目.png"
-          style="
-            flex: 1;
-            padding: 8px 12px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: var(--card);
-            color: var(--text);
-            font-size: calc(13px * var(--ui-fs-scale, 1));
-          "
-        />
-        <button class="btn btn-pri" style="margin-top: 6px" @click="addImageUrl()">添加该图片</button>
+      <div v-if="linkShow" class="link-url-row">
+        <div class="link-url-main">
+          <input
+            v-model="linkUrl"
+            class="link-url-input"
+            placeholder="粘贴图片链接，回车添加"
+            @keydown.enter.prevent="addImageUrl()"
+          />
+          <button class="btn btn-pri" :disabled="linkBusy" @click="addImageUrl()">{{ linkBusy ? '加载中…' : '添加图片' }}</button>
+          <button class="btn btn-gh" @click="linkShow = false; linkErr = ''">取消</button>
+        </div>
+        <div v-if="linkErr" class="link-url-err">⚠️ {{ linkErr }}</div>
+        <div v-else class="link-url-tip">点击链接按钮会自动读取剪贴板里的图片 URL；也可以手动粘贴后按回车。</div>
       </div>
       <div v-if="recentQs.length" class="recent-bar">
         <span class="rb-t">🕘</span>

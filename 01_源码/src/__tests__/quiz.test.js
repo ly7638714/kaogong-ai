@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseQuiz, answerLetter, extractChoices, parseMaterialQuiz } from '../utils/quiz'
+import { parseQuiz, parseQuizBatch, quizRequestCount, answerLetter, extractChoices, parseMaterialQuiz } from '../utils/quiz'
 
 describe('parseQuiz 选项提取', () => {
   it('保留含大写字母的选项文本（回归：旧正则 [^A-D\\n] 会把 GDP 截成 G）', () => {
@@ -54,6 +54,18 @@ describe('answerLetter 答案提取', () => {
     expect(r).toBeTruthy()
     expect(r.material).toContain('1234万人')
     expect(r.qs.length).toBe(2)
+  })
+  it('parseQuizBatch：按题号拆出多道题并保留各自答案', () => {
+    const r = parseQuizBatch('### 第1题\n下面正确的是？\nA. 甲 B. 乙\nC. 丙 D. 丁\n【正确答案】A\n### 第2题\n下面错误的是？\nA. 甲 B. 乙\nC. 丙 D. 丁\n【正确答案】C')
+    expect(r).toHaveLength(2)
+    expect(r[0].answer).toBe('A')
+    expect(r[1].answer).toBe('C')
+  })
+  it('quizRequestCount：识别自然语言题数并限制在 1-20', () => {
+    expect(quizRequestCount('给我出2道同一话题的削弱题')).toBe(2)
+    expect(quizRequestCount('来5题')).toBe(5)
+    expect(quizRequestCount('出一道题')).toBe(1)
+    expect(quizRequestCount('给我出99道')).toBe(20)
   })
   it('"选 X"独立动词才识别，避免 入选 误判', () => {
     expect(answerLetter('答案：选 B')).toBe('B')

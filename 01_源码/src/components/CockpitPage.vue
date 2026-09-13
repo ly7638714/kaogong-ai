@@ -11,6 +11,8 @@ import { masteryOfPlate } from '../utils/mastery'
 import { reviewHealth } from '../utils/reviewHealth' // 复盘健康分（深化）
 import { mergeWeakTasks } from '../utils/weakTask' // 补弱任务（深化）
 import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
+import { loadCheckinState, checkInToday, currentStreak, checkinWeek } from '../utils/checkin'
+import { readSyncState } from '../utils/cloudSync'
 
 // 今日练习：统计今天(按日期)的 user 提问数（chat 记录无 time，用日期近似——用 store 计数即可，标注"累计"更稳）
 const ck = computed(() => {
@@ -77,6 +79,47 @@ const weakest = computed(() => {
 function goto(t) {
   store.tab = t
 }
+function syncTimeLabel(ts) {
+  const n = Number(ts) || 0
+  if (!n) return '尚未同步'
+  const diff = Date.now() - n
+  if (diff < 60000) return '刚刚同步'
+  if (diff < 3600000) return Math.max(1, Math.round(diff / 60000)) + ' 分钟前'
+  if (diff < 86400000) return Math.max(1, Math.round(diff / 3600000)) + ' 小时前'
+  return new Date(n).toLocaleDateString()
+}
+const syncInfo = computed(() => readSyncState())
+const localDataSummary = computed(() => ({ asks: ck.value.q, wrongs: ck.value.w, reviewed: ck.value.r }))
+const commandActions = computed(() => {
+  const due = Number(hubCnt.value || 0)
+  const unreviewed = Math.max(0, Number(ck.value.w) - Number(ck.value.r))
+  const weak = weakPlate()
+  const actions = [
+    { id: 'due', icon: '🔔', title: due ? '清掉 ' + due + ' 个到期任务' : '到期已清空', desc: due ? '按记忆曲线回访，防止旧错重新固化' : '今天的复习节奏很稳', action: { type: 'hub' }, priority: due ? 100 : 35, disabled: !due },
+    { id: 'wrong', icon: '📋', title: unreviewed ? '复盘 ' + unreviewed + ' 道错题' : '错题已复盘', desc: unreviewed ? '逐题找错因，别让错题只囤不消化' : '可以去二刷或做变式', action: { type: 'tab', target: 'wq' }, priority: unreviewed ? 92 : 38, disabled: false },
+    { id: 'quiz', icon: '🎯', title: weak ? '专项练「' + weak + '」' : '开始智能出题', desc: 'AI 按当前薄弱板块生成真题感练习', action: { type: 'quiz' }, priority: weak ? 86 : 55, disabled: false },
+    { id: 'daily', icon: '🌅', title: '每日必刷三大块', desc: '资料、言语、逻辑一次打包，直接开刷', action: { type: 'daily' }, priority: 72, disabled: false },
+    { id: 'kb', icon: '📚', title: '看一张知识卡', desc: '从统一知识卡工作台快速补概念', action: { type: 'tab', target: 'kb' }, priority: 62, disabled: false },
+    { id: 'sync', icon: '☁️', title: syncInfo.value.last ? '同步状态正常' : '完成首次云同步', desc: syncInfo.value.last ? syncTimeLabel(syncInfo.value.last) + ' · ' + (syncInfo.value.lastAction || '数据已同步') : '建议上传或下载一次，确认多端数据一致', action: { type: 'tab', target: 'sync' }, priority: syncInfo.value.last ? 42 : 76, disabled: false }
+  ]
+  return actions.sort((a, b) => b.priority - a.priority)
+})
+const nextBestAction = computed(() => commandActions.value.find((x) => !x.disabled) || commandActions.value[0])
+function runCommand(a) {
+  if (!a || a.disabled) return
+  const x = a.action || {}
+  if (x.type === 'hub') return openHub()
+  if (x.type === 'tab') return goto(x.target)
+  if (x.type === 'quiz') {
+    store.pendingAsk = '请给我出一道' + (weakPlate() || '判断推理') + '仿真题，先给题干和四个选项，不要提前给答案'
+    goto('chat')
+    return
+  }
+  if (x.type === 'daily') {
+    goto('chat')
+    setTimeout(() => window.dispatchEvent(new CustomEvent('xc-open-exam', { detail: { src: 'morning' } })), 40)
+  }
+}
 // 考试节点：按设置的笔试日期自动推算（报名/缴费为常见周期估算，以官方公告为准）
 const nodeAt = (offsetDays) => {
   try {
@@ -112,8 +155,11 @@ const todayKey = () => {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
 const tasks = ref([])
-const streak = ref(0)
-let streakLast = ''
+const checkinState = ref(loadCheckinState(localStorage))
+const streak = computed(() => currentStreak(checkinState.value))
+const checkedToday = computed(() => checkinState.value.last === todayKey())
+const totalCheckins = computed(() => Number(checkinState.value.total) || 0)
+const checkinDays = computed(() => checkinWeek(checkinState.value))
 const customTask = ref('')
 const yesterdayLeft = ref(0)
 const STREAK_MEDALS = [[7, '🥉 青铜'], [14, '🥈 白银'], [21, '🥇 黄金'], [30, '💎 钻石']]
@@ -134,11 +180,7 @@ function delTask(i) {
   saveTasks()
 }
 function loadTasks() {
-  try {
-    const s = JSON.parse(localStorage.getItem('xc_streak') || '{"n":0,"d":""}')
-    streak.value = s.n || 0
-    streakLast.value = s.d || ''
-  } catch (e) {}
+  checkinState.value = loadCheckinState(localStorage)
   try {
     const t = JSON.parse(localStorage.getItem('xc_tasks') || 'null')
     if (t && t.date === todayKey() && Array.isArray(t.items)) {
@@ -217,16 +259,19 @@ function toggleTask(i) {
   tasks.value[i].done = !tasks.value[i].done
   saveTasks()
   const all = tasks.value.length && tasks.value.every((t) => t.done)
-  if (all && streakLast.value !== todayKey()) {
-    streak.value++
-    streakLast.value = todayKey()
-    try {
-      localStorage.setItem('xc_streak', JSON.stringify({ n: streak.value, d: streakLast.value }))
-    } catch (e) {}
-    const md = streakMedal()
-    showToast('🎉 今日任务全部完成，连续打卡 ' + streak.value + ' 天' + (md ? '，达成 ' + md + '！' : '！'), 'success')
-  }
+  if (all) doCheckIn(true)
   window.dispatchEvent(new CustomEvent('xc-task-change'))
+}
+function doCheckIn(auto = false) {
+  const r = checkInToday(localStorage)
+  checkinState.value = r.state
+  if (r.added) {
+    const md = streakMedal()
+    showToast((auto ? '🎉 今日任务全部完成，' : '🎉 打卡成功，') + '连续打卡 ' + streak.value + ' 天' + (md ? '，达成 ' + md + '！' : '！'), 'success')
+  } else if (!auto) {
+    showToast('✅ 今天已经打过卡了，明天再来继续保持！', 'info')
+  }
+  return r.added
 }
 function goTask(t) {
   if (t.k === 'practice') {
@@ -394,6 +439,24 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
         </div>
         <div v-else class="ck-sub">在 设置 → 考试管理 里配置笔试日期可显示倒计时</div>
       </div>
+      <div class="ck-command">
+        <div class="ck-next">
+          <div class="ck-next-ic">{{ nextBestAction.icon }}</div>
+          <div class="ck-next-tx"><em>下一步最佳行动</em><b>{{ nextBestAction.title }}</b><span>{{ nextBestAction.desc }}</span></div>
+          <button class="btn btn-pri" @click="runCommand(nextBestAction)">立即执行</button>
+        </div>
+        <div class="ck-context">
+          <span>💬 {{ localDataSummary.asks }} 问</span>
+          <span>📋 {{ localDataSummary.wrongs }} 错</span>
+          <span>✅ {{ localDataSummary.reviewed }} 复盘</span>
+          <span>☁️ {{ syncTimeLabel(syncInfo.last) }}</span>
+        </div>
+        <div class="ck-command-grid">
+          <button v-for="a in commandActions" :key="a.id" class="ck-command-item" :class="{ disabled: a.disabled }" :disabled="a.disabled" @click="runCommand(a)">
+            <i>{{ a.icon }}</i><span><b>{{ a.title }}</b><em>{{ a.desc }}</em></span>
+          </button>
+        </div>
+      </div>
       <!-- 今日目标（189）：复习到期/做题/复盘/时长 + 本周完成迷你柱 -->
   <div class="ck-plan" style="margin:10px 0 4px;border-radius:12px;padding:10px 12px">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -402,6 +465,22 @@ onMounted(() => { loadTasks(); initWelcome(); pickQuote() })
       <span :style="{ color: morningOk ? '#34d399' : 'var(--text3)', fontSize: '12px' }">🌅 晨练{{ morningOk ? ' ✅' : ' 未做' }}</span>
       <span style="flex:1"></span>
       <span style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text3)">进度 {{ ps.pct }}%</span>
+    </div>
+    <div class="ck-checkin" :class="{ done: checkedToday }">
+      <div class="cc-main">
+        <span class="cc-fire">🔥</span>
+        <span class="cc-num">{{ streak }}</span>
+        <span class="cc-unit">天连续打卡</span>
+        <span class="cc-total">累计 {{ totalCheckins }} 天</span>
+      </div>
+      <div class="cc-week" aria-label="最近七天打卡记录">
+        <span v-for="d in checkinDays" :key="d.key" class="cc-day" :class="{ on: d.done, today: d.today }" :title="d.key + (d.done ? ' 已打卡' : ' 未打卡')">
+          <i></i><em>{{ d.label }}</em>
+        </span>
+      </div>
+      <button class="btn cc-btn" :class="checkedToday ? 'btn-gh' : 'btn-pri'" :disabled="checkedToday" @click="doCheckIn(false)">
+        {{ checkedToday ? '✅ 今日已打卡' : '🔥 今日打卡' }}
+      </button>
     </div>
     <div class="ck-goal-row">
       <span class="ck-goal-pill" :title="'待复习 ' + tp.due + ' 道'"><em>复习到期</em><b>{{ tp.due }}</b><span>道</span></span>

@@ -56,20 +56,20 @@ function hasImg(q) { return !!(q && (q.imgs || []).length) }
       <div v-else class="br-prog" style="margin: 6px 0">
         <div style="font-size: calc(13px * var(--ui-fs-scale, 1))">⏳ {{ brLog }}</div>
         <div style="height: 6px; border-radius: 4px; background: rgba(127,127,127,.15); margin-top: 6px; overflow: hidden">
-          <i :style="{ display: 'block', height: '6px', width: Math.round((brDone / brN) * 100) + '%', background: 'linear-gradient(90deg,#34d399,#fbbf24)', transition: 'width .3s' }"></i>
+          <i :style="{ display: 'block', height: '6px', width: Math.round((brDone / brN) * 100) + '%', background: 'linear-gradient(90deg,var(--state-success),var(--state-warning))', transition: 'width .3s' }"></i>
         </div>
         <button class="btn btn-gh" style="padding: 3px 12px; font-size: calc(12px * var(--ui-fs-scale, 1)); margin-top: 6px" @click="brStop()">⏹ 停止</button>
       </div>
-      <div v-if="brErr" style="color: #f87171; font-size: calc(12px * var(--ui-fs-scale, 1)); margin: 4px 0">{{ brErr }}</div>
+      <div v-if="brErr" style="color: var(--state-danger-text); font-size: calc(12px * var(--ui-fs-scale, 1)); margin: 4px 0">{{ brErr }}</div>
       <div v-if="brRows.length" style="max-height: 48vh; overflow: auto; margin-top: 8px">
         <div v-for="r in brRows" :key="'br' + r.idx" style="border: 1px solid rgba(127,127,127,.18); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px">
           <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
             <b style="font-size: calc(13px * var(--ui-fs-scale, 1))">第 {{ r.idx + 1 }} 题 · {{ qLabel(store.wqs[r.idx]) }} · {{ typeOf(store.wqs[r.idx]) }}</b>
             <button class="btn btn-gh" style="padding:1px 8px;font-size: calc(11px * var(--ui-fs-scale, 1))" title="回到错题列表打开这道题看完整题干/选项/图" @click="brOpenQ(r.idx)">👁 查看原题</button>
           </div>
-          <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);margin:3px 0;line-height:1.6">{{ clean((store.wqs[r.idx] || {}).question, 260) }}<span v-if="hasImg(store.wqs[r.idx])" style="color:#fb7185"> …〔含原图截图〕</span></div>
-          <div style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: #fbbf24">😖 错因：{{ r.reason || '—' }}</div>
-          <div style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: #34d399">💡 修正：{{ r.fix || '—' }}</div>
+          <div style="font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);margin:3px 0;line-height:1.6">{{ clean((store.wqs[r.idx] || {}).question, 260) }}<span v-if="hasImg(store.wqs[r.idx])" style="color:var(--state-danger-text)"> …〔含原图截图〕</span></div>
+          <div style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--state-warning-text)">😖 错因：{{ r.reason || '—' }}</div>
+          <div style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--state-success-text)">💡 修正：{{ r.fix || '—' }}</div>
           <div style="font-size: calc(12.5px * var(--ui-fs-scale, 1)); color: var(--text2)">📌 今日动作：{{ r.action || '—' }}</div>
         </div>
       </div>

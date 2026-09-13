@@ -145,11 +145,11 @@ function dueTipLater() {
       </div>
       <div v-if="stats.rep && stats.rep.r > 0" class="wq-rep">📉 复习后再做 {{ stats.rep.e }}/{{ stats.rep.r }} 次 · 复错率 {{ Math.round((stats.rep.e / stats.rep.r) * 100) }}% —— 复错 = 还没吃透，优先二刷 / 连做</div>
       <div v-if="health" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0;font-size: calc(12px * var(--ui-fs-scale, 1));color:var(--text2);border:1px solid rgba(127,127,127,.18);border-radius:8px;padding:5px 8px">
-        <span>💗 复盘健康 <b :style="{ color: health.score >= 85 ? '#34d399' : health.score >= 60 ? '#fbbf24' : '#fb7185' }">{{ health.score }}</b> 分 · {{ health.grade }}</span>
+        <span>💗 复盘健康 <b :style="{ color: health.score >= 85 ? 'var(--state-success-text)' : health.score >= 60 ? 'var(--state-warning-text)' : 'var(--state-danger-text)' }">{{ health.score }}</b> 分 · {{ health.grade }}</span>
         <template v-if="health.tips.length"><span style="color:var(--text3)">{{ health.tips[0] }}</span></template>
       </div>
       <div v-if="stats.due > 0 && !dueTipOff" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;padding:8px 10px;border-radius:10px;background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.4);font-size: calc(12.5px * var(--ui-fs-scale, 1))">
-        <span>🔔 有 <b style="color:#fb7185">{{ stats.due }}</b> 道错题已「到期」——按记忆曲线（消化后 3→7→15→30 天）该回访了，<b>先复习它们最划算</b>（到期若答错会退回待消化）</span>
+        <span>🔔 有 <b style="color:var(--state-danger-text)">{{ stats.due }}</b> 道错题已「到期」——按记忆曲线（消化后 3→7→15→30 天）该回访了，<b>先复习它们最划算</b>（到期若答错会退回待消化）</span>
         <button class="btn btn-pri" style="padding:3px 12px;font-size: calc(12px * var(--ui-fs-scale, 1))" @click="openHub()">🗓️ 立即复习（今日复习中枢）</button>
         <button class="btn btn-gh" style="padding:3px 10px;font-size: calc(12px * var(--ui-fs-scale, 1))" title="今天不再提醒，明天会自动出现" @click="dueTipLater()">✕ 今天先不提醒</button>
       </div>
@@ -272,7 +272,7 @@ function dueTipLater() {
 .wr > span { max-width: min(100%, 620px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wr-toggle { border: 1px dashed var(--glass-border); background: transparent; color: var(--accent); border-radius: 12px; padding: 1px 7px; font: inherit; cursor: pointer; }
 .as { color: var(--accent); font-size: calc(11px * var(--ui-fs-scale, 1)); font-weight: 800; }
-.as.ok { color: #34d399; }
-.as.warn { color: #fb7185; }
-.wq-archive-note { margin: 8px 0; padding: 8px 10px; border-radius: 8px; border: 1px dashed rgba(52,211,153,.45); background: rgba(52,211,153,.07); color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.7; }
+.as.ok { color: var(--state-success-text); }
+.as.warn { color: var(--state-danger-text); }
+.wq-archive-note { margin: 8px 0; padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--state-success-border); background: var(--state-success-bg); color: var(--text2); font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.7; }
 </style>

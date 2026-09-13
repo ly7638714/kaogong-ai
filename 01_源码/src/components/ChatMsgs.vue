@@ -33,6 +33,11 @@ const {
   pickQuiz,
   quizFullShow,
   quizDeep,
+  quizBatchCount,
+  quizBatchIdx,
+  quizBatchHasPrev,
+  quizBatchHasNext,
+  quizBatchGo,
   capQuizShot,
   quizExplainNow,
   quizScrollTo,
@@ -73,6 +78,8 @@ const {
   onBlDown
 } = toRefs(props.ctx)
 const ttsUi = vueRef({ active: false, paused: false })
+const moreMenu = vueRef({})
+function toggleMore(m) { if (m && m.id) moreMenu.value[m.id] = !moreMenu.value[m.id] }
 let ttsUiTimer = null
 onMounted(() => {
   ttsUiTimer = setInterval(() => {
@@ -154,6 +161,7 @@ const msgRatePct = computed(() => Math.round((Number(props.ctx.store.cfg.ttsRate
                 <div v-if="quizPlate(m)" class="quiz-hd">
                   <span class="quiz-plate">📐 {{ quizPlate(m) }}</span>
                   <span v-if="m.quiz.needAi" class="quiz-tag">先选后判</span>
+                  <span v-if="m._compare" class="quiz-tag compare">⚖️ 对比学习</span>
                   <span v-if="m.orgCard" class="quiz-tag src">截图整理</span>
                 </div>
                 <div class="quiz-stem" v-html="mdC(m.quiz.stem)"></div>
@@ -194,13 +202,21 @@ const msgRatePct = computed(() => Math.round((Number(props.ctx.store.cfg.ttsRate
                   <button class="btn btn-gh" @click="quizWrongIgnore(m)">忽略</button>
                 </div>
                 <div v-if="m.quiz.picked && m.quiz.explain && !m.quiz.checking" class="quiz-explain" v-html="mdC(m.quiz.explain)"></div>
+                <div v-if="m._compare && !quizBatchHasNext(m) && m.quiz.picked && !m.quiz.checking" class="quiz-compare-note">
+                  ⚖️ 对比结论：先看提问要削弱的是“原因→结果”还是“结果→原因”；因推果优先打因果方向，果推因优先找另有他因。正确项必须同时贴合结论主体和方向，只解释一边的选项通常力度不足。
+                </div>
+                <div v-if="quizBatchCount(m) > 1" class="quiz-batch-nav">
+                  <button class="btn btn-gh" :disabled="!quizBatchHasPrev(m)" @click="quizBatchGo(m, -1)">‹ 上一题</button>
+                  <span>第 {{ quizBatchIdx(m) + 1 }} / {{ quizBatchCount(m) }} 题</span>
+                  <button class="btn btn-pri" :disabled="!quizBatchHasNext(m)" @click="quizBatchGo(m, 1)">{{ quizBatchHasNext(m) ? '下一题 ›' : '本组已完成' }}</button>
+                </div>
                 <div v-if="m.quiz.picked && !m.quiz.checking" class="quiz-acts">
                   <button class="btn btn-gh" @click="quizDeep(m)">💬 发到对话深挖</button>
                   <button class="btn btn-gh" @click="saveQuizWrong(m)">📌 存错题本</button>
                   <button class="btn btn-gh" @click="quizFullShow(m)">⛶ 全屏做题</button>
                   <button class="btn btn-gh" @click="capQuizShot(m, 'e')">📸 解析截图</button>
                 </div>
-                <div v-if="m.quiz.picked && !m.quiz.checking" class="quiz-followup">
+                <div v-if="m.quiz.picked && !m.quiz.checking && !quizBatchHasNext(m)" class="quiz-followup">
                   <span class="qf-t">🤔 答对还想巩固？要不要再来一道变式、看解析，或换个角度聊聊？</span>
                   <button class="qf-b" @click="variantMenu = (variantMenu === m ? null : m)">🔁 再出变式</button>
                   <button class="qf-b" @click="showVariantExplain(m)">📖 看解析</button>
@@ -242,27 +258,31 @@ const msgRatePct = computed(() => Math.round((Number(props.ctx.store.cfg.ttsRate
               <div class="msg-actions">
                 <button v-if="m.err" class="retry-btn" @click="retryLast()">↻ 重试</button>
                 <button v-if="!m.err && prevHasImg(m) && figCfg()" :disabled="m.figBusy" :title="'用独立模型把题目截图复刻成图'" @click="retryFigEnhance(m)">🖼 {{ m.fig && m.fig.ok ? '重绘' : '图形增强' }}</button>
-                <button v-if="!m.err" @click="saveWrong(m)">📌 存错题</button>
+                <button v-if="!m.err" class="ma-state" :class="{ 'ma-done': m._wrongSaved }" :disabled="m._wrongSaved" :title="m._wrongSaved ? '这道题已存入错题集' : '把当前题目和原解析一并存入错题集'" @click="saveWrong(m)">📌 {{ m._wrongSaved ? '已存错题' : '存错题' }}</button>
 <button v-if="m._vt" @click="sameTypeAgain(m)">🔁 同型再练</button>
-                <button v-if="!m.err" @click="variantMenu = (variantMenu === m ? null : m)">🔁 变式题</button>
+                <button v-if="!m.err" :class="{ 'ma-open': variantMenu === m }" title="基于当前题生成同考点、不同设问的变式题" @click="variantMenu = (variantMenu === m ? null : m)">🔁 {{ variantMenu === m ? '选择难度' : '变式题' }}</button>
                 <template v-if="variantMenu === m">
-                  <button class="vt-diff" @click="doVariant(m, 'easy')">简单</button>
-                  <button class="vt-diff" @click="doVariant(m, 'mid')">中等</button>
-                  <button class="vt-diff" @click="doVariant(m, 'hard')">困难</button>
+                  <span class="vt-menu-label">变式难度</span>
+                  <button class="vt-diff" title="巩固基础方法，干扰项更明显" @click="doVariant(m, 'easy')">基础 · 巩固</button>
+                  <button class="vt-diff" title="贴近当前题目难度，练稳定性" @click="doVariant(m, 'mid')">提升 · 实战</button>
+                  <button class="vt-diff" title="增加干扰和综合度，练迁移能力" @click="doVariant(m, 'hard')">冲刺 · 迁移</button>
                 </template>
-                <button v-if="!m.err" @click="$emit('export-review')">📄 复盘</button>
-                <button title="基于这条回复继续追问" @click="followUp(m)">💬 追问</button>
-                <button title="收藏到我的笔记" @click="collectMsg(m)">📌 收藏</button>
-                <button :class="{ 'fb-on': m.fb === 1 }" title="这条回复对你有用" @click="toggleFb(m, 1)">👍</button>
-                <button :class="{ 'fb-on': m.fb === -1 }" title="这条回复需改进" @click="toggleFb(m, -1)">👎</button>
-                <button @click="copyMsg($event)">📋 复制</button>
-                <button @click="toggleSpeak($event)">🔊 朗读</button>
+                <button v-if="!m.err" title="把当前题目加入复盘/导出流程" @click="$emit('export-review', m)">📄 复盘</button>
+                <button title="保留当前上下文，把追问模板加入输入框（不会覆盖已有草稿）" @click="followUp(m)">💬 追问</button>
+                <button :class="{ 'ma-open': ttsUi.active && speakingMsgIndex === i }" :title="m._ttsCached ? '从本机永久缓存朗读，不重复请求 TTS' : '朗读这条回复，首次朗读会生成永久缓存'" @click="toggleSpeak($event)">🔊 {{ m._ttsCached ? '缓存朗读' : '朗读' }}</button>
                 <button v-if="speakingMsgIndex === i && speechPreparing" disabled>⏳ 准备讲稿…</button>
                 <button v-if="ttsUi.active && speakingMsgIndex === i" :title="ttsUi.paused ? '继续朗读（从暂停处接着读）' : '暂停朗读'" @click="toggleMsgPause()">{{ ttsUi.paused ? '▶ 继续' : '⏸ 暂停' }}</button>
                 <button v-if="ttsUi.active && speakingMsgIndex === i" :title="'消息朗读倍速：' + msgRatePct + '%（点击切换）'" @click="cycleMsgSpeed()">⏱ {{ msgRatePct }}%</button>
                 <button v-if="ttsUi.active && speakingMsgIndex === i" title="停止当前消息朗读" @click="stopMsgSpeak()">⏹ 停止</button>
-                <button v-if="m._ttsCached" title="这条语音已永久保存在本机缓存，可直接重读，不调用模型、不消耗 token" @click="replayMessageSpeech(m, i)">♻️ 永久重读</button>
-                <button title="把这条 AI 回复整屏截成高清图：发给同学/群里看（无需对方装本项目）" @click="capMsg(m, i)">📸 截图分享</button>
+                <button v-if="m._ttsCached" class="ma-done" title="永久缓存重读：不调用模型、不消耗 token" @click="replayMessageSpeech(m, i)">♻️ 永久重读</button>
+                <button class="ma-more-toggle" :class="{ 'ma-open': moreMenu[m.id] }" :aria-expanded="!!moreMenu[m.id]" title="更多回复操作" @click="toggleMore(m)">••• {{ moreMenu[m.id] ? '收起' : '更多' }}</button>
+                <template v-if="moreMenu[m.id]">
+                  <button class="ma-state" :class="{ 'ma-done': m._collected }" :title="m._collected ? '点击移除收藏' : '收藏到我的笔记'" @click="collectMsg(m)">📌 {{ m._collected ? '已收藏' : '收藏' }}</button>
+                  <button :class="{ 'fb-on': m.fb === 1 }" :aria-pressed="m.fb === 1" :title="m.fb === 1 ? '取消“有用”标记' : '这条回复对你有用'" @click="toggleFb(m, 1)">👍</button>
+                  <button :class="{ 'fb-on': m.fb === -1 }" :aria-pressed="m.fb === -1" :title="m.fb === -1 ? '取消“待改进”标记' : '这条回复需改进'" @click="toggleFb(m, -1)">👎</button>
+                  <button title="只复制回复正文，不带下方的功能按钮文字" @click="copyMsg($event)">📋 复制</button>
+                  <button title="生成带问题的整屏分享图，适合发给同学或群里" @click="capMsg(m, i)">📸 截图分享</button>
+                </template>
               </div>
 </template>
           </div>

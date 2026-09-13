@@ -1,6 +1,6 @@
 <script setup>
 // v3.8.195 6B·ChatPage 拆分：工具抽屉区（快捷入口/模式切换/历史工具）子组件
-import { toRefs, ref } from 'vue'
+import { toRefs, ref, computed } from 'vue'
 import ZhentiPdfLib from './ZhentiPdfLib.vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 const pdfLibShow = ref(false)
@@ -35,6 +35,23 @@ function startOneClickQuiz() {
   trainPickShow.value = false
   utilsOpen.value = false
   openExam.value('ai', { autoStart: true })
+}
+const wrongCount = computed(() => {
+  const s = props.ctx.store || {}
+  return Array.isArray(s.wqs) ? s.wqs.length : 0
+})
+const quickActions = computed(() => [
+  { id: 'ai', ic: '🎯', name: 'AI整卷模拟', desc: '一键生成真题级整卷', tone: '#5cc8ff' },
+  { id: 'single', ic: '⚡', name: '专项刷题', desc: (trainPlate.value || '综合') + ' · 答完即批', tone: '#34d399' },
+  { id: 'wrong', ic: '📚', name: '错题重练', desc: wrongCount.value ? wrongCount.value + ' 道错题待练' : '暂无错题，先刷几道', tone: '#fb7185' },
+  { id: 'daily', ic: '🌅', name: '每日必刷', desc: '资料+言语+判断 60 题', tone: '#f97316' },
+  { id: 'zhenti', ic: '📋', name: '真题快练', desc: '年份卷 / 板块筛选', tone: '#a78bfa' },
+  { id: 'import', ic: '📂', name: '导入材料', desc: '截图 / PDF 校对后入库', tone: '#22d3ee' }
+])
+function quickGo(id) {
+  if (id === 'ai') { startOneClickQuiz(); return }
+  if (id === 'import') { trainPickShow.value = false; utilsOpen.value = false; openExam.value('import'); return }
+  startTrainModule(id)
 }
 const {
   isNarrow,
@@ -88,12 +105,20 @@ const {
               </div>
             </div>
           </div>
+          <div class="ct-quick">
+            <button v-for="q in quickActions" :key="q.id" class="ct-quick-card" :style="{ borderColor: q.tone + '66', background: 'linear-gradient(135deg,' + q.tone + '18, rgba(255,255,255,.015))' }" @click="quickGo(q.id)">
+              <span class="ctq-ic" :style="{ color: q.tone, background: q.tone + '20' }">{{ q.ic }}</span>
+              <span class="ctq-txt"><b :style="{ color: q.tone }">{{ q.name }}</b><em>{{ q.desc }}</em></span>
+              <span class="ctq-arrow">›</span>
+            </button>
+          </div>
           <div class="train-bar">
-            <span class="tb-l">🎯 智能训练</span>
+            <span class="tb-l">🎯 出题板块</span>
             <select v-model="trainPlate" class="tb-sel" title="当前智能训练/出题板块">
               <option v-for="p in plates" :key="p" :value="p">{{ p }}</option>
             </select>
-            <button class="btn btn-pri tb-btn train-launch" title="统一刷题入口：AI真题模拟、专项提升、真题复习都在这里" @click="trainPickShow = true">🚀 开始刷题</button>
+            <span class="tb-status">当前错题 {{ wrongCount }} 道</span>
+            <button class="btn btn-gh tb-btn train-launch" title="查看全部训练方式" @click="trainPickShow = true">全部训练 ›</button>
           </div>
           <div class="train-utils">
             <button class="btn btn-gh tb-btn util-toggle" :aria-expanded="utilsOpen" @click="utilsOpen = !utilsOpen">

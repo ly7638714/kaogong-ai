@@ -6,16 +6,33 @@ import { renderMd } from '../utils/renderMd'
 import { showToast } from '../utils/toast'
 import { store, saveCfg } from '../store'
 import { answerLetter } from '../utils/quiz'
+import { markLearned } from '../utils/learned'
+import { cardMatchesWrongTaxon } from '../utils/wrongTaxonomy'
 import { pickGenCfg } from '../utils/fastMode'
-import { buildPlainTranslationPrompt, sanitizePlainTranslation } from '../utils/plainTranslate'
+import { buildPlainTranslationPrompt, sanitizePlainTranslation, translationKindLabel } from '../utils/plainTranslate'
 import { speak, stopSpeak, primeTts, TTS_ENGINES } from '../utils/tts'
 import AiLessonStage from './AiLessonStage.vue'
 
-const props = defineProps({ initialTab: { type: String, default: 'logic' }, initialText: { type: String, default: '' }, initialAnswer: { type: String, default: '' } })
+const props = defineProps({
+  initialTab: { type: String, default: 'logic' },
+  initialText: { type: String, default: '' },
+  initialAnswer: { type: String, default: '' },
+  initialSubject: { type: String, default: '' },
+  initialSub: { type: String, default: '' },
+  initialType: { type: String, default: '' },
+  mode: { type: String, default: 'both' }
+})
 const emit = defineEmits(['close'])
 const md = (t) => renderMd(t || '')
-const tab = ref(props.initialTab || 'logic')
+const standaloneMode = computed(() => props.mode === 'translation' || props.mode === 'video')
+const defaultTab = props.mode === 'video' ? 'video' : (props.mode === 'translation' ? 'logic' : (props.initialTab || 'logic'))
+const tab = ref(defaultTab)
 const logicText = ref(props.initialText || '')
+const logicFocus = ref('')
+const translateSubject = ref(props.initialSubject || '')
+const translateSub = ref(props.initialSub || '')
+const translateType = ref(props.initialType || '')
+const logicSourceRef = ref(null)
 const logicBusy = ref(false)
 const logicOut = ref('')
 const logicExpectedAnswer = ref(answerLetter(props.initialAnswer || '') || String(props.initialAnswer || '').trim())
@@ -27,6 +44,8 @@ const wrongs = computed(() => (store.wqs || []).slice(0, 80))
 const coursePlate = ref('all')
 const courseTeacher = ref('all')
 const courseKw = ref('')
+const topicMore = ref(false)
+const cacheTick = ref(0)
 const allTopics = computed(() => (CARDS || []).filter((c) => c && c.plate && c.type).map((c) => ({ plate: c.plate, card: c, id: c.id })))
 const coursePlates = computed(() => [...new Set(allTopics.value.map((t) => t.plate))])
 const courseTeachers = computed(() => [...new Set(allTopics.value.map((t) => t.card.source).filter(Boolean))])
@@ -37,6 +56,15 @@ const topics = computed(() => allTopics.value.filter((t) => {
   if (k && !JSON.stringify(t.card).includes(k)) return false
   return true
 }))
+const visibleTopics = computed(() => topicMore.value ? topics.value : topics.value.slice(0, 18))
+const cachedTopicCount = computed(() => {
+  cacheTick.value
+  const all = readLessonCache()
+  return allTopics.value.filter((t) => {
+    const hit = all[lessonCacheKey(t.card)]
+    return hit && hit.v === LESSON_CACHE_VERSION && hit.lesson && Array.isArray(hit.lesson.scenes)
+  }).length
+})
 const topic = ref(null)
 const lesson = ref(null)
 const lessonBusy = ref(false)
@@ -45,6 +73,7 @@ const playing = ref(false)
 const transcriptOpen = ref(false)
 const checkpointPick = ref('')
 const checkpointOk = ref(false)
+const sceneMastery = ref({})
 let playToken = 0
 const LESSON_CACHE_KEY = 'xc_micro_lesson_cache_v1'
 const LESSON_CACHE_VERSION = 1
@@ -52,6 +81,31 @@ const scenes = computed(() => (lesson.value && lesson.value.scenes) || [])
 const currentScene = computed(() => scenes.value[sceneIdx.value] || null)
 const progress = computed(() => (scenes.value.length ? ((sceneIdx.value + 1) / scenes.value.length) * 100 : 0))
 const lessonTitle = computed(() => (lesson.value && lesson.value.title) || '未生成课程')
+const courseObjective = computed(() => (lesson.value && lesson.value.objective) || (topic.value && topic.value.card && topic.value.card.tip) || '')
+const courseTakeaways = computed(() => (lesson.value && Array.isArray(lesson.value.takeaways) ? lesson.value.takeaways : []))
+const relatedWrongs = computed(() => topic.value ? (store.wqs || []).filter((q) => cardMatchesWrongTaxon(topic.value.card, q)).slice(0, 5) : [])
+const topicCached = computed(() => !!(topic.value && getCachedLesson(topic.value.card)))
+const courseStep = computed(() => lessonBusy.value ? 2 : (lesson.value ? 3 : (topic.value ? 2 : 1)))
+const sceneTypeLabel = computed(() => {
+  const t = currentScene.value && currentScene.value.type
+  return ({ hook: '导入', deep: '原理', flow: '流程', process: '步骤', example: '例题', compare: '辨析', checkpoint: '检查', trap: '避坑', summary: '总结', apply: '实战' })[t] || '讲解'
+})
+const translateTitle = computed(() => props.mode === 'translation' ? '🧭 题干与选项白话翻译' : '🎬 AI 动画微课 · 学懂而不是看过')
+const translateKindLabel = computed(() => translationKindLabel(translateSubject.value, translateSub.value))
+const translationChunks = computed(() => {
+  const raw = String(logicText.value || '')
+  const out = []
+  for (const line of raw.split(/\r?\n/)) {
+    const s = String(line || '').trim()
+    if (!s) continue
+    const parts = s.match(/[^。！？；]+[。！？；]?/g) || [s]
+    for (const part of parts) {
+      const t = String(part || '').trim()
+      if (t.length >= 2 && !out.includes(t)) out.push(t)
+    }
+  }
+  return out.slice(0, 12)
+})
 
 function stopNarration() { playToken++; try { stopSpeak() } catch (e) {} }
 function sceneNarration(sc) { return sc ? sc.title + '。' + sc.body + (sc.points || []).join('；') : '' }
@@ -72,6 +126,7 @@ function saveLessonCache(card, value) {
     all[lessonCacheKey(card)] = { v: LESSON_CACHE_VERSION, t: Date.now(), lesson: value }
     const rows = Object.entries(all).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).slice(0, 30)
     localStorage.setItem(LESSON_CACHE_KEY, JSON.stringify(Object.fromEntries(rows)))
+    cacheTick.value++
   } catch (e) {}
 }
 function ensureCompleteScript(text) {
@@ -182,7 +237,11 @@ async function play() {
     if (!playing.value || token !== playToken) break
     await waitSpeech(text)
     if (!playing.value || token !== playToken) break
-    if (sceneIdx.value >= scenes.value.length - 1) { playing.value = false; break }
+    if (sceneIdx.value >= scenes.value.length - 1) {
+      playing.value = false
+      if (topic.value && topic.value.card && topic.value.card.id) { try { markLearned(topic.value.card.id) } catch (e) {} }
+      break
+    }
     sceneIdx.value++
   }
 }
@@ -200,6 +259,42 @@ function gotoScene(i) {
 }
 function prev() { gotoScene(sceneIdx.value - 1) }
 function next() { gotoScene(sceneIdx.value + 1) }
+function replayScene() { gotoScene(sceneIdx.value) }
+function markSceneUnderstood(ok) {
+  const i = sceneIdx.value
+  sceneMastery.value = Object.assign({}, sceneMastery.value, { [i]: !!ok })
+  if (ok) {
+    if (i < scenes.value.length - 1) next()
+    return
+  }
+  showToast('已标记“还不懂”，会重播本幕；可继续点“让老师再举例”做迁移。', 'info')
+  replayScene()
+}
+function askCurrentScene() {
+  if (!topic.value || !currentScene.value) return
+  const card = topic.value.card
+  store.pendingAsk = '我正在学习微课「' + card.type + '」的这一幕：' + currentScene.value.title + '。' +
+    '场景讲解：' + currentScene.value.body + '。请针对这一幕继续深挖：先指出我刚才最可能误解的点，再用一个更简单的生活化例子讲清，最后给我一个立刻可做的小检查。'
+  store.tab = 'chat'
+  emit('close')
+}
+function askWithMyWrong() {
+  const card = topic.value && topic.value.card
+  if (!card) return
+  const sample = relatedWrongs.value[0]
+  store.pendingAsk = sample
+    ? '请用我的这道错题来讲透知识卡「' + card.type + '」：' + String(sample.question || sample.q || sample.stem || '').slice(0, 1200) + '\n先让我自己判断，再逐步引导我找到知识卡中的方法和我的错因，不要一上来给答案。'
+    : '请围绕「' + card.type + '」现场编一道我可能做错的题，先让我作答，再逐步讲透。'
+  store.tab = 'chat'
+  emit('close')
+}
+function cycleRate() {
+  const rates = [0.75, 1, 1.1, 1.2, 1.3, 1.5, 1.8, 2]
+  const cur = Number(store.cfg.ttsRate) || 1
+  const i = rates.findIndex((x) => Math.abs(x - cur) < 0.01)
+  store.cfg.ttsRate = rates[(i + 1 + rates.length) % rates.length]
+  saveCfg()
+}
 function checkPoint(k) {
   const sc = currentScene.value
   checkpointPick.value = k
@@ -229,6 +324,8 @@ function localLesson(card) {
   const type = card.type || '核心方法'
   return {
     title: plate + ' · ' + type,
+    objective: '学完后能独立识别「' + type + '」的信号，按步骤处理题目，并说清最容易错在哪里。',
+    takeaways: [card.tip || '先判题型，再走方法步骤。', (card.steps || [])[0] || '把方法落到第一步动作。', (card.traps || [])[0] || '警惕主体、方向、范围和力度陷阱。'],
     scenes: [
       { type: 'hook', icon: '🎯', title: '这道题真正考什么', body: '不是背概念，而是识别命题结构。', points: ['识别信号：' + (card.signs || []).join('；'), '考试目标：把材料翻译成可判断的结构'] },
       { type: 'deep', icon: '🔬', title: '为什么这个方法成立', body: (card.detail || card.tip || '先找论据与结论的共同话题，再判断选项是连接、切断还是偷换。'), points: ['先看命题人改变哪一块', '再判断选项作用方向', '最后比较力度和范围'] },
@@ -252,7 +349,7 @@ async function buildLesson() {
   const card = topic.value.card
   try {
     const sys = '你是行测动画微课导演。把知识卡设计成一节真正能教会考生的动画微课，不要PPT提纲。只输出 JSON。'
-    const user = '请围绕：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail, example: card.example }) + '\n输出：{"title":"课程名","scenes":[...]}，共 9-11 个场景。每个场景字段：type(hook|deep|flow|process|example|compare|checkpoint|trap|summary|apply), icon, title, body, points(数组), example(可选对象{q,opts,answer,path}), options(可选数组{k,t}), answer(可选), explain(可选)。要求：必须包含至少1个deep深度讲解场景和至少1个example例题场景；例题优先使用提供知识卡里的 example，若没有则自行设计一个最小可验证例题并明确写出答案和路径；讲解要干练准确，不说空话；最后再放交互检查点、陷阱和实战动作。禁止只是复述知识卡字段。'
+    const user = '请围绕：' + JSON.stringify({ plate: card.plate, type: card.type, signs: card.signs, steps: card.steps, traps: card.traps, tip: card.tip, detail: card.detail, example: card.example }) + '\n输出：{"title":"课程名","objective":"学完能做到什么","takeaways":["可迁移结论1","可迁移结论2","可迁移结论3"],"scenes":[...]}，共 9-11 个场景。每个场景字段：type(hook|deep|flow|process|example|compare|checkpoint|trap|summary|apply), icon, title, body, points(数组), example(可选对象{q,opts,answer,path}), options(可选数组{k,t}), answer(可选), explain(可选)。要求：objective 必须写成可检验的学习结果；takeaways 必须短、准、可迁移；必须包含至少1个deep深度讲解场景和至少1个example例题场景；例题优先使用提供知识卡里的 example，若没有则自行设计一个最小可验证例题并明确写出答案和路径；讲解要干练准确，不说空话；最后再放交互检查点、陷阱和实战动作。禁止只是复述知识卡字段。'
     const reply = await callText([{ role: 'system', content: sys }, { role: 'user', content: user }], 1800, 60000)
     const m = String(reply || '').match(/\{[\s\S]*\}/)
     const parsed = m ? JSON.parse(m[0]) : null
@@ -307,17 +404,44 @@ async function recognizeImage(ev) {
 function pickWrong() {
   const q = wrongs.value.find((x) => String(x.id) === String(wrongPick.value))
   if (!q) return
-  logicText.value = String(q.question || '')
+  const opts = Array.isArray(q.options) ? q.options.map((o) => String((o && o.k) || '') + '. ' + String((o && (o.t || o)) || '')).join('\n') : ''
+  logicText.value = String(q.question || '') + (opts ? '\n\n' + opts : '')
   logicExpectedAnswer.value = answerLetter(q.answer || '') || String(q.answer || '').trim()
+  translateSubject.value = String(q.subject || q.plate || '')
+  translateSub.value = String(q.subx || q.sub || '')
+  translateType.value = String(q.variant || q.vx || '')
   showToast('已把错题带入翻译，答案字段单独锁定', 'success')
 }
-async function translate() {
+function selectedTranslationText() {
+  const el = logicSourceRef.value
+  if (!el || typeof el.selectionStart !== 'number' || el.selectionStart === el.selectionEnd) return ''
+  return String(logicText.value || '').slice(el.selectionStart, el.selectionEnd).trim()
+}
+function captureSelected() {
+  const s = selectedTranslationText()
+  if (!s) { showToast('请先在题目文本中划选一个词、句子或选项', 'info'); return '' }
+  logicFocus.value = s
+  return s
+}
+function translateSelection() {
+  const s = captureSelected()
+  if (s) translate(s)
+}
+function translateChunk(text) {
+  logicFocus.value = String(text || '').trim()
+  if (logicFocus.value) translate(logicFocus.value)
+}
+async function translate(focus = '') {
   const q = logicText.value.trim()
   if (!q) { showToast('请先粘贴题目、导入截图或从错题集选择', 'info'); return }
   logicBusy.value = true
   logicOut.value = ''
   try {
-    const prompt = buildPlainTranslationPrompt(q, logicExpectedAnswer.value)
+    const prompt = buildPlainTranslationPrompt(q, logicExpectedAnswer.value, focus, {
+      subject: translateSubject.value,
+      sub: translateSub.value,
+      type: translateType.value
+    })
     const out = await callText([{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }], 1400, 60000)
     const clean = sanitizePlainTranslation(out)
     logicOut.value = clean || '模型没有返回可用的白话翻译，请重试；本次不会用原解析或答案内容顶替。'
@@ -336,48 +460,74 @@ onUnmounted(() => { stopNarration() })
 </script>
 
 <template>
-  <div class="ov show at-ov" @click.self="emit('close')">
+  <div class="ov show at-ov" :class="{ 'at-standalone': standaloneMode }" @click.self="emit('close')">
     <div ref="panelRef" class="pnl at-pnl">
       <div class="at-head">
-        <button class="pnl-top-b" @click="emit('close')">← 返回知识库</button>
-        <b class="at-title">🎬 AI 动画微课 · 学懂而不是看过</b>
-        <button class="btn btn-gh" title="全屏观看动画" @click="toggleFullscreen()">⛶ 全屏</button>
+        <button class="pnl-top-b" @click="emit('close')">{{ mode === 'translation' ? '← 返回错题详解' : '← 返回知识库' }}</button>
+        <b class="at-title">{{ translateTitle }}</b>
+        <button v-if="mode !== 'translation'" class="btn btn-gh" title="全屏观看动画" @click="toggleFullscreen()">⛶ 全屏</button>
         <button class="pc-close" @click="emit('close')">✕</button>
       </div>
-      <div class="at-tabs">
+      <div v-if="mode === 'both'" class="at-tabs">
         <button class="btn" :class="tab === 'logic' ? 'btn-pri' : 'btn-gh'" @click="tab = 'logic'">🧭 逻辑题干白话翻译</button>
         <button class="btn" :class="tab === 'video' ? 'btn-pri' : 'btn-gh'" @click="tab = 'video'">🎬 交互式动画微课</button>
       </div>
 
       <div v-if="tab === 'logic'" class="at-logic">
-        <div class="at-logic-tools">
+        <div v-if="mode !== 'translation'" class="at-logic-tools">
           <button class="btn btn-gh" :disabled="imageBusy" @click="fileInput && fileInput.click()">{{ imageBusy ? '⏳ 识别中' : '📷 导入题目截图' }}</button>
           <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="recognizeImage" />
           <select v-model="wrongPick" class="tb-sel" @change="pickWrong()"><option value="">📋 从错题集选择</option><option v-for="q in wrongs" :key="q.id" :value="q.id">{{ (q.subject || '错题') + ' · ' + String(q.question || '').slice(0, 34) }}</option></select>
         </div>
-        <div v-if="logicExpectedAnswer" class="at-locked">🔒 已带入错题集答案字段，但翻译模式只解释题干概念，不判断、不解释、不改写答案</div>
-        <textarea v-model="logicText" rows="8" class="pv-edit" placeholder="粘贴逻辑判断题：题干 + 选项，或导入截图/从错题集选择。只翻译难懂概念和句意，不复述原解析"></textarea>
-        <div class="at-logic-acts"><button class="btn btn-pri" :disabled="logicBusy" @click="translate()">{{ logicBusy ? '⏳ 正在翻译…' : '🧭 只翻译难懂概念' }}</button></div>
+        <div class="at-translate-mode"><span>当前结构：{{ translateKindLabel }}</span><span v-if="translateSub || translateType">{{ [translateSub, translateType].filter(Boolean).join(' · ') }}</span></div>
+        <div v-if="logicExpectedAnswer" class="at-locked">🔒 已带入错题集答案字段，但翻译模式只解释题干、选项和局部表达，不判断、不解释、不改写答案</div>
+        <div class="at-select-help"><span>可直接在题目中划选任意词、句子或选项，再点“翻译选中内容”；也可以点下方片段直接解释。</span><button class="btn btn-gh" :disabled="logicBusy" @click="translateSelection()">🔎 翻译选中内容</button></div>
+        <textarea ref="logicSourceRef" v-model="logicText" rows="11" class="pv-edit at-source-text" placeholder="粘贴任意行测题：题干 + 选项。可划选一小段，也可以整题翻译。"></textarea>
+        <div v-if="translationChunks.length" class="at-chunk-row">
+          <button v-for="(c, i) in translationChunks" :key="i" class="at-chunk" :disabled="logicBusy" :title="c" @click="translateChunk(c)">{{ c.length > 36 ? c.slice(0, 36) + '…' : c }}</button>
+        </div>
+        <div class="at-focus-row">
+          <input v-model="logicFocus" class="pv-edit" placeholder="也可以手动输入：要解释的词 / 句子 / A-D选项内容" @keydown.enter="logicFocus && translate(logicFocus)" />
+          <button class="btn btn-gh" :disabled="logicBusy || !logicFocus.trim()" @click="translate(logicFocus)">只解释这一段</button>
+        </div>
+        <div class="at-logic-acts">
+          <button class="btn btn-pri" :disabled="logicBusy" @click="translate('')">{{ logicBusy ? '⏳ 正在翻译…' : '🧭 整题翻译' }}</button>
+          <button class="btn btn-gh" :disabled="logicBusy || !logicFocus.trim()" @click="translate(logicFocus)">翻译指定片段</button>
+        </div>
         <div v-if="logicOut" class="at-logic-out" v-html="md(logicOut)"></div>
       </div>
 
       <div v-else class="at-video">
+        <div class="at-learning-path">
+          <span :class="{ on: courseStep === 1, done: courseStep > 1 }">1 选题</span><i>→</i>
+          <span :class="{ on: courseStep === 2, done: courseStep > 2 }">2 生成课程与讲稿</span><i>→</i>
+          <span :class="{ on: courseStep === 3 }">3 跟老师学懂</span><i>→</i>
+          <span>4 检查与实战</span>
+        </div>
         <div class="at-course-filters">
           <select v-model="coursePlate" class="tb-sel"><option value="all">全部板块</option><option v-for="p in coursePlates" :key="p" :value="p">{{ p }}</option></select>
           <select v-model="courseTeacher" class="tb-sel"><option value="all">全部老师/来源</option><option v-for="t in courseTeachers" :key="t" :value="t">{{ t }}</option></select>
           <input v-model="courseKw" class="pv-edit" placeholder="搜索知识点 / 题型 / 口诀 / 步骤…" />
-          <span class="at-count">共 {{ topics.length }} / {{ allTopics.length }} 个知识点</span>
+          <span class="at-count">共 {{ topics.length }} / {{ allTopics.length }} 个知识点 · 已缓存 {{ cachedTopicCount }}</span>
         </div>
         <div class="at-topics">
-          <button v-for="t in topics" :key="t.id || t.plate + t.card.type" class="shelf-tab" :class="{ on: topic && topic.id === t.id }" @click="selectTopic(t)">{{ t.plate }} · {{ t.card.type }}<small v-if="t.card.source"> · {{ t.card.source }}</small></button>
+          <button v-for="t in visibleTopics" :key="t.id || t.plate + t.card.type" class="shelf-tab" :class="{ on: topic && topic.id === t.id }" @click="selectTopic(t)">{{ t.plate }} · {{ t.card.type }}<small v-if="t.card.source"> · {{ t.card.source }}</small></button>
+          <button v-if="topics.length > visibleTopics.length || topicMore" class="shelf-tab at-more" @click="topicMore = !topicMore">{{ topicMore ? '收起列表' : '展开全部 ' + topics.length + ' 个' }}</button>
         </div>
         <div v-if="topic" class="at-course-head">
-          <div><b>{{ topic.card.type }}</b><span>{{ topic.card.tip }}<template v-if="lesson"> · {{ lesson.scripts && lesson.scripts.length ? '✅ 全套讲稿已缓存' : '⚠️ 未生成讲稿' }}</template></span></div>
+          <div><b>{{ topic.card.type }}</b><span>{{ topic.card.tip }}<template v-if="topicCached"> · ⚡ 本地已缓存，可秒开</template><template v-else> · 首次生成后会永久缓存，后续不重复消耗 token</template></span></div>
           <button class="btn btn-pri" :disabled="lessonBusy" @click="buildLesson()">{{ lessonBusy ? '⏳ AI 一次性生成课程与讲稿…' : lesson ? '🔄 重新生成课程与讲稿' : '✨ 生成深度微课与讲稿' }}</button>
         </div>
         <template v-if="lesson">
+          <div class="at-course-brief">
+            <div class="acb-goal"><span>🎯 学完目标</span><b>{{ courseObjective }}</b></div>
+            <div v-if="courseTakeaways.length" class="acb-points"><span>🧠 本课带走的结论</span><div><em v-for="(t,i) in courseTakeaways" :key="'take-'+i">{{ t }}</em></div></div>
+            <div v-if="relatedWrongs.length" class="acb-wrong"><span>📋 我的关联错题 {{ relatedWrongs.length }} 道</span><b>{{ String(relatedWrongs[0].question || relatedWrongs[0].q || '').slice(0, 72) }}</b></div>
+          </div>
+          <div class="at-learning-grid">
+          <div class="at-learning-main">
           <div class="at-stage">
-            <div class="at-stage-hd"><b>{{ lessonTitle }}</b><span>{{ sceneIdx + 1 }} / {{ scenes.length }}</span></div>
+            <div class="at-stage-hd"><b>{{ lessonTitle }}</b><span>{{ sceneTypeLabel }} · {{ sceneIdx + 1 }} / {{ scenes.length }}</span></div>
             <AiLessonStage :scene="currentScene" :playing="playing" :scene-index="sceneIdx" />
             <div v-if="currentScene && currentScene.type === 'checkpoint'" class="at-check">
               <button v-for="o in currentScene.options || []" :key="o.k" class="coach-opt" :class="{ on: checkpointPick === o.k, right: checkpointOk && checkpointPick === o.k, wrong: checkpointPick === o.k && !checkpointOk }" @click="checkPoint(o.k)"><b>{{ o.k }}</b><span>{{ o.t }}</span></button>
@@ -390,6 +540,11 @@ onUnmounted(() => { stopNarration() })
             <button v-if="!playing" class="btn btn-pri" @click="play()">▶ 播放</button>
             <button v-else class="btn btn-gh" @click="pause()">⏸ 暂停</button>
             <button class="btn btn-gh" @click="next()">⏭</button>
+            <button class="btn btn-gh" title="重播当前这一幕" @click="replayScene()">↺ 重播本幕</button>
+            <button class="btn btn-gh" title="本幕听懂了，进入下一幕" @click="markSceneUnderstood(true)">✅ 我懂了</button>
+            <button class="btn btn-gh" title="本幕还没懂，重播并标记" @click="markSceneUnderstood(false)">🤔 还不懂</button>
+            <button class="btn btn-gh" title="让 AI 针对本幕继续解释" @click="askCurrentScene()">❓ 追问本幕</button>
+            <button class="btn btn-gh" title="调整讲课语速" @click="cycleRate()">⏱ {{ Math.round((Number(store.cfg.ttsRate) || 1) * 100) }}%</button>
             <button class="btn btn-gh" @click="transcriptOpen = !transcriptOpen">{{ transcriptOpen ? '收起字幕' : '显示字幕' }}</button>
             <label class="at-ai-script"><input v-model="store.cfg.microScriptOn" type="checkbox" @change="saveCfg()" /> AI讲课稿</label>
             <select v-model="store.cfg.ttsMode" class="tb-sel" title="选择微课朗读音色引擎；与对话/萌宠共用全局语音设置" @change="saveCfg()">
@@ -398,38 +553,88 @@ onUnmounted(() => { stopNarration() })
             <span class="at-free">{{ lesson.scripts && lesson.scripts.length ? '✅ 全套讲稿已缓存 · 语音读完才进入下一幕' : '🔊 语音读完才进入下一幕' }}</span>
           </div>
           <div v-if="transcriptOpen" class="at-transcript"><div v-for="(s, i) in scenes" :key="i" :class="{ cur: i === sceneIdx }" @click="gotoScene(i)"><b>{{ i + 1 }}. {{ s.title }}</b><span>{{ s.body }}</span></div></div>
+          </div>
+          <aside class="at-outline">
+            <div class="at-outline-hd"><b>🧭 课程大纲</b><span>{{ scenes.length }} 幕</span></div>
+            <button v-for="(s, i) in scenes" :key="'outline-' + i" class="at-outline-item" :class="{ on: i === sceneIdx, done: sceneMastery[i] === true || i < sceneIdx, unsure: sceneMastery[i] === false }" @click="gotoScene(i)">
+              <i>{{ sceneMastery[i] === true ? '✓' : i + 1 }}</i><span><b>{{ s.title }}</b><em>{{ s.type || 'flow' }}{{ sceneMastery[i] === false ? ' · 待回看' : '' }}</em></span>
+            </button>
+            <div class="at-outline-tip">🎯 目标：不是“看过”，而是能复述结构、说明步骤、独立做对同类题。</div>
+          </aside>
+          </div>
           <div class="at-actions">
-            <button class="btn btn-gh" @click="tab = 'logic'; logicText = topic.card.type + '：' + (topic.card.detail || topic.card.tip || '')">🧭 用翻译拆这道题</button>
+            <button v-if="topic" class="btn btn-pri" @click="askWithMyWrong()">{{ relatedWrongs.length ? '🧩 用我的错题讲这节' : '🧩 用一道题检验这节' }}</button>
+            <button v-if="topic" class="btn btn-pri" @click="askExample(topic.card)">📚 让老师再举一例</button>
             <button class="btn btn-gh" @click="goPractice()">🎲 去 AI 出题练</button>
             <button class="btn btn-gh" @click="goWrong()">📋 去错题集复练</button>
           </div>
         </template>
-        <div v-else class="at-empty">选一个板块主题，再点「生成深度微课与讲稿」。系统会一次生成全套教师讲稿并缓存，播放时直接读取，不再逐幕临时生成。</div>
+        <div v-else class="at-empty"><b>从上方选一个知识点开始</b><span>首次生成：AI 将一次完成知识结构、深度讲解、例题、检查点与全套教师讲稿；生成后永久缓存，后续直接播放。</span></div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.at-ov { z-index: 450; }
-.at-pnl { width: 100vw; height: 100dvh; max-height: none; overflow: auto; padding: 12px 18px; border-radius: 0; }
+.at-ov { z-index: 450; padding:0 !important; align-items:stretch !important; justify-content:stretch !important; }
+.at-pnl { flex:0 0 100vw; margin:0; width: 100vw !important; max-width: 100vw !important; height: 100dvh; max-height: none !important; overflow: auto; padding: 14px clamp(14px, 3vw, 42px) 28px; border-radius: 0; box-sizing: border-box; }
+.at-logic, .at-video { width: 100%; max-width: 100%; box-sizing: border-box; }
 .at-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .at-title { font-size: calc(17px * var(--ui-fs-scale, 1)); color: var(--accent); }
 .at-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
 .at-logic-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .at-locked { margin: 6px 0; padding: 7px 9px; border: 1px solid rgba(251,191,36,.45); background: rgba(251,191,36,.1); color: #fbbf24; border-radius: 8px; font-size: calc(12px * var(--ui-fs-scale, 1)); line-height: 1.6; }
-.at-logic textarea, .at-logic .pv-edit { width: 100%; resize: vertical; }
-.at-logic-acts { margin: 8px 0; }
-.at-logic-out { margin-top: 10px; border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; background: var(--glass-bg); line-height: 1.85; font-size: calc(13px * var(--ui-fs-scale, 1)); }
+.at-logic textarea, .at-logic .pv-edit { width: 100%; resize: vertical; box-sizing: border-box; }
+.at-translate-mode { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; color:var(--text3); font-size:calc(12px * var(--ui-fs-scale, 1)); margin:2px 0 7px; }
+.at-select-help { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:8px 10px; margin-bottom:7px; border:1px dashed var(--glass-border-hi); border-radius:9px; background:var(--accent2); color:var(--text2); font-size:calc(12px * var(--ui-fs-scale, 1)); line-height:1.55; }
+.at-select-help span { flex:1; min-width:240px; }
+.at-source-text { min-height:250px !important; max-height:none !important; line-height:1.75 !important; font-size:calc(14px * var(--ui-fs-scale, 1)) !important; user-select:text; }
+.at-chunk-row { display:flex; gap:6px; flex-wrap:wrap; max-height:112px; overflow:auto; margin:7px 0; padding:7px; border:1px solid var(--glass-border); border-radius:9px; background:var(--glass-bg); }
+.at-chunk { max-width:min(100%,440px); padding:5px 8px; border:1px solid var(--glass-border); border-radius:999px; background:var(--surface); color:var(--text2); font:inherit; font-size:calc(11.5px * var(--ui-fs-scale, 1)); text-align:left; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.at-chunk:hover { color:var(--accent); border-color:var(--glass-border-hi); }
+.at-focus-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:7px 0; }
+.at-focus-row .pv-edit { flex:1; min-width:min(520px, 100%); }
+.at-logic-acts { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+.at-logic-out { width:100%; max-width:100%; margin-top:10px; border:1px solid var(--glass-border); border-radius:10px; padding:10px 12px; background:var(--glass-bg); line-height:1.85; font-size:calc(13px * var(--ui-fs-scale, 1)); box-sizing:border-box; overflow-wrap:anywhere; }
 .at-topics { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.at-learning-path { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:10px; padding:8px 10px; border:1px solid var(--glass-border); border-radius:10px; background:var(--glass-bg); color:var(--text3); font-size:calc(11.5px * var(--ui-fs-scale, 1)); }
+.at-learning-path span { padding:4px 9px; border-radius:999px; border:1px solid transparent; }
+.at-learning-path span.on { color:var(--accent); border-color:var(--glass-border-hi); background:var(--accent2); font-weight:800; }
+.at-learning-path span.done { color:var(--state-success-text); border-color:var(--state-success-border); background:var(--state-success-bg); }
+.at-learning-path i { color:var(--text3); font-style:normal; }
 .at-course-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-bottom: 10px; padding: 9px 11px; border: 1px solid var(--glass-border); border-radius: 10px; }
 .at-course-head div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .at-course-head span { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .at-course-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .at-course-filters .pv-edit { flex: 1; min-width: 190px; }
 .at-count { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
-.at-topics { max-height: 150px; overflow: auto; }
+.at-topics { max-height: 126px; overflow: auto; }
 .at-topics small { opacity: .65; }
+.at-topics .at-more { color:var(--accent); border-style:dashed; }
+.at-learning-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,300px); gap:12px; align-items:start; }
+.at-course-brief { display:grid; gap:7px; margin-bottom:10px; padding:10px 12px; border:1px solid var(--glass-border-hi); border-radius:11px; background:linear-gradient(135deg,var(--accent2),var(--glass-bg)); }
+.at-course-brief > div { display:flex; align-items:flex-start; gap:8px; min-width:0; }
+.at-course-brief span { flex:0 0 auto; color:var(--text3); font-size:calc(11px * var(--ui-fs-scale, 1)); font-weight:800; }
+.at-course-brief b { color:var(--text); font-size:calc(12px * var(--ui-fs-scale, 1)); line-height:1.55; }
+.acb-points > div { display:flex; flex-wrap:wrap; gap:5px; }
+.acb-points em { padding:3px 8px; border-radius:999px; background:var(--surface); border:1px solid var(--glass-border); color:var(--text2); font-style:normal; font-size:calc(10.5px * var(--ui-fs-scale, 1)); }
+.acb-wrong { padding-top:6px; border-top:1px dashed var(--glass-border); }
+.acb-wrong b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.at-learning-main { min-width:0; }
+.at-outline { position:sticky; top:0; max-height:calc(100dvh - 190px); overflow:auto; padding:10px; border:1px solid var(--glass-border); border-radius:12px; background:var(--glass-bg); }
+.at-outline-hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.at-outline-hd b { color:var(--text); font-size:calc(13px * var(--ui-fs-scale, 1)); }
+.at-outline-hd span { color:var(--text3); font-size:calc(11px * var(--ui-fs-scale, 1)); }
+.at-outline-item { display:flex; align-items:flex-start; gap:8px; width:100%; padding:7px 8px; margin-bottom:4px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text2); font:inherit; text-align:left; cursor:pointer; }
+.at-outline-item:hover { background:var(--accent2); border-color:var(--glass-border); }
+.at-outline-item.on { color:var(--accent); background:var(--accent2); border-color:var(--glass-border-hi); }
+.at-outline-item.done { color:var(--state-success-text); }
+.at-outline-item.unsure { color:var(--state-warning-text); border-color:var(--state-warning-border); background:var(--state-warning-bg); }
+.at-outline-item > i { flex:0 0 22px; width:22px; height:22px; display:grid; place-items:center; border-radius:50%; background:var(--surface); font-style:normal; font-size:calc(10.5px * var(--ui-fs-scale, 1)); }
+.at-outline-item > span { display:grid; gap:2px; min-width:0; }
+.at-outline-item b { font-size:calc(11.5px * var(--ui-fs-scale, 1)); line-height:1.4; }
+.at-outline-item em { color:var(--text3); font-style:normal; font-size:calc(9.5px * var(--ui-fs-scale, 1)); }
+.at-outline-tip { margin-top:8px; padding-top:8px; border-top:1px dashed var(--glass-border); color:var(--text3); font-size:calc(10.5px * var(--ui-fs-scale, 1)); line-height:1.55; }
 .at-teacher { position: relative; width: 126px; height: 128px; margin: 0 auto 8px; animation: teacherFloat 2.4s ease-in-out infinite; }
 .at-teacher-head { position: absolute; left: 39px; top: 18px; width: 48px; height: 50px; border-radius: 45% 45% 48% 48%; background: #f3c7a7; border: 2px solid rgba(30,41,59,.35); z-index: 2; }
 .at-teacher-hair { position: absolute; left: 35px; top: 8px; width: 56px; height: 33px; border-radius: 50% 50% 35% 35%; background: #263244; z-index: 3; }
@@ -468,11 +673,14 @@ onUnmounted(() => { stopNarration() })
 .at-transcript div.cur { background: rgba(34,211,238,.1); }
 .at-transcript span { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .at-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.at-empty { color: var(--text3); padding: 30px 0; text-align: center; }
+.at-empty { display:grid; gap:6px; color: var(--text3); padding: 34px 18px; text-align: center; border:1px dashed var(--glass-border); border-radius:12px; background:var(--glass-bg); }
+.at-empty b { color:var(--text); font-size:calc(15px * var(--ui-fs-scale, 1)); }
+.at-empty span { line-height:1.7; }
 .coach-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); border-radius: 9px; padding: 8px 10px; font: inherit; cursor: pointer; }
 .coach-opt span { color: var(--text3); font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .coach-opt.on { border-color: var(--accent); background: rgba(34,211,238,.1); }
 .coach-opt.right { border-color: #34d399; }
 .coach-opt.wrong { border-color: #fb7185; }
-@media (max-width: 640px) { .at-pnl { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; } .at-free { margin-left: 0; } .at-course-head { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 900px) { .at-learning-grid { grid-template-columns:1fr; } .at-outline { position:static; max-height:240px; } }
+@media (max-width: 640px) { .at-pnl { width:100vw !important; max-width:100vw !important; height:100dvh; max-height:100dvh !important; padding:10px 10px calc(16px + env(safe-area-inset-bottom)); } .at-free { margin-left: 0; } .at-course-head { align-items: flex-start; flex-direction: column; } .at-select-help span { min-width:100%; } .at-source-text { min-height:44vh !important; } .at-focus-row .pv-edit { min-width:100%; } .at-course-filters > * { flex:1 1 100%; } .at-learning-path { gap:4px; overflow-x:auto; flex-wrap:nowrap; } }
 </style>

@@ -8,9 +8,10 @@ import { petFeatureText, petDetectUi, DATA_TRAIN_INDEX } from './petKnowledge'
 import { renderCards } from '../kb/retrieve'
 import { retrieveDetailed } from '../kb/retrieveV2'
 import { confusableHints } from './intentProbe'
-import { profileLine } from './petProfile'
+import { buildPetDashboard } from './petProfile'
 import { kbFlowHead } from './kbFlow'
 import { speakReadyText } from './speechScript'
+import { loadCheckinState, currentStreak } from './checkin'
 
 const KEY = 'xc_pet'
 const STAGES = [
@@ -120,8 +121,7 @@ export const petStats = computed(() => {
   const digested = store.wqs.filter((q) => q.digested).length
   let streak = 0
   try {
-    const s = JSON.parse(localStorage.getItem('xc_streak') || '{"n":0}')
-    streak = s.n || 0
+    streak = currentStreak(loadCheckinState(localStorage))
   } catch (e) {}
   return { asks, answers, wrongs, reviewed, digested, streak }
 })
@@ -658,7 +658,12 @@ export function petPersona() {
   const plate = petDetectPlate()
   const kb = petBuildKnowledge(plate)
   const mem = petMemCompact()
-  const weakLine = profileLine(store.wqs || [], 2)
+  let todayChecked = false
+  try { todayChecked = loadCheckinState(localStorage).last === new Date().toLocaleDateString('sv-SE') } catch (e) {}
+  const dash = buildPetDashboard({ msgs: store.msgs || [], wqs: store.wqs || [], streak: s.streak, todayChecked })
+  const focusLine = dash.focusType
+    ? '最需要关注：' + dash.weak.label + ' / ' + dash.focusSub.sub + ' / ' + dash.focusType.type + '（错 ' + dash.focusType.wrongs + ' 道、复错 ' + dash.focusType.repeated + ' 次）'
+    : (dash.weak ? '最需要关注：' + dash.weak.label : '')
   const skin = petSkin.value
   const custom = skin && skin.custom ? (petCustomData(skin.id) || {}) : null
   const skinName = custom ? (custom.name || '自定义人物') : (skin ? skin.name : '')
@@ -680,7 +685,7 @@ export function petPersona() {
     dataIdx +
     qcNote +
     '\n\n【用户个人记忆库（作答可引用，用户积累的常识/时政/成语/实词/笔记）】\n' + mem +
-    '\n\n【当前上下文】当前板块：' + (plate || '综合') + '；用户累计提问 ' + s.asks + ' 次、问答 ' + s.answers + ' 次、错题 ' + s.wrongs + ' 道、已复盘 ' + s.reviewed + ' 道、连续打卡 ' + s.streak + ' 天，目标行测 ' + goal + ' 分' + (weakLine ? '；' + weakLine : '') + '。' +
+    '\n\n【当前上下文】当前板块：' + (plate || '综合') + '；用户累计提问 ' + s.asks + ' 次、问答 ' + s.answers + ' 次、错题 ' + s.wrongs + ' 道、已复盘 ' + s.reviewed + ' 道、待复盘 ' + dash.overall.unreviewed + ' 道、到期 ' + dash.overall.due + ' 道、连续打卡 ' + s.streak + ' 天，目标行测 ' + goal + ' 分' + (focusLine ? '；' + focusLine : '') + '。' +
     '\n\n【回答要求】语气亲切有温度，可用少量 emoji；用户问功能/入口时按【本项目功能百科】准确回答；讲题时先判题型，再按上面名师方法论分步（考点结构→正确项逻辑→干扰项陷阱→结论），表达口语化、讲透为止（100-300字）；聊天/规划/鼓励类回复保持简短（60-150字）；涉及老师方法只讲真实公认内容，不确定就如实说明；自然地结合用户数据鼓励，不罗列数据。'
 }
 export async function petAsk(text, opts = {}) {

@@ -109,13 +109,14 @@ function ensureSpeechBoundary(line) {
 }
 
 // 分块之间的停顿时长：文本先补过边界标点，这里据此调度真实静音，避免“无标点连读”
+// 【v3.8.332】按标点语义重设：原先统一 10~45ms，叠加块尾仅保留的 30ms 后净停顿不足 100ms，
+// 远低于真人换气（句号后通常 200~350ms）→ 听感“抢话、连读”。现按标点分级。
 export function speechPauseMs(text) {
   const t = String(text || '').trim()
-  // 分块音频本身已有自然收尾；调度层只补极短呼吸感，避免把独立 TTS 分块听成一句一顿。
-  if (/[。！？…]$/.test(t)) return 45
-  if (/[；;]$/.test(t)) return 25
-  if (/[，,：:]$/.test(t)) return 15
-  return 10
+  if (/[。！？!?…]$/.test(t)) return 260 // 句末：完整换气
+  if (/[；;]$/.test(t)) return 200 // 分号：并列分句
+  if (/[，,：:、]$/.test(t)) return 140 // 逗号/冒号/顿号：短停顿
+  return 90 // 无标点（硬切）：最低呼吸感
 }
 
 // 朗读去噪：按行去掉系统/功能提示横幅，只保留真正要听的内容
@@ -174,9 +175,17 @@ export function chunkText(text, maxLen = 420) {
 }
 
 // 在 want 附近找自然停顿（句号/逗号等）切一刀，避免把话从中间掐断
+// 【v3.8.332】回看窗口 24 → 40 字符，且优先在「句末标点」切：原先只看 24 字符，
+// 遇到长定语/多逗号长句时容易找不到标点而硬切 → 首块末尾半句未完，听感断裂。
 function naturalCut(str, want) {
-  for (let i = Math.min(str.length, want); i > Math.max(6, want - 24); i--) {
-    if ('。！？!?；;，,、'.includes(str[i])) return i + 1
+  const lo = Math.max(6, want - 40)
+  // 第一优先：句末标点（。！？!?；;）——切在完整句尾最自然
+  for (let i = Math.min(str.length, want); i > lo; i--) {
+    if ('。！？!?；;'.includes(str[i])) return i + 1
+  }
+  // 第二优先：句读标点（，,、：:）——退而求其次
+  for (let i = Math.min(str.length, want); i > lo; i--) {
+    if ('，,、：:'.includes(str[i])) return i + 1
   }
   return Math.min(str.length, want)
 }

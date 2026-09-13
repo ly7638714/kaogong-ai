@@ -8,7 +8,7 @@ export const KEYS = {
   ATTEMPTS: 'xc_attempts', // 作答事件流（35号批次1-B）：统一作答明细，驱动难度校准/薄弱点加权/Elo
   FLAG_QS: 'xc_flag_qs', // 疑题反馈（37号 正确性加固B）：用户认为有问题的题，用于降权/人工复核
   COST: 'xc_cost', SRS: 'xc_srs', STUDY: 'xc_study', PET: 'xc_pet',
-  TASKS: 'xc_tasks', QUIZ_LOG: 'xc_quiz_log', DATA: 'xc_data',
+  TASKS: 'xc_tasks', CHECKINS: 'xc_checkins', QUIZ_LOG: 'xc_quiz_log', DATA: 'xc_data',
   STREAK: 'xc_streak', WQ_REASONS: 'xc_wq_reasons', EXAM_INFO: 'xc_exam_info',
   THEME: 'xc_theme', THEME_PRESET: 'xc_theme_preset', ACCENT: 'xc_accent',
   AUTH: 'xc_auth', ERRLOG: 'xc_errlog', RECENT_QS: 'xc_recent_qs',

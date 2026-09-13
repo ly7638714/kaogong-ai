@@ -1,10 +1,22 @@
-// tts/wav.js —— WAV 平滑纯函数（批次6B拆分：自 ttsEngine.js 纯移动，未改动）
-export function smoothWavBytes(input, opts = {}) {
+// tts/wav.js —— WAV 解析纯函数
+//
+// 【v3.8.332 重构说明】
+// 原先 smoothWavBytes 既做「解析」又做「开头/结尾裁剪」，且其判据（crest = rms/meanAbs，
+// 阈值 zcr>0.075 && crest<1.45）与人声失配：实测正常人声该 crest 恒在 1.14~1.36，
+// 开口 zcr 常 0.08~0.12 → 每个音频块开头的真人声被当成「纯音」误裁（实测恒定 200ms）。
+// 同时它与 ttsEngine.detectLeadArtifact（crest = peak/rms）判据不同，同一段音频两套结论。
+//
+// 因此拆分为两个职责：
+//   · parseWavOnly(input)      —— 只做「校验 + 逐块解析」，定位 data 块与格式参数，不裁任何样本；
+//   · smoothWavBytes(input)    —— 保留旧实现，仅供既有单元测试与历史对照使用，**不再进入生产播放链路**。
+// 生产链路（ttsEngine.gapDecode）改为：parseWavOnly 校验 → decodeAudioData →
+// applyLeadTrim（detectLeadArtifact 单一判据统一裁剪）。
+export function parseWavOnly(input) {
   try {
     const u8 = input instanceof Uint8Array ? input : new Uint8Array(input)
-    if (u8.length < 64) return input
+    if (u8.length < 44) return null
     const ascii = (o, n) => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(u8[o + i]); return s }
-    if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return input
+    if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return null
     // 逐块解析，找到 data 块（跳过 AIGC/LIST 等元数据）
     let dataOff = -1, dataLen = 0, rate = 0, ch = 1, bits = 16
     let i = 12
@@ -25,13 +37,27 @@ export function smoothWavBytes(input, opts = {}) {
       }
       if (i >= u8.length) break
     }
-    if (dataOff < 0 || dataLen < 8) return input
-    if (dataOff + dataLen > u8.length) return input
+    if (dataOff < 0 || dataLen < 8) return null
+    if (dataOff + dataLen > u8.length) return null
     const bytesPer = bits / 8
-    if (bytesPer < 1 || !ch || !rate) return input
+    if (bytesPer < 1 || !ch || !rate) return null
     const blockAlign = ch * bytesPer
     const frames = Math.floor(dataLen / blockAlign)
-    if (frames < 32) return input
+    if (frames < 32) return null
+    return { u8, dataOff, dataLen, rate, ch, bits, bytesPer, blockAlign, frames }
+  } catch (e) {
+    return null
+  }
+}
+
+// 仅供单元测试与历史对照：**不要在新的生产链路里调用**（会误裁人声开头）。
+// 新代码请用 parseWavOnly 做解析、用 ttsEngine 的 detectLeadArtifact 做裁剪。
+export function smoothWavBytes(input, opts = {}) {
+  try {
+    const p = parseWavOnly(input)
+    if (!p) return input
+    const u8 = p.u8
+    const { dataOff, ch, rate, bits, bytesPer, blockAlign, frames } = p
     const read = (fi, ci) => {
       const o = dataOff + fi * blockAlign + ci * bytesPer
       if (bytesPer === 2) { const v = u8[o] | (u8[o + 1] << 8); return v >= 0x8000 ? v - 0x10000 : v }

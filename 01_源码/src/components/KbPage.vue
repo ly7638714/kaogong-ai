@@ -11,38 +11,23 @@ window.addEventListener('xc-open-ai-teach', (e) => {
   const d = (e && e.detail) || {}
   teachInitialText.value = String(d.text || '')
   teachInitialAnswer.value = String(d.answer || '')
-  teachTab.value = d.tab || 'logic'
+  teachTab.value = 'video'
   teachShow.value = true
 })
 window.addEventListener('xc-open-kb-card', (e) => {
   const id = e && e.detail
   if (!id) return
   store.tab = 'kb'
-  activeShelf.value = 'all'
   view.value = 'cards'
   cardOpen.value = id
   try { markLearned(id) } catch (e) {}
 })
 
-const activeShelf = ref('all')
 const teachShow = ref(false)
-const teachTab = ref('logic')
+const teachTab = ref('video')
 const teachInitialText = ref('')
 const teachInitialAnswer = ref('')
-const view = ref('quick') // quick=核心速查 | cards=理论技巧卡 | graph=神经网络图谱
-
-const shelvesList = [
-  { key: 'all', name: '📚 全部' },
-  { key: '判断推理', name: '🧠 判断推理' },
-  { key: '言语理解', name: '📖 言语理解' },
-  { key: '数量关系', name: '🔢 数量' },
-  { key: '资料分析', name: '📈 资料' },
-  { key: '政治理论', name: '🏛️ 政治' },
-  { key: '常识判断', name: '🌍 常识' },
-  { key: '类比推理', name: '🔗 类比' },
-  { key: '定义判断', name: '📋 定义' },
-  { key: '图形推理', name: '🔷 图推' }
-]
+const view = ref('cards') // cards=统一知识卡工作台 | graph=神经网络图谱
 // 板块名 → mode key
 function mapMode(shelf) {
   const map = {
@@ -79,6 +64,8 @@ const shownCards = computed(() =>
     return true
   })
 )
+// 统一知识卡工作台顶部速查：展示当前筛选下最直接可用的少量卡片。
+const quickPicks = computed(() => shownCards.value.slice(0, 6))
 // 理论技巧卡：板块 → 老师 → 卡片 三级分组
 const cardGroups = computed(() => {
   const m = {}
@@ -90,25 +77,6 @@ const cardGroups = computed(() => {
     m[plate][src].push(c)
   }
   return Object.entries(m).map(([plate, bySrc]) => ({
-    plate,
-    srcs: Object.entries(bySrc),
-    total: Object.values(bySrc).reduce((n, arr) => n + arr.length, 0)
-  }))
-})
-// 核心速查：板块 → 老师 → 卡（点击即问）
-const quickCards = computed(() =>
-  activeShelf.value === 'all' ? cards : cards.filter((c) => c.plate === activeShelf.value)
-)
-const quickGroups = computed(() => {
-  const byPlate = {}
-  for (const c of quickCards.value) {
-    const plate = c.plate || '未分类'
-    const src = c.source || '综合'
-    byPlate[plate] = byPlate[plate] || {}
-    byPlate[plate][src] = byPlate[plate][src] || []
-    byPlate[plate][src].push(c)
-  }
-  return Object.entries(byPlate).map(([plate, bySrc]) => ({
     plate,
     srcs: Object.entries(bySrc),
     total: Object.values(bySrc).reduce((n, arr) => n + arr.length, 0)
@@ -223,56 +191,13 @@ function startRandom() {
   <div class="page on kb-page">
     <div class="page-inner kb-inner">
       <div class="kb-mode-switch">
-        <button class="btn btn-gh" :class="{ on: view === 'quick' }" @click="view = 'quick'">⭐ 核心速查</button>
-        <button class="btn btn-gh" :class="{ on: view === 'cards' }" @click="view = 'cards'">📇 理论技巧卡（{{ cards.length }}）</button>
+        <button class="btn btn-gh" :class="{ on: view === 'cards' }" @click="view = 'cards'">📚 统一知识卡（{{ cards.length }}）</button>
         <button class="btn btn-gh" :class="{ on: view === 'graph' }" @click="view = 'graph'">🧠 知识图谱</button>
-<button class="btn btn-gh" @click="teachTab = 'logic'; teachShow = true">🧭 逻辑题干翻译</button>
 <button class="btn btn-gh" @click="teachTab = 'video'; teachShow = true">🎬 AI 动画微课</button>
       </div>
-      <!-- ========== 核心速查：板块 → 老师 → 核心知识卡（点击即问） ========== -->
-      <template v-if="view === 'quick'">
-      <div class="sec-t">⭐ 核心速查 · {{ cards.length }} 张核心知识卡，按板块 → 老师分层浏览，点击即问 AI 讲透</div>
-      <!-- 板块抽屉切换 -->
-      <div class="shelf-tabs">
-        <button
-          v-for="s in shelvesList"
-          :key="s.key"
-          class="shelf-tab"
-          :class="{ on: activeShelf === s.key }"
-          @click="activeShelf = s.key"
-        >
-          {{ s.name }}
-        </button>
-      </div>
-      <div class="kb-list">
-        <div v-for="g in quickGroups" :key="g.plate" class="kb-group kb-quick">
-          <div class="kl-title">{{ g.plate }} · {{ g.total }} 卡 · {{ g.srcs.length }} 位老师</div>
-          <div v-for="[src, arr] in g.srcs" :key="src" class="kc-src">
-            <div class="kc-src-t">🧑‍🏫 {{ src }}（{{ arr.length }}）</div>
-            <div
-              v-for="c in arr"
-              :key="c.id"
-              class="kc-row"
-              :title="'问 AI 讲透「' + c.type + '」'"
-              @click="askCard(c)"
-            >
-              <div class="kc-hd">
-                <span class="kc-type">{{ c.type }}</span>
-                <span class="kc-tip-badge">💡 {{ c.tip }}</span>
-                <span class="kc-qask">💬 问 AI</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div v-if="!quickGroups.length" class="empty">
-          <div class="empty-i">🔍</div>
-          <div class="empty-t">该板块暂无知识卡</div>
-        </div>
-      </div>
-      </template>
-      <!-- ========== 理论技巧卡：名师蒸馏知识库 ========== -->
-      <template v-else-if="view === 'cards'">
-        <div class="sec-t">📇 名师理论技巧卡 · 六大板块 {{ cards.length }} 张，来源为本地名师讲义蒸馏</div>
+      <!-- ========== 统一知识卡工作台：速查 + 完整卡 + 三级筛选 ========== -->
+      <template v-if="view === 'cards'">
+        <div class="sec-t">📚 统一知识卡 · 六大板块 {{ cards.length }} 张，先用顶部速查快速问 AI，再向下展开完整方法卡</div>
         <!-- 入门引导：解决“不知道从何开始” -->
         <div v-if="cardGuide" class="kc-guide">
           <div class="kc-guide-hd">
@@ -298,6 +223,17 @@ function startRandom() {
           <button class="shelf-tab" title="收起所有卡片详情并折叠全部板块" @click="tidyAll()">📥 一键收纳</button>
           <button class="shelf-tab" title="展开全部板块（卡片保持单行）" @click="expandAll()">📤 全部展开</button>
           <span class="kc-count">共 {{ shownCards.length }} 张</span>
+        </div>
+        <div v-if="quickPicks.length" class="kb-quick-picks">
+          <div class="kqp-hd"><b>⚡ 核心速查</b><span>当前筛选下先看这些，点卡片展开，点「问 AI」直接讲透</span></div>
+          <div class="kqp-grid">
+            <button v-for="c in quickPicks" :key="'quick-' + c.id" class="kqp-card" @click="toggleCard(c)">
+              <span class="kqp-plate">{{ c.plate }} · {{ c.source || '综合' }}</span>
+              <b>{{ c.type }}</b>
+              <em>💡 {{ c.tip }}</em>
+              <span class="kqp-ask" @click.stop="askCard(c)">💬 问 AI</span>
+            </button>
+          </div>
         </div>
         <!-- 筛选区（可收纳：默认折叠成单行，点开才展开 chips） -->
         <div class="kc-filters" :class="{ open: filtersOpen }">
@@ -381,7 +317,7 @@ function startRandom() {
       <KnowledgeGraph v-else-if="view === 'graph'" :cards="cards" @ask="askCard" @ask-example="askExample" />
     </div>
   </div>
-<AiTeach v-if="teachShow" :initial-tab="teachTab" :initial-text="teachInitialText" :initial-answer="teachInitialAnswer" @close="teachShow = false" />
+<AiTeach v-if="teachShow" mode="video" :initial-tab="teachTab" :initial-text="teachInitialText" :initial-answer="teachInitialAnswer" @close="teachShow = false" />
 </template>
 
 <style scoped>
@@ -440,6 +376,17 @@ function startRandom() {
 .kc-bar .kc-search { flex: 1; min-width: 0; margin-bottom: 0; padding: 7px 10px; }
 .kc-bar .shelf-tab { flex-shrink: 0; padding: 5px 10px; font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
 .kc-bar .kc-count { font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); flex-shrink: 0; padding-left: 4px; }
+.kb-quick-picks { margin:8px 0 10px; padding:10px; border:1px solid var(--glass-border); border-radius:12px; background:linear-gradient(135deg,var(--accent2),var(--glass-bg)); }
+.kqp-hd { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.kqp-hd b { color:var(--accent); font-size:calc(13px * var(--ui-fs-scale, 1)); }
+.kqp-hd span { color:var(--text3); font-size:calc(11px * var(--ui-fs-scale, 1)); }
+.kqp-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:7px; }
+.kqp-card { position:relative; display:grid; gap:3px; min-width:0; padding:9px 10px; border:1px solid var(--glass-border); border-radius:9px; background:var(--surface); color:var(--text); text-align:left; font:inherit; cursor:pointer; }
+.kqp-card:hover { border-color:var(--glass-border-hi); background:var(--accent2); }
+.kqp-plate { color:var(--text3); font-size:calc(10px * var(--ui-fs-scale, 1)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kqp-card b { color:var(--text); font-size:calc(12.5px * var(--ui-fs-scale, 1)); }
+.kqp-card em { color:var(--text2); font-style:normal; font-size:calc(11px * var(--ui-fs-scale, 1)); line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.kqp-ask { position:absolute; right:7px; top:7px; color:var(--accent); font-size:calc(10.5px * var(--ui-fs-scale, 1)); font-weight:800; }
 /* 筛选面板：可收纳，默认折叠为单行，点开展开 chips（老师 chips 横向滚动避免撑高） */
 .kc-filters { border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); margin-bottom: 6px; overflow: hidden; }
 .kc-filters-hd { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; user-select: none; font-size: calc(12.5px * var(--ui-fs-scale, 1)); }

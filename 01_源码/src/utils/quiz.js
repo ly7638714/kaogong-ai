@@ -75,6 +75,17 @@ export function isQuizAsk(text) {
   return /(帮我出|给我出|能不能出|出一(道|题)|出几道|出个题|出道题|出题|来一(道|题)|来几(道|题)|来道题|来几道|练(一|几)题|练习(?!册)(一|几|道|题)?|做(一|几)道(题)?|帮我(来|弄)(一)?道题)/.test(t)
 }
 
+// 从自然语言出题请求里提取明确题数，例如“出2道”“来5题”“给我出3个”；
+// 最多允许 20 道，避免异常大请求一次性耗尽额度。
+export function quizRequestCount(text) {
+  const t = String(text || '').trim()
+  if (!t) return 1
+  const m = t.match(/(?:出|来|做|练|给|要|生成|准备)\s*(\d{1,2})\s*(?:道|题|个|组)/i) || t.match(/(\d{1,2})\s*(?:道|题|个)\s*(?:同话题|同类|一起|批)/)
+  if (!m) return 1
+  const n = parseInt(m[1], 10)
+  return Math.max(1, Math.min(20, n))
+}
+
 // 判断是否「真·题目」而非解析/复盘长文：避免把带 A-D 选项的讲解误判成可点作答卡片
 export function looksLikeQuiz(text) {
   const t = String(text || '')
@@ -114,11 +125,11 @@ export function parseQuiz(text) {
   }
   let stem = ''
   if (firstOptLine >= 0) {
-    stem = lines.slice(0, firstOptLine).join('\n').replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim()
+    stem = lines.slice(0, firstOptLine).join('\n').replace(/^#{1,6}\s*(?:✅\s*)?(?:第\s*\d+\s*题|题目\s*\d+|题目|📝|题干)[^\n]*\n?/i, '').trim()
   } else {
     // 内联选项兜底：题干与选项同行（"题干… A. 2 B. 3 C. 4 D. 5"）
     const m = String(text).match(/([A-D])[.、．:：]/)
-    stem = m ? String(text).slice(0, m.index).replace(/^#{1,6}\s*(✅\s*)?(题目|📝|题干)[^\n]*\n?/i, '').trim() : ''
+    stem = m ? String(text).slice(0, m.index).replace(/^#{1,6}\s*(?:✅\s*)?(?:第\s*\d+\s*题|题目\s*\d+|题目|📝|题干)[^\n]*\n?/i, '').trim() : ''
   }
   if (!stem) return null
   // 35号批次1-A：剔除【考点】元数据行（若模型把考点行误放在题干区，不得污染题干）
@@ -137,6 +148,19 @@ export function parseQuiz(text) {
   }
 
   return { stem, options: opts, answer, explain, designer, kpoint: parseKpoint(text) }
+}
+
+// 多题批处理：优先按“### 第1题 / ### 题目1”切块；无题号则按单题解析。
+// AI 用户可用自然语言指定题数，系统生成后按题号切题，做完一题再下一题。
+export function parseQuizBatch(text) {
+  const src = String(text || '')
+  const parts = src.split(/(?=^#{1,6}\s*(?:第\s*\d+\s*题|题目\s*\d+)\s*[:：]?\s*\n?)/m).map((s) => s.trim()).filter(Boolean)
+  if (parts.length >= 2) {
+    const qs = parts.map((s) => parseQuiz(s)).filter(Boolean)
+    if (qs.length >= 2) return qs
+  }
+  const q = parseQuiz(src)
+  return q ? [q] : []
 }
 
 // 35号批次1-A：从 AI 输出提取【考点】自标（无标记返回空串，不抛错）

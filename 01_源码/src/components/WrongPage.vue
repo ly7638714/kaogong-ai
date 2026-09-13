@@ -683,6 +683,7 @@ function focusRedo(q) {
 function openRaw(idx) {
   if (idx < 0) return
   cur.value = idx
+  aiPreview.value = null
   show.value = true
   rep.value = false
   const q = store.wqs[idx] || {}
@@ -1344,6 +1345,7 @@ function gotoWrongExam() {
 }
 // 让小助手引导归纳错因
 const aiBusy = ref(false)
+const aiPreview = ref(null)
 function origCtx() {
   const q = store.wqs[cur.value]
   if (!q) return null
@@ -1378,7 +1380,7 @@ async function askAiReasons() {
       }
     }
     const rc = q.reasonCoach || {}
-    const sys = `你是行测错题复盘教练。你只能使用考生自己完成分步引导后写下的观察、卡点和下次动作来整理，不得新增考生没有表达过的原因，不得替考生编造心理活动，不得写泛泛而谈的“审题不清/粗心”。请把用户原话整理成具体、可执行、能指导下一次避免的错因，并继续帮助他写出可迁移规律、个人复盘笔记和本题解析拆解。`
+    const sys = `你是行测错题复盘教练。请结合题干、考生作答、正确答案、解析、已有复盘和历史错因，整理出具体、可执行、能指导下一次避免的错因、可迁移规律、个人复盘笔记和解析拆解。优先尊重考生自己写下的观察；信息不足时只写有证据支持的判断，不替考生编造心理活动，不写空泛的“审题不清/粗心”。`
     const myAnswer = String(q.your || q.answerUser || '').trim()
     const rightAns = String(q.answer || q.ans || q.correct || '').trim()
     const analysis = String(q.explain || q.analysis || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 700)
@@ -1389,6 +1391,7 @@ async function askAiReasons() {
   "pattern": "一句话可迁移规律/下次看到这类题先想什么",
   "note": "以第一人称写的简短个人复盘笔记，提醒我不要再犯同一个判断错误",
   "analysis": "解析拆解：正确答案为什么成立、我错在哪一步、干扰项如何设置，150-300字",
+  "evidence": ["每条错因对应的题干线索、作答或解析依据，最多3条"],
   "guide": {
     "pattern": ["帮助我自己写出规律的两个追问"],
     "note": ["帮助我自己写个人笔记的两个追问"],
@@ -1401,7 +1404,8 @@ async function askAiReasons() {
 正确答案：${rightAns || '（未知）'}
 正确解析：${analysis || '（无）'}
 AI 当时的解答：${aiReply || '（无）'}
-考生三步引导原话：${JSON.stringify(rc)}`
+考生动态三步选择：${JSON.stringify((rc && rc.answers) || {})}
+考生补充原话：${String((rc && rc.reflection) || '').slice(0, 500)}`
     let messages
     if (withImg) {
       messages = [{
@@ -1414,8 +1418,28 @@ AI 当时的解答：${aiReply || '（无）'}
     const reply = await chatOnce(c, messages, 1400, 60000)
     const obj = parseCoachAiReply(reply) || parseByField(reply)
     if (obj) {
-      applyCoachReview(q, obj, { autoSave: true, source: 'ai' })
-      showToast('✅ AI 已完成：错因 · 规律 · 个人笔记 · 解析拆解', 'success')
+      const normalized = {
+        answer: String(obj.answer || '').trim(),
+        reasons: Array.isArray(obj.reasons) ? obj.reasons.slice(0, 3) : [],
+        pattern: String(obj.pattern || obj.method || '').trim(),
+        note: String(obj.note || '').trim(),
+        analysis: String(obj.analysis || '').trim(),
+        evidence: Array.isArray(obj.evidence) ? obj.evidence.slice(0, 3) : [],
+        guide: obj.guide && typeof obj.guide === 'object' ? obj.guide : { pattern: [], note: [], analysis: [] }
+      }
+      aiPreview.value = {
+        qid: q.id,
+        draft: normalized,
+        selected: {
+          reasons: normalized.reasons.map(() => true),
+          pattern: !!normalized.pattern,
+          note: !!normalized.note,
+          analysis: !!normalized.analysis
+        },
+        reasonMode: 'merge',
+        at: Date.now()
+      }
+      showToast('🤖 AI 草稿已生成，请先预览并选择要采纳的内容', 'info')
     } else if (reply) {
       frm.value.note = (frm.value.note ? frm.value.note + '\n\n' : '') + '🤖 小助手引导（可编辑）：\n' + reply
       showToast('已写入复盘笔记', 'success')
@@ -1427,6 +1451,38 @@ AI 当时的解答：${aiReply || '（无）'}
   } finally {
     aiBusy.value = false
   }
+}
+function toggleAiPreviewField(field, index = -1) {
+  const p = aiPreview.value
+  if (!p || !p.selected) return
+  if (field === 'reasons') {
+    if (!Array.isArray(p.selected.reasons)) p.selected.reasons = []
+    p.selected.reasons[index] = !p.selected.reasons[index]
+  } else {
+    p.selected[field] = !p.selected[field]
+  }
+}
+function cancelAiPreview() {
+  aiPreview.value = null
+}
+function applyAiPreview() {
+  const p = aiPreview.value
+  if (!p || !p.draft) return
+  const q = store.wqs.find((x) => x === store.wqs[cur.value]) || store.wqs[cur.value]
+  if (!q) { aiPreview.value = null; return }
+  const d = p.draft
+  const pickedReasons = (d.reasons || []).filter((r, i) => p.selected.reasons && p.selected.reasons[i])
+  const out = {
+    answer: d.answer || '',
+    reasons: pickedReasons,
+    pattern: p.selected.pattern ? d.pattern : '',
+    note: p.selected.note ? d.note : '',
+    analysis: p.selected.analysis ? d.analysis : '',
+    guide: d.guide || {}
+  }
+  applyCoachReview(q, out, { autoSave: true, source: 'ai', replaceReasons: p.reasonMode === 'replace' })
+  aiPreview.value = null
+  showToast('✅ 已采纳 AI 草稿并保存；未勾选内容没有写入', 'success')
 }
 function appendCoachField(current, next, label = '') {
   const value = String(next || '').trim()
@@ -1441,7 +1497,9 @@ function applyCoachReview(q, o, opts = {}) {
   if (!q || !o) return false
   const onQ = () => cur.value >= 0 && store.wqs[cur.value] === q
   const reasons = Array.isArray(o.reasons) ? o.reasons.map((r) => String(r || '').trim()).filter(Boolean).slice(0, 3) : []
-  const currentReasons = onQ() ? frm.value.sel.slice() : (Array.isArray(q.reasons) ? q.reasons.slice() : [])
+  const currentReasons = opts.replaceReasons
+    ? []
+    : (onQ() ? frm.value.sel.slice() : (Array.isArray(q.reasons) ? q.reasons.slice() : []))
   const mergedReasons = [...currentReasons, ...reasons.filter((r) => !currentReasons.includes(r))]
   if (reasons.length) rememberReasons(reasons)
   if (onQ()) {
@@ -1523,7 +1581,8 @@ watch([show, cur, rep, redo, cardShow, cardIdx, focusShow, vtShow, vtMode, vtIdx
   { flush: 'post' })
 
 const wrongCtx = reactive({
-  PAGE, addCustomReason, aiBusy, aiGuideBusy, aiPolishBusy, aiPolishReason, applyCoachReview,
+  PAGE, addCustomReason, aiBusy, aiPreview, aiGuideBusy, aiPolishBusy, aiPolishReason, applyCoachReview,
+  applyAiPreview, cancelAiPreview, toggleAiPreviewField,
   ankiPush, askAiGuide, askAiReasons, askCoreDeep, boxReasons, cardFlip,
   cardIdx, cardMark, cardQueue, cardShow, checkedAllReasons, clearTypeFilter,
   closeImg, closeRedo, copyObsidianWrong, coreAiBusy, coreAiText, coreCard, coreOrigMd,
